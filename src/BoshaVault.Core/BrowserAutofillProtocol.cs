@@ -46,7 +46,7 @@ public static class BrowserAutofillProtocol
     }
     public static string Validate(BrowserAutofillRequest request)
     {
-        if (request.Op is not ("list" or "fill" or "open" or "save" or "update")) throw new VaultException("Unsupported browser request.");
+        if (request.Op is not ("list" or "fill" or "open" or "save" or "update" or "capture")) throw new VaultException("Unsupported browser request.");
         if (request.Origin is null || request.EntryId is null || request.Username is null || request.Password is null)
             throw new VaultException("Invalid browser request fields.");
         if (request.Op == "open") return "";
@@ -59,13 +59,13 @@ public static class BrowserAutofillProtocol
         string host = OriginPolicy.ExactHost(request.Origin);
         if (request.Op is "fill" or "update" && !Guid.TryParseExact(request.EntryId, "D", out _))
             throw new VaultException("Invalid saved login identifier.");
-        if (request.Op is "save" or "update")
+        if (request.Op is "save" or "update" or "capture")
         {
             if (request.Username.Length > 2000 || request.Username.IndexOfAny(['\r','\n','\0']) >= 0)
                 throw new VaultException("Invalid captured username.");
             // A generated password is provided only after explicit user action in the extension.
-            if (request.Password.Length is < 16 or > 128 ||
-                request.Password.Any(c => c is < '!' or > '~'))
+            if (request.Op != "capture" && (request.Password.Length is < 16 or > 128 ||
+                request.Password.Any(c => c is < '!' or > '~')))
                 throw new VaultException("Invalid generated password.");
         }
         return host;
