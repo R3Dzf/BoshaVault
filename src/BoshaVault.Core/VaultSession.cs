@@ -63,6 +63,32 @@ public sealed class VaultSession : IDisposable
         Commit(candidate);
     }
 
+    /// <summary>Imports validated entries using one atomic encrypted update, never a partial CSV import.</summary>
+    public int ImportEntries(IReadOnlyCollection<VaultEntry> incoming)
+    {
+        EnsureOpen();
+        if (incoming.Count == 0) return 0;
+        if (incoming.Count > CredentialCsvImport.MaxRows ||
+            (long)Data.Entries.Count + incoming.Count > VaultCodec.MaxEntries)
+            throw new VaultException("Import exceeds the vault entry limit.");
+        var candidate = CloneData();
+        var existingIds = candidate.Entries.Select(e => e.Id).ToHashSet(StringComparer.Ordinal);
+        foreach (var entry in incoming)
+        {
+            if (!VaultCodec.IsId(entry.Id) || !existingIds.Add(entry.Id) ||
+                entry.Deleted || entry.Username.Length > 2000 || entry.Password.Length is 0 or > 4096)
+                throw new VaultException("Invalid import item; no entries were saved.");
+            var copy = entry.Clone();
+            copy.Clock = [];
+            MergeEngine.Tick(copy.Clock, DeviceId);
+            copy.UpdatedUtc = DateTimeOffset.UtcNow.ToString("O");
+            candidate.Entries.Add(copy);
+        }
+        candidate.Revision++;
+        Commit(candidate);
+        return incoming.Count;
+    }
+
     public int MergeEncrypted(byte[] bytes)
     {
         EnsureOpen();
