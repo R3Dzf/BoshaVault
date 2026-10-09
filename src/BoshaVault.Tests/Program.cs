@@ -136,6 +136,11 @@ try
             "unsafe browser origin rejected");
     RejectNow(()=>BrowserAutofillProtocol.Validate(new BrowserAutofillRequest { Op="fill", Origin="https://accounts.example.com", EntryId="invalid" }),
         "unrecognized login identity rejected");
+
+    Check(BrowserAutofillProtocol.Validate(new BrowserAutofillRequest {
+        Op = "save", Origin = "https://github.com", Username = "example@email.test",
+        Password = "RandomStrongPassword24!" }) == "github.com",
+        "browser signup saving accepts reviewed HTTPS credentials");
     using (var pipeData=new MemoryStream())
     {
         await BrowserAutofillProtocol.WriteAsync(pipeData,new BrowserAutofillRequest { Op="list",Origin="https://accounts.example.com" },CancellationToken.None);
