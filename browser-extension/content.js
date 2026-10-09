@@ -14,12 +14,31 @@
     return r.width>12 && r.height>9 &&
       getComputedStyle(input).visibility!=="hidden";
   }
+  // Decline forms visibly configured to send credentials to a different
+  // origin. This cannot detect every JavaScript-controlled submit handler.
+  function safeFormDestination(form) {
+    if (!(form instanceof HTMLFormElement)) return true;
+    let target;
+    try { target = new URL(form.getAttribute("action") || location.href,location.href); }
+    catch { return false; }
+    if (target.origin !== location.origin || target.protocol !== "https:")return false;
+    for (const button of form.querySelectorAll("[formaction]")) {
+      if (button.disabled)continue;
+      try {
+        const url = new URL(button.getAttribute("formaction"),location.href);
+        if (url.origin !== location.origin || url.protocol !== "https:")return false;
+      }catch{return false;}
+    }
+    return true;
+  }
   function credentialContext(input) {
     if (!visible(input)) return null;
     const form=input.form || input.closest("form") || document;
+    if (!safeFormDestination(form)) return null;
     const pw=[...form.querySelectorAll(pwSelector)].filter(visible);
     if (!pw.length) return null;
     const pass=pw.find(e=>e.autocomplete==="new-password") || (pw.includes(input)?input:pw[0]);
+    if(pass.type!=="password")return null;
     if (!pw.includes(input) && !["text","email",""].includes(input.type)) return null;
     const user=[...form.querySelectorAll('input:not([type="hidden"]):not([type="password"])')]
       .filter(visible).find(e=>{
