@@ -22,7 +22,7 @@ def main():
  work=Path(tempfile.mkdtemp(prefix='apk-build-',dir=DEPS))
  classes=work/'classes';classes.mkdir(parents=True);res=work/'res.zip';compiled=work/'unsigned.apk';app=ROOT/'android/app/src/main';android=sdk/'android.jar'
  run(tools/'aapt2','compile','--dir',app/'res','-o',res)
- run(tools/'aapt2','link','-o',compiled,'--manifest',app/'AndroidManifest.xml','-I',android,'--min-sdk-version','28','--target-sdk-version','35','--version-code','3','--version-name','1.2.0-pairing-hotfix',res)
+ run(tools/'aapt2','link','-o',compiled,'--manifest',app/'AndroidManifest.xml','-I',android,'--min-sdk-version','28','--target-sdk-version','35','--version-code','4','--version-name','1.3.0-biometric-fix',res)
  classpath=os.pathsep.join(str(DEPS/name) for name in ('bcprov.jar','zxing-core.jar'))
  run('java','-jar',DEPS/'ecj.jar','-1.8','-warn:none','-bootclasspath',str(android)+os.pathsep+str(tools/'core-lambda-stubs.jar'),'-cp',classpath,'-d',classes,*sorted((app/'java').rglob('*.java')))
  jar=work/'app.jar'
