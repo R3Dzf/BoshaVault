@@ -193,6 +193,14 @@ public partial class MainWindow : Window
         var startup = new CheckBox { Content = "Start with Windows · locked in the tray", IsChecked = StartupEnabled() }; d.Body.Children.Add(startup);
         startup.Click += (_, _) => { SetStartup(startup.IsChecked == true); startup.IsChecked = StartupEnabled(); };
         d.Label("Closing the main window locks the vault and keeps BoshaVault in the tray. Click the tray icon or use Ctrl + Alt + P to reopen. Right-click the icon for Exit.");
+        var browserAuto = new CheckBox { Content = "Enable local Chrome / Edge Autofill", IsChecked = preferences.BrowserAutofillEnabled };
+        d.Body.Children.Add(browserAuto);
+        browserAuto.Click += (_, _) => Guard(() => {
+            preferences.BrowserAutofillEnabled = browserAuto.IsChecked == true;
+            preferences.Save(preferencesPath);
+            SetStatus(preferences.BrowserAutofillEnabled ? "Browser Autofill enabled." : "Browser Autofill disabled.");
+        });
+        d.Label("Browser setup: Install the BoshaVault extension in Chrome or Edge (Load unpacked), then run Install-BrowserAutofill.ps1 with its extension ID. Matching HTTPS logins appear near password fields. Every fill requires your approval on Windows. No blind typing.");
         d.Label("Auto-lock after inactivity");
         var options = new ComboBox { ItemsSource = new[] { 1, 2, 5, 10 }, SelectedItem = timeoutMinutes, Padding = new(10), Margin = new(0, 0, 0, 18) }; d.Body.Children.Add(options);
         d.Action("Apply auto-lock time", () => Guard(() => { int minutes = (int)options.SelectedItem; preferences.AutoLockMinutes = minutes; preferences.Save(preferencesPath); timeoutMinutes = minutes; SetStatus($"Auto-lock set to {timeoutMinutes} minutes and saved."); }));
