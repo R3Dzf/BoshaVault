@@ -15,9 +15,9 @@ public static class DesktopTests
         {
             string path = Path.Combine(folder, "desktop.json");
             Check(DesktopPreferences.Load(path).AutoLockMinutes == 2, "Missing preferences use secure auto-lock default");
-            new DesktopPreferences { AutoLockMinutes = 5, TrayTipShown = true }.Save(path);
+            new DesktopPreferences { AutoLockMinutes = 5, TrayTipShown = true, BrowserAutofillEnabled = false }.Save(path);
             var restored = DesktopPreferences.Load(path);
-            Check(restored.AutoLockMinutes == 5 && restored.TrayTipShown, "Desktop preferences survive reopening");
+            Check(restored.AutoLockMinutes == 5 && restored.TrayTipShown && !restored.BrowserAutofillEnabled, "Desktop preferences survive reopening");
             new DesktopPreferences { AutoLockMinutes = 1 }.Save(path);
             Check(DesktopPreferences.Load(path).AutoLockMinutes == 1 && Directory.GetFiles(folder).Length == 1, "Preference replacement is atomic and leaves no temporary files");
             string original = File.ReadAllText(path); bool refused = false;
