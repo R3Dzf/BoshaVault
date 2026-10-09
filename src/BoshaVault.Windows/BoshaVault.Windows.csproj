@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <AssemblyName>BoshaVault</AssemblyName>
+    <Product>BoshaVault</Product>
+    <Version>1.2.0</Version>
+    <ApplicationIcon>Assets/boshavault.ico</ApplicationIcon>
+  </PropertyGroup>
+  <ItemGroup><ProjectReference Include="../BoshaVault.Core/BoshaVault.Core.csproj" /></ItemGroup>
+  <ItemGroup>
+    <Using Remove="System.Drawing" />
+    <Using Remove="System.Windows.Forms" />
+    <EmbeddedResource Include="Assets/boshavault.ico" LogicalName="BoshaVault.TrayIcon" />
+  </ItemGroup>
+</Project>

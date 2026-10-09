@@ -1,0 +1,61 @@
+<Window x:Class="BoshaVault.Windows.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="BoshaVault · Your private space" Width="1230" Height="790" MinWidth="1040" MinHeight="680" WindowStartupLocation="CenterScreen">
+ <Grid>
+  <Grid x:Name="VaultView" Visibility="Collapsed">
+   <Grid.ColumnDefinitions><ColumnDefinition Width="236"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+   <Border Background="White" BorderBrush="#ECEAF4" BorderThickness="0,0,1,0">
+    <Grid Margin="22,28,22,24">
+     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+     <StackPanel Orientation="Horizontal" Margin="0,0,0,34"><Border Background="#7762DF" Width="40" Height="40" CornerRadius="13"><TextBlock Text="B" Foreground="White" FontSize="24" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><StackPanel Margin="11,0,0,0" VerticalAlignment="Center"><TextBlock Text="BoshaVault" FontSize="19" FontWeight="Bold"/><TextBlock Text="YOUR PRIVATE SPACE" FontSize="8" Foreground="{StaticResource Muted}" Margin="0,3,0,0"/></StackPanel></StackPanel>
+     <StackPanel Grid.Row="1">
+      <TextBlock Text="WORKSPACE" Foreground="#A39FB4" FontSize="10" FontWeight="Bold" Margin="16,0,0,12"/>
+      <Button x:Name="AllNav" Content="▤   All items" Style="{StaticResource Nav}" Click="AllClick" Background="#F3F0FF" Foreground="#7762DF"/>
+      <Button Content="☆   Favorites" Style="{StaticResource Nav}" Click="FavoriteClick"/>
+      <Button Content="♧   Security check" Style="{StaticResource Nav}" Click="HealthClick"/>
+      <Button Content="⚡   Password generator" Style="{StaticResource Nav}" Click="GeneratorClick"/>
+      <Button Content="↔   Devices &amp; backup" Style="{StaticResource Nav}" Click="SyncClick"/>
+      <Button Content="♲   Trash" Style="{StaticResource Nav}" Click="TrashClick"/>
+      <TextBlock Text="QUICK ACCESS" Foreground="#A39FB4" FontSize="10" FontWeight="Bold" Margin="16,28,0,12"/>
+      <Border Background="#FAF9FD" CornerRadius="12" Padding="14"><StackPanel><TextBlock Text="Ctrl + Alt + P" FontWeight="SemiBold" FontSize="13"/><TextBlock Text="Open your vault anywhere" Foreground="{StaticResource Muted}" FontSize="11" Margin="0,5,0,0"/></StackPanel></Border>
+     </StackPanel>
+     <StackPanel Grid.Row="3"><Border Background="#EDF8F3" CornerRadius="12" Padding="14" Margin="0,0,0,14"><StackPanel><TextBlock Text="●  Local &amp; encrypted" Foreground="#37866C" FontWeight="SemiBold" FontSize="12"/><TextBlock Text="Your vault stays on your device." FontSize="10" Foreground="#69887E" Margin="0,6,0,0"/></StackPanel></Border><Button Content="⚙   Settings" Style="{StaticResource Nav}" Click="SettingsClick"/><Button Content="Lock vault" Click="LockClick"/></StackPanel>
+    </Grid>
+   </Border>
+   <Grid Grid.Column="1" Margin="30,26,30,20">
+    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+    <Grid><StackPanel><TextBlock Text="A little peace of mind." FontSize="13" Foreground="{StaticResource Muted}"/><TextBlock x:Name="PageHeading" Text="Your vault" FontSize="30" FontWeight="Bold" Margin="0,6,0,0"/></StackPanel><Button Content="+   Add login" Style="{StaticResource Primary}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="AddClick"/></Grid>
+    <Grid Grid.Row="1" Margin="0,23,0,23"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+     <Border Background="#F0ECFF" CornerRadius="16" Padding="20,16" Margin="0,0,12,0"><StackPanel><TextBlock Text="SAVED LOGINS" FontSize="10" Foreground="#8171BA" FontWeight="Bold"/><TextBlock x:Name="CountText" Text="0" FontSize="27" FontWeight="Bold" Margin="0,7,0,0"/><TextBlock Text="Everything in one private place" FontSize="11" Foreground="#827B9A" Margin="0,5,0,0"/></StackPanel></Border>
+     <Border Grid.Column="1" Background="#EAF6F1" CornerRadius="16" Padding="20,16" Margin="0,0,12,0"><StackPanel><TextBlock Text="PASSWORD CHECK" FontSize="10" Foreground="#568C79" FontWeight="Bold"/><TextBlock x:Name="HealthText" Text="Ready" FontSize="27" FontWeight="Bold" Margin="0,7,0,0"/><TextBlock Text="Local checks, no upload" FontSize="11" Foreground="#69887E" Margin="0,5,0,0"/></StackPanel></Border>
+     <Border Grid.Column="2" Background="#FFF4DF" CornerRadius="16" Padding="20,16"><StackPanel><TextBlock Text="BUILT FOR PRIVACY" FontSize="10" Foreground="#AB8A49" FontWeight="Bold"/><TextBlock Text="Offline first" FontSize="25" FontWeight="Bold" Margin="0,7,0,0"/><TextBlock Text="Encrypted backup &amp; local transfer" FontSize="11" Foreground="#AA946D" Margin="0,5,0,0"/></StackPanel></Border>
+    </Grid>
+    <Grid Grid.Row="2" Margin="0,0,0,16"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBox x:Name="SearchBox" TextChanged="SearchChanged" ToolTip="Search by title, username, folder or website"/><TextBlock x:Name="SearchHint" Text="⌕   Search your vault…" IsHitTestVisible="False" VerticalAlignment="Center" Foreground="#9A95AC" Margin="14,0,0,0"/><TextBlock Grid.Column="1" Text="AES-256-GCM   ·   Argon2id" Foreground="{StaticResource Muted}" FontSize="11" VerticalAlignment="Center" Margin="20,0,0,0"/></Grid>
+    <Grid Grid.Row="3"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="18"/><ColumnDefinition Width="370"/></Grid.ColumnDefinitions>
+     <Grid><ListBox x:Name="EntryList" SelectionChanged="SelectionChanged"><ListBox.ItemTemplate><DataTemplate><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="46"/><ColumnDefinition Width="*"/><ColumnDefinition Width="26"/></Grid.ColumnDefinitions><Border Background="#EEE8FF" CornerRadius="12" Width="38" Height="38"><TextBlock Text="{Binding Initial}" Foreground="#7762DF" FontSize="17" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><StackPanel Grid.Column="1" Margin="9,0,0,0"><TextBlock Text="{Binding Title}" FontWeight="SemiBold" FontSize="14" TextTrimming="CharacterEllipsis"/><TextBlock Text="{Binding Username}" Foreground="{StaticResource Muted}" FontSize="12" Margin="0,6,0,0" TextTrimming="CharacterEllipsis"/></StackPanel><TextBlock Grid.Column="2" Text="{Binding Star}" Foreground="#B39A56" FontSize="17" VerticalAlignment="Center"/></Grid></DataTemplate></ListBox.ItemTemplate></ListBox><StackPanel x:Name="EmptyState" VerticalAlignment="Center" HorizontalAlignment="Center"><TextBlock Text="✧" FontSize="46" Foreground="#B7A9EF" HorizontalAlignment="Center"/><TextBlock Text="Room for your first login" FontSize="17" FontWeight="SemiBold" Margin="0,15,0,8"/><TextBlock Text="Add a login or import an encrypted vault." Foreground="{StaticResource Muted}" FontSize="12"/></StackPanel></Grid>
+     <Border Grid.Column="2" Background="White" CornerRadius="17" BorderBrush="#ECEAF4" BorderThickness="1" Padding="24"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel>
+      <TextBlock Text="LOGIN DETAILS" Foreground="#9A95AC" FontSize="10" FontWeight="Bold" Margin="0,0,0,20"/>
+      <TextBlock x:Name="DetailTitle" Text="Your logins, protected." FontSize="22" FontWeight="Bold" TextWrapping="Wrap"/>
+      <TextBlock x:Name="DetailHost" Text="Choose an item to view its details." Foreground="{StaticResource Muted}" FontSize="12" TextWrapping="Wrap" Margin="0,8,0,20"/>
+      <StackPanel x:Name="DetailFields" Visibility="Collapsed">
+       <TextBlock Text="Username / email" Foreground="{StaticResource Muted}" FontSize="11" Margin="0,0,0,7"/><Border Background="#F8F7FC" CornerRadius="10" Padding="12"><TextBlock x:Name="DetailUsername" TextWrapping="Wrap" FontSize="13"/></Border><Button Content="Copy username" Margin="0,8,0,20" Click="CopyUserClick"/>
+       <TextBlock Text="Password" Foreground="{StaticResource Muted}" FontSize="11" Margin="0,0,0,7"/><Border Background="#F8F7FC" CornerRadius="10" Padding="12"><TextBlock x:Name="DetailPassword" Text="••••••••••••••••" FontFamily="Consolas" FontSize="15" TextWrapping="Wrap"/></Border><Grid Margin="0,8,0,20"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><Button Content="Copy password" Click="CopyPasswordClick"/><Button Grid.Column="1" x:Name="RevealButton" Content="Show" Margin="8,0,0,0" Click="RevealClick"/></Grid>
+       <TextBlock Text="Notes" Foreground="{StaticResource Muted}" FontSize="11" Margin="0,0,0,7"/><TextBlock x:Name="DetailNotes" TextWrapping="Wrap" FontSize="13" Margin="0,0,0,22"/>
+       <Button Content="Edit login" Style="{StaticResource Primary}" Click="EditClick"/><Button Content="Open website" Margin="0,8,0,0" Click="OpenWebsiteClick"/><Button x:Name="DeleteButton" Content="Move to trash" Background="#FFF0F1" Foreground="#B96370" Margin="0,8,0,0" Click="DeleteClick"/>
+       <TextBlock Text="Clipboard clears after 20 seconds.&#10;Passwords are never typed into other windows." Foreground="#A29DAF" FontSize="10" TextWrapping="Wrap" Margin="0,20,0,0"/>
+      </StackPanel>
+     </StackPanel></ScrollViewer></Border>
+    </Grid>
+    <TextBlock Grid.Row="4" x:Name="StatusText" Text="Vault unlocked. Auto-lock after 2 minutes of inactivity." Foreground="{StaticResource Muted}" FontSize="11" Margin="0,14,0,0"/>
+   </Grid>
+  </Grid>
+  <Grid x:Name="LockView" Background="#F8F7FD"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+   <Border Background="#EDE7FF" Margin="24" CornerRadius="24"><Grid Margin="46"><StackPanel VerticalAlignment="Center"><Border Background="#7762DF" CornerRadius="23" Width="82" Height="82" HorizontalAlignment="Left"><TextBlock Text="B" FontSize="48" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><TextBlock Text="Your life.&#10;Your passwords.&#10;Your space." FontSize="45" FontWeight="Bold" Margin="0,38,0,0"/><TextBlock Text="A calmer home for your digital life." FontSize="16" Foreground="#8474B7" Margin="0,23,0,0"/><Border Background="#F8F5FF" CornerRadius="12" Padding="18" Margin="0,38,0,0"><TextBlock Text="●  Encrypted on your device&#10;●  No account or subscription&#10;●  No browser extension" Foreground="#6F619C" FontSize="13" LineHeight="26"/></Border></StackPanel><TextBlock Text="BOSHAVAULT  /  1.0 PREVIEW" VerticalAlignment="Bottom" Foreground="#9C8EC4" FontSize="10"/></Grid></Border>
+   <StackPanel Grid.Column="1" Width="360" VerticalAlignment="Center"><TextBlock Text="BoshaVault" FontSize="28" FontWeight="Bold"/><TextBlock x:Name="LockHeading" Text="Welcome back" FontSize="23" FontWeight="SemiBold" Margin="0,34,0,8"/><TextBlock x:Name="LockDescription" Text="Unlock your private space with your master passphrase." FontSize="13" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,0,0,24"/>
+    <TextBlock Text="Master passphrase" Foreground="{StaticResource Muted}" FontSize="12" Margin="0,0,0,8"/><PasswordBox x:Name="MasterBox" KeyDown="MasterKeyDown" MaxLength="1024"/>
+    <StackPanel x:Name="ConfirmPanel" Visibility="Collapsed"><TextBlock Text="Confirm master passphrase" Foreground="{StaticResource Muted}" FontSize="12" Margin="0,16,0,8"/><PasswordBox x:Name="ConfirmBox" MaxLength="1024"/></StackPanel>
+    <TextBlock x:Name="LockError" Foreground="#B65769" TextWrapping="Wrap" FontSize="12" Margin="0,12,0,12"/><Button x:Name="UnlockButton" Content="Unlock vault →" Style="{StaticResource Primary}" Padding="16,14" Click="UnlockClick"/>
+    <Button Content="Import an encrypted vault" Background="Transparent" Margin="0,12,0,0" Click="LockedImportClick"/>
+    <TextBlock Text="A lost passphrase cannot be reset. Keep an encrypted backup.&#10;Preview release · independent security review pending." Foreground="#A29DAF" FontSize="11" TextWrapping="Wrap" Margin="0,24,0,0"/>
+   </StackPanel>
+  </Grid>
+ </Grid>
+</Window>
