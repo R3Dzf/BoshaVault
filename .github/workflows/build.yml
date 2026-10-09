@@ -92,6 +92,9 @@ jobs:
         run: |
           Copy-Item 'dist/nativehost/BoshaVault.NativeHost.exe' 'dist/windows/BoshaVault.NativeHost.exe' -Force
           Copy-Item 'browser-extension' 'dist/windows/browser-extension' -Recurse -Force
+          Copy-Item 'src/BoshaVault.Core/Assets/public_suffix_list.dat' 'dist/windows/public_suffix_list.dat' -Force
+          $suffix = Get-Content 'dist/windows/public_suffix_list.dat' -Raw
+          if (-not $suffix.Contains('BEGIN PRIVATE DOMAINS') -or -not $suffix.Contains('github.io')) { throw 'Offline private PSL data missing or invalid' }
           Copy-Item 'tools/Install-BrowserAutofill.ps1' 'dist/windows/Install-BrowserAutofill.ps1' -Force
           if (!(Test-Path 'dist/windows/browser-extension/manifest.json')) { throw 'Extension missing from bundle' }
       - name: Test Chrome and Edge native host registration
