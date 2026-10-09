@@ -2,11 +2,13 @@
 
 > **Pairing hotfix source update (2026-10-09):** See [`docs/PAIRING-HOTFIX-2026-10-09.md`](docs/PAIRING-HOTFIX-2026-10-09.md). This is source-only and has not passed live Windows/Android pairing. `Build-Windows-Hotfix.ps1` builds the updated desktop after running tests; `Diagnose-BoshaVault.ps1` provides read-only diagnostics. Existing signed Android APK is unchanged.
 
-# BoshaVault Windows 1.5 security + CSV import preview / Android 1.3.x
+# BoshaVault Windows 1.6 browser Autofill + login editor fixes / Android 1.3.x
 
 Native password vault for Windows x64 and Android 9+. English UI, Unicode credentials and notes. A local Chrome/Edge browser extension preview is included for user-approved filling; there is no cloud account, advertising, analytics or external synchronization service.
 
-New groundwork: a local Password Health report, standalone RFC 6238 TOTP engine and independently encrypted optional Supabase snapshot format are in source. Windows 1.5 preview now also includes **local Chrome/Bitwarden CSV import with human review**, browser document-ID origin verification, lookalike hostname warnings and user-confirmed updates to existing saved passwords. **Cloud Sync, saved TOTP, Windows Hello, passkeys, CSV import and automatic signed updates are not enabled in the shipped UI yet.** See [the cloud security design](docs/CLOUD-SYNC.md) and [roadmap/status table](docs/ROADMAP-SECURITY.md).\n\nThis is a working implementation and a preview build, not an independently audited security product. There is no promise of invulnerability or impossible decryption. See `docs/SECURITY.md` and `docs/VALIDATION.md` before using real credentials. Use synthetic credentials for initial device testing.
+New groundwork: a local Password Health report, standalone RFC 6238 TOTP engine and independently encrypted optional Supabase snapshot format are in source. Windows 1.5 preview also includes **local Chrome/Bitwarden CSV import with human review**, browser document-ID origin verification, lookalike hostname warnings and user-confirmed updates to existing saved passwords. **Cloud Sync, saved TOTP, Windows Hello, passkeys, CSV import and automatic signed updates are not enabled in the shipped UI yet.** See [the cloud security design](docs/CLOUD-SYNC.md) and [roadmap/status table](docs/ROADMAP-SECURITY.md).\n\n**Windows 1.6:** fixed a closed-Shadow-DOM click bug that caused login suggestion presses to disappear without filling. Added username-first login support, live Chrome/Edge toolbar actions, optional www/bare-host match, one-click capture of the current HTTPS website/username into the new-login form, and a compact WPF dialog with Generate + Copy password buttons. Browser extension is still a hardware-untested preview. See [Windows Autofill](docs/WINDOWS-AUTOFILL.md).
+
+This is a working implementation and a preview build, not an independently audited security product. There is no promise of invulnerability or impossible decryption. See `docs/SECURITY.md` and `docs/VALIDATION.md` before using real credentials. Use synthetic credentials for initial device testing.
 
 ## Included
 
