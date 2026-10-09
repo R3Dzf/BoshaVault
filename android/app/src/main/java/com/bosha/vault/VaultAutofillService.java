@@ -80,7 +80,10 @@ public final class VaultAutofillService extends AutofillService {
                 (variation==InputType.TYPE_TEXT_VARIATION_PASSWORD ||
                  variation==InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD ||
                  variation==InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
-        boolean username=false,explicitUsername=false;
+        boolean username=(type&InputType.TYPE_MASK_CLASS)==InputType.TYPE_CLASS_TEXT&&
+                (variation==InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS ||
+                 variation==InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS);
+        boolean explicitUsername=false;
         String[] hints=n.getAutofillHints();
         if(hints!=null)for(String hint:hints){
             if(hint==null)continue;
@@ -88,6 +91,13 @@ public final class VaultAutofillService extends AutofillService {
             if(h.equals(View.AUTOFILL_HINT_PASSWORD))password=true;
             if(h.equals(View.AUTOFILL_HINT_USERNAME)){username=true;explicitUsername=true;}
             if(h.equals(View.AUTOFILL_HINT_EMAIL_ADDRESS))username=true;
+        }
+        String id=n.getIdEntry();
+        if(id!=null){
+            String idLower=id.toLowerCase(Locale.ROOT).replace("-","_");
+            if(idLower.equals("username")||idLower.equals("user_name")||
+                    idLower.equals("login")||idLower.equals("login_email")||
+                    idLower.equals("email")||idLower.equals("user_email"))username=true;
         }
         ViewStructure.HtmlInfo html=n.getHtmlInfo();
         boolean exclude=false;
