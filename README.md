@@ -2,9 +2,9 @@
 
 > **Pairing hotfix source update (2026-10-09):** See [`docs/PAIRING-HOTFIX-2026-10-09.md`](docs/PAIRING-HOTFIX-2026-10-09.md). This is source-only and has not passed live Windows/Android pairing. `Build-Windows-Hotfix.ps1` builds the updated desktop after running tests; `Diagnose-BoshaVault.ps1` provides read-only diagnostics. Existing signed Android APK is unchanged.
 
-# BoshaVault Windows 1.2 / Android 1.2 pairing-hotfix source (preview)
+# BoshaVault Windows 1.3 browser Autofill preview / Android 1.3.x
 
-Native password vault for Windows x64 and Android 9+. English UI, Unicode credentials and notes. No browser extension, cloud account, advertising, analytics, website interface or external synchronization service.
+Native password vault for Windows x64 and Android 9+. English UI, Unicode credentials and notes. A local Chrome/Edge browser extension preview is included for user-approved filling; there is no cloud account, advertising, analytics or external synchronization service.
 
 This is a working implementation and a preview build, not an independently audited security product. There is no promise of invulnerability or impossible decryption. See `docs/SECURITY.md` and `docs/VALIDATION.md` before using real credentials. Use synthetic credentials for initial device testing.
 
@@ -27,15 +27,15 @@ This is a working implementation and a preview build, not an independently audit
 | Close window | Locks vault and moves to tray; Exit is explicit | Locks when leaving app |
 | Optional start at sign-in | Locked, hidden in tray | Not included |
 | Biometric quick unlock | Not included | Android Keystore + biometric CryptoObject |
-| Autofill | Manual copy, with history/cloud opt-outs | System Autofill; authenticated selection |
+| Autofill | Chrome/Edge extension preview; exact HTTPS host + Windows confirmation; manual copy fallback | System Autofill; authenticated selection |
 
-Windows does not type into arbitrary windows and does not pretend to know a browser's origin. Ctrl+Alt+P brings the app forward. Copy and paste is the fallback accepted in the design discussion. Android rejects insecure or missing browser origins, ambiguous forms and unverified WebViews. A browser's signing identity must be approved on first use and match thereafter. Native-app filling requires explicitly linking each login to that package and certificate.
+The Windows extension reads the browser's verified HTTPS origin and offers only exact-host matches after the vault is unlocked. Each credential release still requires a confirmation on Windows; it never types into arbitrary desktop applications. See [Windows browser Autofill setup](docs/WINDOWS-AUTOFILL.md). Ctrl+Alt+P brings the app forward. Copy and paste is the fallback accepted in the design discussion. Android rejects insecure or missing browser origins, ambiguous forms and unverified WebViews. A browser's signing identity must be approved on first use and match thereafter. Native-app filling requires explicitly linking each login to that package and certificate.
 
 No passkeys, TOTP manager, continuous/background synchronization, automatic password saving, Windows Hello unlocking, cloud sync, breach lookup or recovery service is included. LAN sync is an explicit transfer, not a promise of automatic discovery. Features absent from the UI are not hidden placeholders.
 
 ## Run
 
-Windows: extract `BoshaVault-Windows.zip` and start `BoshaVault.exe` without administrator privileges. It bundles .NET 10.0.12; no separate runtime installation is required. Data is under `%LOCALAPPDATA%\BoshaVault`. The binary has no publisher Authenticode signature. Do not disable antivirus to run it.
+Windows: extract the full `BoshaVault-Windows-x64` artifact and start `BoshaVault.exe` without administrator privileges. Keep the native host, browser-extension folder and installer script together for Chrome/Edge autofill setup. See [installation guide](docs/WINDOWS-AUTOFILL.md). It bundles .NET 10.0.12; no separate runtime installation is required. Data is under `%LOCALAPPDATA%\BoshaVault`. The binary has no publisher Authenticode signature. Do not disable antivirus to run it.
 
 Android: the **previously distributed** `BoshaVault-Android.apk` is version 1.1, signed with the same certificate as the original 1.0 preview. The **updated Android source** now builds version 1.2.0 pairing-hotfix (version code 3). A GitHub CI APK signed with an ephemeral test key cannot update that existing version, even with a higher version code. Do not uninstall until you have a restorable encrypted backup. Export an encrypted backup before updating as a precaution. It is signed with a unique preview-build key, is not debuggable, and has no shared debug signing key. A subsequent APK signed with a different key cannot update this install: export an encrypted backup before uninstalling. Build and sign your own releases with a persistent private signing key; that private key is not part of this source package.
 
