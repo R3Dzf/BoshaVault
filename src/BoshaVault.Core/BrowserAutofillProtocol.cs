@@ -13,6 +13,8 @@ public sealed class BrowserAutofillRequest
     public string Op { get; set; } = "";
     public string Origin { get; set; } = "";
     public string EntryId { get; set; } = "";
+    public string Username { get; set; } = "";
+    public string Password { get; set; } = "";
 }
 public sealed class BrowserAccount
 {
@@ -43,7 +45,7 @@ public static class BrowserAutofillProtocol
     }
     public static string Validate(BrowserAutofillRequest request)
     {
-        if (request.Op is not ("list" or "fill" or "open")) throw new VaultException("Unsupported browser request.");
+        if (request.Op is not ("list" or "fill" or "open" or "save")) throw new VaultException("Unsupported browser request.");
         if (request.Op == "open") return "";
         if (request.Origin.Length is < 9 or > 2048) throw new VaultException("Invalid browser origin.");
         if (!Uri.TryCreate(request.Origin, UriKind.Absolute, out var uri) ||
@@ -54,6 +56,15 @@ public static class BrowserAutofillProtocol
         string host = OriginPolicy.ExactHost(request.Origin);
         if (request.Op == "fill" && !Guid.TryParseExact(request.EntryId, "D", out _))
             throw new VaultException("Invalid saved login identifier.");
+        if (request.Op == "save")
+        {
+            if (request.Username.Length > 2000 || request.Username.IndexOfAny(['\r','\n','\0']) >= 0)
+                throw new VaultException("Invalid captured username.");
+            // A generated password is provided only after explicit user action in the extension.
+            if (request.Password.Length is < 16 or > 128 ||
+                request.Password.Any(c => c is < '!' or > '~'))
+                throw new VaultException("Invalid generated password.");
+        }
         return host;
     }
     public static async Task<T> ReadAsync<T>(Stream stream, CancellationToken ct) where T : class
