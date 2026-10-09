@@ -25,24 +25,24 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     const page = new URL(sender.url || sender.tab.url);
     const tabUrl = new URL(sender.tab.url);
     if (page.protocol !== "https:" || page.origin !== tabUrl.origin ||
-        page.hostname !== tabUrl.hostname || !["list", "fill", "open", "save", "update"].includes(message?.op)) {
+        page.hostname !== tabUrl.hostname || !["list", "fill", "open", "save", "update", "capture"].includes(message?.op)) {
       return {status: "denied"};
     }
     if (["fill","update"].includes(message.op) && !/^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(message.entryId || "")) {
       return {status: "denied"};
     }
-    if (["save","update"].includes(message.op) && (
+    if (["save","update","capture"].includes(message.op) && (
       typeof message.username !== "string" || message.username.length > 2000 ||
       /[\r\n\0]/.test(message.username) ||
-      typeof message.password !== "string" || message.password.length < 16 ||
-      message.password.length > 128 || !/^[!-~]+$/.test(message.password))) {
+      (message.op !== "capture" && (typeof message.password !== "string" ||
+      message.password.length < 16 || message.password.length > 128 || !/^[!-~]+$/.test(message.password))))) {
       return {status:"denied", message:"Invalid generated password or username."};
     }
-    if (["fill","save","update"].includes(message.op) && !(await sameActiveDocument(sender,page.origin)))
+    if (["fill","save","update","capture"].includes(message.op) && !(await sameActiveDocument(sender,page.origin)))
       return {status:"denied", message:"Browser page changed. Retry on the intended website."};
     const answer = await chrome.runtime.sendNativeMessage(NATIVE, {
       op: message.op, origin: page.origin, entryId: ["fill","update"].includes(message.op) ? message.entryId : "",
-      username: ["save","update"].includes(message.op) ? message.username : "",
+      username: ["save","update","capture"].includes(message.op) ? message.username : "",
       password: ["save","update"].includes(message.op) ? message.password : ""
     });
     if (!answer || typeof answer.status !== "string") return {status: "unavailable"};
@@ -50,7 +50,8 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     // different page, even in the same tab.
     if ((message.op === "fill" && answer.status === "filled") ||
         (message.op === "save" && answer.status === "saved") ||
-        (message.op === "update" && answer.status === "updated")) {
+        (message.op === "update" && answer.status === "updated") ||
+        (message.op === "capture" && answer.status === "saved")) {
       if (!(await sameActiveDocument(sender,page.origin))) {
         return {status:"denied",message:"The tab navigated during approval. Secret was not delivered."};
       }
