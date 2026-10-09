@@ -14,6 +14,7 @@ try
         throw new InvalidDataException("Browser extension identity missing.");
     using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(48));
     var request = await BrowserAutofillProtocol.ReadAsync<BrowserAutofillRequest>(Console.OpenStandardInput(), timeout.Token);
+    if (request.Op == "save") timeout.CancelAfter(TimeSpan.FromSeconds(130));
     BrowserAutofillProtocol.Validate(request);
     using var pipe = new NamedPipeClientStream(".", BrowserAutofillProtocol.PipeName(),
         PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
