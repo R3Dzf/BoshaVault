@@ -31,11 +31,11 @@ public partial class MainWindow
                 int saveStamp = generation;
                 BringToFront();
                 var dialog = new FormDialog(this, "Save generated login", 510);
-                dialog.Label("Verified destination: https://" + host + "\nThis creates a new entry; it does not register an account at the site.");
+                dialog.Label("Browser-reported HTTPS site: https://" + host + "\nThis creates a new entry; it does not register an account at the site.");
                 var title = dialog.Field("Login name", host, 200);
                 var user = dialog.Field("Username / email from signup form (review or edit)", request.Username, 2000);
                 dialog.Label("Generated password: " + request.Password.Length +
-                    " characters (hidden). Only press Save after checking the website and username.");
+                    " characters (hidden). Only press Save after checking the browser address bar and username.");
                 var warning = new System.Windows.Controls.TextBlock
                 {
                     TextWrapping = TextWrapping.Wrap,
