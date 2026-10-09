@@ -6,6 +6,7 @@
   if (window.top !== window || location.protocol !== "https:") return;
   const pwSelector = 'input[type="password"],input[autocomplete="current-password"],input[autocomplete="new-password"]';
   let frame=null, shadow=null, panel=null, focus=null, sequence=0, draft=null, origin=location.origin;
+  let savedMatches=[];
 
   function visible(input) {
     if (!(input instanceof HTMLInputElement) || !input.isConnected ||
@@ -151,8 +152,34 @@
     const username=(ctx.user?.value||"").trim();
     line("Username/email: "+(username || "Not found here — enter it in Windows before saving."),"sub");
     button("Save username + password in BoshaVault",()=>save(ctx),true);
+    for(const entry of savedMatches.slice(0,5)) {
+      if(typeof entry.id!=="string" || typeof entry.username!=="string")continue;
+      button("Update saved password · "+entry.username,()=>updatePassword(ctx,entry.id));
+    }
     button("Regenerate a new 24-character password",()=>generate(ctx,24,true));
     button("Close (keep values in form)",hide);
+  }
+  async function updatePassword(ctx,id) {
+    if(!liveDraft(ctx) || !safeFormDestination(ctx.form)) {
+      message("The page or password changed. Focus the field and regenerate.");return;
+    }
+    const sentOrigin=location.origin;
+    const username=(ctx.user?.value||"").trim();
+    message("Review the saved account and new password change in BoshaVault Windows…");
+    try {
+      const answer=await chrome.runtime.sendMessage({
+        op:"update",entryId:id,username,password:draft.password
+      });
+      if(location.origin!==sentOrigin || !ctx.pass.isConnected){hide();return;}
+      if(answer?.status==="updated") {
+        draft=null;
+        message("Updated the encrypted saved login. Verify the new password works on the website.");
+      }else {
+        message(answer?.message || "Password update was not saved. Review the website and retry.");
+      }
+    } catch {
+      message("Update could not be completed. Keep the form open, verify the website, and try again.");
+    }
   }
   async function save(ctx) {
     if(!liveDraft(ctx)){message("The form changed. Focus the password field again to regenerate.");return;}
@@ -182,6 +209,7 @@
     title(ctx);
     if(typeof reply?.warning==="string" && reply.warning.length>0)
       line("⚠️ "+reply.warning);
+    savedMatches=reply?.status==="ok" && Array.isArray(reply.accounts) ? reply.accounts.slice(0,10) : [];
     if(reply?.status==="ok" && Array.isArray(reply.accounts)) {
       for(const account of reply.accounts.slice(0,10)){
         if(!account || typeof account.id!=="string" || typeof account.username!=="string")continue;
