@@ -135,3 +135,18 @@ Windows **Add a new login** now has a compact, screen-bounded, scrollable dialog
 If a login is saved for a genuinely different host (for example \`accounts.example.com\` rather than \`example.com\`), edit the saved Website entry to the actual login host; do not disable phishing checks or allow substring matching to force a suggestion.
 
 **Testing status:** GitHub automated tests cover expected behavior, but browser compatibility and real device/UI acceptance must still be verified. The extension is a security-sensitive preview, not an independently audited password manager.
+
+
+
+## Windows 1.7 — readable fields and safe related-domain suggestions
+
+- The compact Add / Edit Login form now uses legible 15px text, at least 50 logical pixels for single-line entries, and a higher multiline notes field. WPF's TextBox/PasswordBox templates now place padding on the border only instead of trimming the text inside a too-short scroll viewer. **Save** and **Cancel** remain visible in the sticky footer. Display scaling and font metrics may vary; verify the editor on real Windows hardware.
+- The Autofill host distinguishes **Exact** and **Related domain** accounts. Exact includes identical HTTPS hostnames and the literal `www.` alias. Related uses the offline, private-inclusive Public Suffix List to find one registrable domain shared by different subdomains.
+- Example: `https://www.google.com` saved login is marked **Related domain** at `https://myaccount.google.com`. Another example is `accounts.example.co.uk` and `shop.example.co.uk`; unlike naïve two-label matching, only the correct registrable domain `example.co.uk` is shared.
+- The Public Suffix List includes PRIVATE rules, so `alice.github.io` and `bob.github.io`, or independent `blogspot.com` tenants, are **never related**, even though their ending looks similar. Lookalikes such as `google.com.attacker.test`, `lookalike-google.com`, mixed schemes and unrelated origins are rejected. If the offline rules list cannot be loaded, **related matching is disabled**, while exact matching remains available.
+- Related-account suggestions show the saved hostname in the extension UI. Choosing one **does not silently autofill**. Windows opens a stronger confirmation identifying **BOTH** the page domain and original saved domain; choose Yes only after verifying both addresses. A compromised sibling subdomain could read any password that you intentionally fill there, so never accept this warning without checking. **Updating** an existing password still requires an exact saved website match.
+- Related websites do not imply identity-provider cross-site federation. Login forms on `youtube.com` and `google.com` may use the same Google account, but they are not automatically related by PSL alone; filling across entirely different registrable domains requires an explicit separately designed linking feature.
+
+The offline PSL is vendored at `src/BoshaVault.Core/Assets/public_suffix_list.dat` (Mozilla Public License v2.0), pinned to upstream publicsuffix/list commit `3929462652695bad04f0a27afb600974014a3c8b`. Parser library: Nager.PublicSuffix 3.8.0. CI ensures the file is bundled as `public_suffix_list.dat` next to `BoshaVault.exe`; do not remove it from the extracted folder.
+
+**Upgrade:** replace the complete Windows archive after exiting the previous tray process, and reload extension version `0.5.0` from the new `browser-extension` directory. Confirm the native-host registration path if the folder moved. Use **fake** test accounts for `www.google.com` and `myaccount.google.com` to verify Exact/Related labels; do not submit those synthetic credentials to Google.
