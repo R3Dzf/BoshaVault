@@ -46,7 +46,7 @@ public static class BrowserAutofillProtocol
     }
     public static string Validate(BrowserAutofillRequest request)
     {
-        if (request.Op is not ("list" or "fill" or "open" or "save")) throw new VaultException("Unsupported browser request.");
+        if (request.Op is not ("list" or "fill" or "open" or "save" or "update")) throw new VaultException("Unsupported browser request.");
         if (request.Origin is null || request.EntryId is null || request.Username is null || request.Password is null)
             throw new VaultException("Invalid browser request fields.");
         if (request.Op == "open") return "";
@@ -57,9 +57,9 @@ public static class BrowserAutofillProtocol
             !string.IsNullOrEmpty(uri.UserInfo) || !uri.IsDefaultPort)
             throw new VaultException("Browser origin must be an exact HTTPS origin.");
         string host = OriginPolicy.ExactHost(request.Origin);
-        if (request.Op == "fill" && !Guid.TryParseExact(request.EntryId, "D", out _))
+        if (request.Op is "fill" or "update" && !Guid.TryParseExact(request.EntryId, "D", out _))
             throw new VaultException("Invalid saved login identifier.");
-        if (request.Op == "save")
+        if (request.Op is "save" or "update")
         {
             if (request.Username.Length > 2000 || request.Username.IndexOfAny(['\r','\n','\0']) >= 0)
                 throw new VaultException("Invalid captured username.");
