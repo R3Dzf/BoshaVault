@@ -88,3 +88,23 @@ If the Windows vault is locked, the extension can still generate and fill locall
 - Complex SPAs, iframe login forms and custom shadow-DOM fields are not guaranteed to work. Chrome/Edge + real websites need device testing before production use.
 - A local process running under your Windows identity might forge native pipe requests; **Windows prompts for confirmation before saving or releasing a credential**. Review the hostname each time. This does not make a compromised computer safe.
 - Encryption of stored data is handled by the existing encrypted BoshaVault vault (Argon2id for passphrase derivation and AES-GCM for vault data). Generating a password never creates a new encryption algorithm.
+
+## Windows 1.5: safer browser filling and changing existing passwords
+
+- A generic warning appears on domains that differ by a single character from one of your saved hosts, extend a saved hostname as a false prefix, or contain punycode labels. This warning is a **heuristic**. It cannot identify all phishing sites, and the browser page does not get the name of the saved account being compared.
+- Credential replies now require the **same top-level Chromium document ID** before and after Windows approval. Navigation during a confirmation results in a refusal, not a secret delivered to a different tab document.
+- The extension refuses ordinary HTML forms whose action or explicitly configured submitter target is a different origin. A website can still submit with JavaScript, so this does **not** prove a page is safe. Always check your address bar.
+- On an existing saved website, generate a new password and choose **Update saved password** beside the matching account. BoshaVault Windows asks for explicit confirmation before replacing the old encrypted entry. It never submits a website form or guarantees the remote site accepted the new password. Confirm it works after the change; consider keeping a restorable encrypted backup.
+- The extension needs the Chromium \`webNavigation\` permission to check document identity. Restart/reload the extension after upgrading, and recheck that its Native Messaging registration still points to the right extension ID.
+
+## Import Chrome/Bitwarden CSV into the Windows vault
+
+Open BoshaVault **Your vault settings → Import Chrome / Bitwarden passwords from CSV**, choose your export type and CSV, review the import report and an initial list of account names, then explicitly confirm **Import into encrypted vault**. A single authenticated encrypted write imports the entries; it does not replace your original data if validation fails.
+
+Important:
+- The CSV is **plaintext**, and the importer leaves it on disk. Save an encrypted vault backup first and handle the CSV afterward. Even file deletion may not securely erase an SSD or backups.
+- A UTF-8 file must be no larger than **2 MB**, at most **2,000 records**, with recognized Chrome or Bitwarden headers and well-formed RFC-style CSV quoting.
+- The importer never automatically overwrites accounts with the same exact HTTPS host and username. Insecure HTTP/custom-port sites, missing passwords, invalid fields and non-login items are skipped and counted.
+- **Bitwarden items with TOTP secrets or custom fields are refused** to prevent silent data loss. Import just login/password records after separating those extra fields safely, or wait for a future complete encrypted TOTP integration.
+- Browser-export notes, titles, folder labels and passwords enter the currently unlocked encrypted vault only after final confirmation. No uploads, secret logs, or clipboard steps.
+- Existing **local Wi-Fi transfer remains unchanged**; imported entries can sync using the encrypted local transfer/merge once verified.
