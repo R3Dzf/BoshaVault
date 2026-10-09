@@ -227,9 +227,9 @@ try
     var serializedBrowser=JsonSerializer.Serialize(new BrowserAutofillResponse {
         Status="ok",Accounts=[new BrowserAccount {Id=Guid.NewGuid().ToString(),Title="Demo",Username="demo"}] },
         JsonOptions.Strict);
-    Check(serializedBrowser.Contains("\\"accounts\\":") &&
-        serializedBrowser.Contains("\\"username\\":") &&
-        serializedBrowser.Contains("\\"status\\":"),
+    Check(serializedBrowser.Contains(@"""accounts"":") &&
+        serializedBrowser.Contains(@"""username"":") &&
+        serializedBrowser.Contains(@"""status"":"),
         "browser IPC exposes expected camelCase JSON response fields");
     Check(OriginPolicy.LooksLikeSavedHostname("paypa1.com",["paypal.com"]) &&
         OriginPolicy.LooksLikeSavedHostname("paypal.com.phish.test",["paypal.com"]) &&
