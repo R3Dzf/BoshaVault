@@ -12,6 +12,7 @@ public partial class App : Application
     private Mutex? single;
     private bool ownsMutex;
     private InstanceActivationChannel? activation;
+    private BrowserAutofillServer? autofill;
     protected override void OnStartup(StartupEventArgs e)
     {
         bool background = e.Args.Contains("--background", StringComparer.OrdinalIgnoreCase);
@@ -31,6 +32,7 @@ public partial class App : Application
         {
             var window = new MainWindow(); MainWindow = window;
             activation = new InstanceActivationChannel(pipe, () => { if (!Dispatcher.HasShutdownStarted) Dispatcher.BeginInvoke(() => window.BringToFront()); });
+            autofill = new BrowserAutofillServer(Dispatcher, window.HandleBrowserAutofill);
             window.InitializeLaunch(background);
         }
         catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
@@ -40,7 +42,7 @@ public partial class App : Application
     { (MainWindow as MainWindow)?.PrepareToExit(); base.OnSessionEnding(e); }
     protected override void OnExit(ExitEventArgs e)
     {
-        activation?.Dispose(); (MainWindow as MainWindow)?.ReleaseDesktopResources();
+        autofill?.Dispose(); activation?.Dispose(); (MainWindow as MainWindow)?.ReleaseDesktopResources();
         if (ownsMutex) { try { single?.ReleaseMutex(); } catch (ApplicationException) { } }
         single?.Dispose(); base.OnExit(e);
     }
