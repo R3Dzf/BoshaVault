@@ -26,7 +26,11 @@ class FakeElement {
   closest(){return null;}
   querySelectorAll(){return [];}
 }
-class HTMLInputElement extends FakeElement { constructor(type){super("input");this.type=type;} }
+class HTMLInputElement extends FakeElement {
+  constructor(type){super("input");delete this.value;this.type=type;this.value="";}
+  get value(){return this._value||"";}
+  set value(next){this._value=next;}
+}
 class HTMLFormElement extends FakeElement {
   constructor(){super("form");this.fields=[]; }
   querySelectorAll(selector){
