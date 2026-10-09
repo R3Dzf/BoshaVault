@@ -14,6 +14,8 @@ public partial class MainWindow
         {
             if (exiting || resourcesReleased) return new() { Status = "unavailable" };
             string host = BrowserAutofillProtocol.Validate(request);
+            if (!preferences.BrowserAutofillEnabled)
+                return new() { Status = "denied", Message = "Browser Autofill is disabled in BoshaVault settings." };
             if (request.Op == "open")
             {
                 BringToFront();
