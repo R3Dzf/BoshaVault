@@ -108,3 +108,30 @@ Important:
 - **Bitwarden items with TOTP secrets or custom fields are refused** to prevent silent data loss. Import just login/password records after separating those extra fields safely, or wait for a future complete encrypted TOTP integration.
 - Browser-export notes, titles, folder labels and passwords enter the currently unlocked encrypted vault only after final confirmation. No uploads, secret logs, or clipboard steps.
 - Existing **local Wi-Fi transfer remains unchanged**; imported entries can sync using the encrypted local transfer/merge once verified.
+
+## Windows 1.6: Autofill usability and functional click fix
+
+Previous browser suggestions could disappear before their click handlers executed: a closed Shadow DOM retargeted \`pointerdown\` events to the suggestion host, which was incorrectly treated as an outside click. Version 1.6 fixes this and includes a simulated Chrome content-script regression test that actually clicks a matching login suggestion and checks both fields.
+
+The extension can now:
+- Offer matching saved accounts on **username/email-only first steps** (when the password field is not yet on the page). Choose an account to fill its username; on the next password page you may need to select the account again.
+- Treat **exact HTTPS host** and its optional literal \`www.\` prefix as matching, but **not** arbitrary subdomains: \`accounts.example.com\` is not interchangeable with \`example.com\`. Always review which site you approved.
+- Show a clear no-matching-logins explanation, instead of displaying only generator buttons.
+- Use the **extension toolbar icon** → **Show saved logins**, or **Save this website in BoshaVault** to open a Windows Add Login dialog with the browser-reported website and detected username/email automatically filled. This is the supported way to avoid typing the website manually. Save still requires unlocked vault, explicit action, and Windows review.
+- Work with ordinary login forms on HTTPS pages only. Cross-origin iframe forms, sites controlled entirely by scripts/shadow-DOM widgets, HTTP, restricted Chrome/Edge pages and arbitrary Windows desktop apps are not promised.
+
+Windows **Add a new login** now has a compact, screen-bounded, scrollable dialog with a permanently visible **Save login** and **Cancel** footer; **Website** is near the top and automatically suggests a name. If entering a login manually, you can type \`github.com\` and it is normalized to \`https://github.com/\`. **Paste website URL** reads the clipboard only after you click it, validates HTTPS, and never accepts a non-HTTPS URL. Generated passwords have a nearby **Copy password** button, using the app's existing 20-second best-effort clipboard clearing.
+
+### Upgrading correctly
+
+1. Close the old BoshaVault instance via the tray **Exit** (just clicking X only locks/hides it). Keep a tested encrypted backup.
+2. Extract the complete latest \`BoshaVault-Windows-x64\` archive into a stable folder. Do not replace or delete \`%LOCALAPPDATA%\BoshaVault\vault.boshavault\`.
+3. In \`chrome://extensions\` / \`edge://extensions\`, find **BoshaVault Autofill**, choose **Reload**, and check its access for the intended website. **Restart the browser** if the native host registration was changed.
+4. If you moved the Windows folder, rerun the matching \`Install-BrowserAutofill.ps1\` registration using that browser's exact extension ID.
+5. Open/unlock BoshaVault Windows and ensure **Enable local Chrome / Edge Autofill** is turned on. Add a **fake** login for \`https://github.com\`; focus the username/password field at \`https://github.com/login\`.
+6. Confirm the saved account appears, click it, approve the one-time fill in BoshaVault Windows, and check the username/password fields are populated. Do **not** sign in with your fake credentials.
+7. If the browser popup says the app is disconnected, verify that your system-tray BoshaVault process is the new build (not an old hidden instance), and that Native Messaging registration points to the new install path.
+
+If a login is saved for a genuinely different host (for example \`accounts.example.com\` rather than \`example.com\`), edit the saved Website entry to the actual login host; do not disable phishing checks or allow substring matching to force a suggestion.
+
+**Testing status:** GitHub automated tests cover expected behavior, but browser compatibility and real device/UI acceptance must still be verified. The extension is a security-sensitive preview, not an independently audited password manager.
