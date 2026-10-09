@@ -17,7 +17,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     }
     if (message.op === "save" && (
       typeof message.username !== "string" || message.username.length > 2000 ||
-      /[\\r\\n\\0]/.test(message.username) ||
+      /[\r\n\0]/.test(message.username) ||
       typeof message.password !== "string" || message.password.length < 16 ||
       message.password.length > 128 || !/^[!-~]+$/.test(message.password))) {
       return {status:"denied", message:"Invalid generated password or username."};
