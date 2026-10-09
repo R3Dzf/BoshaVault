@@ -44,7 +44,7 @@ public sealed class FormDialog : Window
         var box = new TextBox { Text = initial, MaxLength = max,
             Margin = new Thickness(0, 0, 0, 8), MinHeight = 0,
             Height = multi ? 76 : 38, FontSize = 13,
-            Padding = new Thickness(10, multi ? 9 : 7),
+            Padding = new Thickness(10, multi ? 9 : 7, 10, multi ? 9 : 7),
             AcceptsReturn = multi,
             VerticalContentAlignment = multi ? VerticalAlignment.Top : VerticalAlignment.Center,
             TextWrapping = multi ? TextWrapping.Wrap : TextWrapping.NoWrap };
@@ -55,7 +55,7 @@ public sealed class FormDialog : Window
         Label(label);
         var p = new PasswordBox { MaxLength = 1024,
             Height = 38, MinHeight = 0, FontSize = 13,
-            Padding = new Thickness(10, 7),
+            Padding = new Thickness(10, 7, 10, 7),
             Margin = new Thickness(0, 0, 0, 8) };
         Body.Children.Add(p); return p;
     }
@@ -65,7 +65,7 @@ public sealed class FormDialog : Window
     public Button Action(string text, Action click, bool primary = false)
     {
         var button = new Button { Content = text, Margin = new Thickness(0, 5, 0, 0),
-            MinHeight = 37, Padding = new Thickness(10, 7) };
+            MinHeight = 37, Padding = new Thickness(10, 7, 10, 7) };
         if (primary) button.Style = (Style)FindResource("Primary");
         button.Click += (_, _) => click();
         footer.Children.Add(button); return button;
@@ -109,7 +109,7 @@ public sealed class FormDialog : Window
         var siteButtons = new StackPanel { Orientation=Orientation.Horizontal,
             Margin=new Thickness(0,0,0,8) };
         var pasteSite = new Button { Content="Paste website URL",
-            Padding=new Thickness(10,6), Margin=new Thickness(0,0,6,0) };
+            Padding=new Thickness(10,6,10,6), Margin=new Thickness(0,0,6,0) };
         pasteSite.Click += (_, _) => {
             try {
                 if (!Clipboard.ContainsText()) return;
@@ -128,15 +128,15 @@ public sealed class FormDialog : Window
 
         dialog.Label("Password");
         var password = new PasswordBox { Password = entry.Password, MaxLength=4096,
-            Height=38, MinHeight=0, FontSize=13, Padding=new Thickness(10,7),
+            Height=38, MinHeight=0, FontSize=13, Padding=new Thickness(10,7,10,7),
             Margin=new Thickness(0,0,0,6) };
         dialog.Body.Children.Add(password);
         var helpers = new Grid { Margin=new Thickness(0,0,0,8) };
         helpers.ColumnDefinitions.Add(new ColumnDefinition { Width=new GridLength(1,GridUnitType.Star) });
         helpers.ColumnDefinitions.Add(new ColumnDefinition { Width=GridLength.Auto });
         var generate = new Button { Content="Generate strong password",
-            Padding=new Thickness(10,7), Margin=new Thickness(0,0,6,0) };
-        var copy = new Button { Content="Copy password", Padding=new Thickness(10,7) };
+            Padding=new Thickness(10,7,10,7), Margin=new Thickness(0,0,6,0) };
+        var copy = new Button { Content="Copy password", Padding=new Thickness(10,7,10,7) };
         Grid.SetColumn(generate,0);
         Grid.SetColumn(copy,1);
         helpers.Children.Add(generate);helpers.Children.Add(copy);
