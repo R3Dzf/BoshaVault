@@ -1,14 +1,14 @@
 {
   "manifest_version": 3,
   "name": "BoshaVault Autofill (Local Preview)",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "User-approved local autofill through the BoshaVault Windows app. No cloud service.",
   "permissions": ["nativeMessaging"],
   "host_permissions": ["https://*/*"],
   "background": { "service_worker": "background.js" },
   "content_scripts": [{
     "matches": ["https://*/*"],
-    "js": ["content.js"],
+    "js": ["password-utils.js", "content.js"],
     "run_at": "document_idle",
     "all_frames": false
   }],
