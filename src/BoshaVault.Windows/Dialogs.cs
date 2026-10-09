@@ -42,7 +42,7 @@ public sealed class FormDialog : Window
     {
         Label(label);
         var box = new TextBox { Text = initial, MaxLength = max,
-            Margin = new Thickness(0, 0, 0, 8), MinHeight = 0,
+            Margin = new Thickness(0, 0, 0, 8),
             MinHeight = multi ? 110 : 50, FontSize = 15,
             VerticalAlignment = VerticalAlignment.Stretch,
             Padding = new Thickness(13, multi ? 10 : 0, 13, multi ? 10 : 0),
