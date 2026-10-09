@@ -135,10 +135,25 @@ public final class MainActivity extends Activity {
         b.addView(Ui.button(this,"Unlock & complete transfer",true,()->{String p=master.getText().toString(),r=incoming==null?"":incoming.getText().toString();master.setText("");if(incoming!=null)incoming.setText("");task(()->{if(exists){if(!engine.isOpen())engine.open(p);if(engine.needsPassphrase(bytes)){engine.mergeUsingPassword(bytes,r.isEmpty()?p:r);Biometrics.disable(this);}else engine.merge(bytes);}else{VaultEngine.importNew(Store.vault(this),bytes,p,Store.device(this));engine.open(p);engine.revokeTrust();}pendingTransfer.upload(engine.export());pendingTransfer=null;},()->{d.dismiss();toast("Transfer complete.");showVault();});}));
     }
     private void settings(){
-        LinearLayout b=Ui.column(this);b.addView(Ui.text(this,"Autofill uses Android's built-in framework. The vault is unlocked for each fill request. Only exact HTTPS hosts or apps you explicitly link are eligible.",13,Ui.MUTED,false));b.addView(Ui.button(this,"Enable Android Autofill",true,()->{try{startActivity(new Intent(Settings.ACTION_REQUEST_SET_AUTOFILL_SERVICE,Uri.parse("package:"+getPackageName())));}catch(Exception e){startActivity(new Intent(Settings.ACTION_SETTINGS));}}));
+        LinearLayout b=Ui.column(this);b.addView(Ui.text(this,"Autofill uses Android's built-in framework. The vault is unlocked for each fill request. Only exact HTTPS hosts or apps you explicitly link are eligible.",13,Ui.MUTED,false));Ui.gap(b,12);
+        b.addView(Ui.text(this,"Autofill provider status",17,Ui.INK,true));
+        Ui.gap(b,8);
+        TextView providerStatus=Ui.text(this,AutofillStatus.summary(this),13,Ui.INK,false);
+        b.addView(providerStatus);
+        Ui.gap(b,8);
+        TextView lastRequest=Ui.text(this,AutofillStatus.diagnostic(this),12,Ui.MUTED,false);
+        b.addView(lastRequest);
+        b.addView(Ui.button(this,"Refresh Autofill status",false,()->{
+            providerStatus.setText(AutofillStatus.summary(this));
+            lastRequest.setText(AutofillStatus.diagnostic(this));
+        }));
+        b.addView(Ui.text(this,"How it appears: Tap a recognized login field in another app or browser. Android can show 'Fill with BoshaVault' near the field. Unlock, then select a matching account. If nothing appears, return here and refresh status. Verified HTTPS websites and approved apps only.",12,Ui.MUTED,false));
+        Ui.gap(b,8);
+        b.addView(Ui.button(this,"Enable Android Autofill",true,()->{try{startActivity(new Intent(Settings.ACTION_REQUEST_SET_AUTOFILL_SERVICE,Uri.parse("package:"+getPackageName())));}catch(Exception e){startActivity(new Intent(Settings.ACTION_SETTINGS));}}));
         b.addView(Ui.button(this,Biometrics.available(this)?"Disable fingerprint unlock":"Enable fingerprint unlock",false,()->{
             try{if(Biometrics.available(this)){Biometrics.disable(this);toast("Fingerprint unlock disabled.");}else Biometrics.enable(this,engine.biometricKey(),(key,error)->{if(error!=null)Ui.error(this,error);else toast("Fingerprint unlock enabled for this phone.");});}catch(Exception e){Ui.error(this,e);}
-        }));b.addView(Ui.button(this,"Revoke all Autofill app approvals",false,()->task(engine::revokeTrust,()->toast("Approvals revoked. Apps must be approved again."))));
+        }));b.addView(Ui.button(this,"Clear Autofill diagnostics",false,()->{AutofillStatus.clear(this);lastRequest.setText(AutofillStatus.diagnostic(this));}));
+        b.addView(Ui.button(this,"Revoke all Autofill app approvals",false,()->task(engine::revokeTrust,()->toast("Approvals revoked. Apps must be approved again."))));
         Ui.gap(b,20);EditText current=Ui.field(b,"Current master passphrase","",true,1024),next=Ui.field(b,"New master passphrase (16+ characters)","",true,1024),confirm=Ui.field(b,"Confirm new passphrase","",true,1024);b.addView(Ui.button(this,"Change master passphrase",false,()->{String c=current.getText().toString(),n=next.getText().toString();if(!n.equals(confirm.getText().toString())){toast("Passphrases do not match.");return;}current.setText("");next.setText("");confirm.setText("");task(()->{engine.changePassword(c,n);Biometrics.disable(this);},()->toast("Passphrase changed. Old backups still use their original passphrase."));}));Ui.gap(b,16);b.addView(Ui.text(this,"Screenshots are blocked where Android supports it. Copying a password exposes it to the clipboard. Malware on an unlocked device can still steal data. No cloud sync, passkey storage or breach lookup is included.",11,Ui.MUTED,false));dialog("Your vault settings",b);
     }
 }
