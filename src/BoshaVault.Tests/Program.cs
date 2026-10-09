@@ -65,6 +65,11 @@ try
     string path = temp + "/a.boshavault";
     using var a = await VaultSession.Create(path, password, devA);
     var entry = new VaultEntry { Title = "Demo Mail", Username = "demo@example.com", Password = "OnlySyntheticTestSecret-7!", Url = "https://example.com/login", Notes = "ملاحظات تجريبية", Favorite = true };
+    byte[] totpVector = TotpEngine.DecodeBase32("GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ");
+    Check(TotpEngine.Calculate(totpVector,DateTimeOffset.FromUnixTimeSeconds(59),8)=="94287082" &&
+          TotpEngine.Calculate(totpVector,DateTimeOffset.FromUnixTimeSeconds(1111111109),8)=="07081804",
+          "RFC 6238 TOTP official SHA1 test vectors");
+    CryptographicOperations.ZeroMemory(totpVector);
     Check(PasswordHealth.IsPredictable("password123") &&
           PasswordHealth.IsPredictable("myname-123456-2026") &&
           !PasswordHealth.IsPredictable("J8z!qA3@vM7#wN2$"),
