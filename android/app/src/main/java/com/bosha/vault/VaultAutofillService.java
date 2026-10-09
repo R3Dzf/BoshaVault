@@ -13,11 +13,8 @@ import android.view.ViewStructure;
 import android.view.autofill.*;
 import android.widget.RemoteViews;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 
 public final class VaultAutofillService extends AutofillService {
-    // Expiring one-use references only; no credentials or form text live here.
-    static final Map<String,FillTarget> REQUESTS=new ConcurrentHashMap<>();
     private int nodes;
     @Override public void onFillRequest(FillRequest request,CancellationSignal cancel,FillCallback callback){
         AutofillStatus.report(this,"SERVICE_CALLED");
@@ -41,18 +38,25 @@ public final class VaultAutofillService extends AutofillService {
                 callback.onSuccess(null);return;
             }
             target.validate(this);
-            REQUESTS.entrySet().removeIf(x->SystemClock.elapsedRealtime()-x.getValue().created>180000);
-            if(REQUESTS.size()>=8){AutofillStatus.report(this,"BUSY");callback.onSuccess(null);return;}
-            String nonce=UUID.randomUUID().toString();
-            REQUESTS.put(nonce,target);
-            Intent intent=new Intent(this,FillActivity.class).putExtra("request",nonce);
-            PendingIntent pending=PendingIntent.getActivity(this,nonce.hashCode(),intent,PendingIntent.FLAG_CANCEL_CURRENT|PendingIntent.FLAG_IMMUTABLE);
+            // A static Map may be lost when Android reclaims the service process.
+            // Carry nonsecret validated request metadata in the explicit, one-shot
+            // authentication PendingIntent instead; never put vault data in extras.
+            String requestId=UUID.randomUUID().toString();
+            Intent intent=new Intent(this,FillActivity.class)
+                    .setAction("com.bosha.vault.AUTHENTICATE_AUTOFILL")
+                    .putExtra("request",requestId).putExtra("target",target);
+            // Android fills EXTRA_ASSIST_STRUCTURE / EXTRA_CLIENT_STATE into the
+            // intent at selection time; FLAG_IMMUTABLE blocks that framework flow.
+            // Explicit target Activity is not exported; only the system receives
+            // this one-shot mutable capability.
+            PendingIntent pending=PendingIntent.getActivity(this,requestId.hashCode(),intent,
+                    PendingIntent.FLAG_CANCEL_CURRENT|PendingIntent.FLAG_ONE_SHOT|PendingIntent.FLAG_MUTABLE);
             List<AutofillId> ids=new ArrayList<>();
             if(target.user!=null)ids.add(target.user);
             if(target.password!=null)ids.add(target.password);
             RemoteViews label=new RemoteViews(getPackageName(),android.R.layout.simple_list_item_1);
             label.setTextViewText(android.R.id.text1,"Fill with BoshaVault");
-            if(cancel.isCanceled()){REQUESTS.remove(nonce);return;}
+            if(cancel.isCanceled()){return;}
             callback.onSuccess(new FillResponse.Builder()
                     .setAuthentication(ids.toArray(new AutofillId[0]),pending.getIntentSender(),label)
                     .build());
