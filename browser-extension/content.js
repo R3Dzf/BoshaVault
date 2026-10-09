@@ -1,123 +1,203 @@
 "use strict";
 
-// Runs only in the extension's isolated world on top-level HTTPS pages.
+// No background password-field harvesting: read username only after the user
+// explicitly chooses Save, and only from this focused login form.
 (() => {
-  const selector = 'input[type="password"],input[autocomplete="current-password"]';
-  let frame = null, root = null, panel = null, focus = null, seq = 0;
-  let current = [], origin = location.origin;
   if (window.top !== window || location.protocol !== "https:") return;
+  const pwSelector = 'input[type="password"],input[autocomplete="current-password"],input[autocomplete="new-password"]';
+  let frame=null, shadow=null, panel=null, focus=null, sequence=0, draft=null, origin=location.origin;
 
-  function shown(input) {
-    if (!input || !input.isConnected || input.disabled || input.readOnly) return false;
-    const r = input.getBoundingClientRect();
-    return r.width > 12 && r.height > 9 && getComputedStyle(input).visibility !== "hidden";
+  function visible(input) {
+    if (!(input instanceof HTMLInputElement) || !input.isConnected ||
+        input.disabled || input.readOnly) return false;
+    const r=input.getBoundingClientRect();
+    return r.width>12 && r.height>9 &&
+      getComputedStyle(input).visibility!=="hidden";
   }
   function credentialContext(input) {
-    if (!(input instanceof HTMLInputElement)) return null;
-    const form = input.form || input.closest('form') || document;
-    const pass = [...form.querySelectorAll(selector)].find(shown);
-    if (!pass) return null;
-    if (input !== pass && !['text','email',''].includes(input.type)) return null;
-    const user = [...form.querySelectorAll('input:not([type="hidden"]):not([type="password"])')]
-      .filter(shown).find(e => e.autocomplete === 'username' || /user|login|email/i.test(e.name || e.id) || e.type === 'email')
-      || (input !== pass ? input : null);
-    return {pass, user, anchor:input};
+    if (!visible(input)) return null;
+    const form=input.form || input.closest("form") || document;
+    const pw=[...form.querySelectorAll(pwSelector)].filter(visible);
+    if (!pw.length) return null;
+    const pass=pw.find(e=>e.autocomplete==="new-password") || (pw.includes(input)?input:pw[0]);
+    if (!pw.includes(input) && !["text","email",""].includes(input.type)) return null;
+    const user=[...form.querySelectorAll('input:not([type="hidden"]):not([type="password"])')]
+      .filter(visible).find(e=>{
+        const hint=(e.autocomplete || "").toLowerCase();
+        return hint==="username" || hint==="email" || e.type==="email" ||
+          /user(name)?|login|email/i.test((e.name || "")+" "+(e.id || ""));
+      }) || (pw.includes(input)?null:input);
+    const confirm=pw.find(e=>e!==pass &&
+      (e.autocomplete==="new-password" ||
+       /confirm|repeat|verify|retype/i.test((e.name || "")+" "+(e.id || "")))) || null;
+    return {pass,user,confirm,anchor:input,form};
   }
   function setup() {
     if (frame) return;
-    frame = document.createElement("div");
-    frame.setAttribute("data-boshavault-ui", "1");
-    frame.style.cssText = "position:fixed;z-index:2147483646;top:0;left:0;width:0;height:0;pointer-events:none";
-    root = frame.attachShadow({mode:"closed"});
-    const style = document.createElement("style");
-    style.textContent = ".panel{width:300px;background:#fff;color:#242335;border:1px solid #dcd5f9;border-radius:12px;box-shadow:0 9px 26px #18122a3b;padding:9px;font:13px system-ui,sans-serif;pointer-events:auto}button{display:block;text-align:left;background:#f5f3ff;color:#32276c;border:0;border-radius:8px;padding:11px;width:100%;margin:4px 0;cursor:pointer;font:13px system-ui,sans-serif}button:hover{background:#e8e0ff}.top{font-weight:700;padding:6px;color:#7762df}.sub{font-size:11px;color:#777;overflow-wrap:anywhere;padding:0 6px 5px}.msg{padding:10px;line-height:1.4}";
-    root.append(style);
-    panel = document.createElement("div");
-    panel.className = "panel"; root.append(panel);
+    frame=document.createElement("div");
+    frame.setAttribute("data-boshavault-ui","1");
+    frame.style.cssText="position:fixed;z-index:2147483646;width:310px;max-width:calc(100vw - 16px);pointer-events:auto;";
+    shadow=frame.attachShadow({mode:"closed"});
+    const style=document.createElement("style");
+    style.textContent=".panel{box-sizing:border-box;width:100%;background:#fff;color:#242335;border:1px solid #dcd5f9;border-radius:12px;box-shadow:0 9px 26px #18122a3b;padding:10px;font:13px system-ui,sans-serif}.top{font-weight:700;padding:5px;color:#7762df}.sub{font-size:11px;color:#777;overflow-wrap:anywhere;padding:0 6px 7px}button{display:block;text-align:left;width:100%;background:#f5f3ff;color:#32276c;border:0;border-radius:8px;padding:10px;margin:5px 0;cursor:pointer;font:13px system-ui,sans-serif}button:hover{background:#e8e0ff}button.primary{color:#fff;background:#7762df}button.primary:hover{background:#6250c1}.msg{padding:9px;line-height:1.4;white-space:pre-wrap}";
+    panel=document.createElement("div");
+    panel.className="panel";
+    shadow.append(style,panel);
     (document.body || document.documentElement).append(frame);
   }
-  function place(input) {
-    if (!frame || !shown(input)) return;
-    const r = input.getBoundingClientRect();
-    const x = Math.max(8,Math.min(window.innerWidth-310,r.left));
-    const y = r.bottom + 8 + 160 > innerHeight ? Math.max(4,r.top-175):r.bottom+8;
-    frame.style.left = x+"px"; frame.style.top = y+"px";
+  function position(anchor) {
+    if (!frame || !visible(anchor)) return;
+    const r=anchor.getBoundingClientRect();
+    const left=Math.max(8,Math.min(innerWidth-318,r.left));
+    frame.style.left=left+"px";
+    frame.style.top=Math.max(8,Math.min(innerHeight-260,r.bottom+8))+"px";
   }
-  function hide() { if (frame) {frame.remove();frame=null;root=null;panel=null;} }
-  function row(text, action) {
-    const btn=document.createElement("button");
-    btn.type="button";btn.textContent=text;
-    btn.addEventListener("pointerdown",e=>e.preventDefault());
-    btn.addEventListener("click",e=>{e.stopPropagation();action();});
-    panel.append(btn);
+  function hide() {
+    if(frame)frame.remove();
+    frame=null;panel=null;shadow=null;
   }
-  function render(context, reply) {
-    if (!context?.pass?.isConnected || focus !== context || location.origin !== origin) return;
-    if (reply.status !== "locked" && (reply.status !== "ok" || !reply.accounts?.length)) {hide();return;}
-    setup();panel.replaceChildren();
-    const title=document.createElement("div");title.className="top";title.textContent="🔐 BoshaVault";panel.append(title);
-    const domain=document.createElement("div");domain.className="sub";domain.textContent=location.hostname;panel.append(domain);
-    if (reply.status === "locked") {
-      row("Unlock BoshaVault on Windows",async()=>{
-        rowMessage("Open BoshaVault, unlock it, then focus this field again.");
-        await chrome.runtime.sendMessage({op:"open"}).catch(()=>{});
-      });
+  function line(text,classname="msg") {
+    const div=document.createElement("div");
+    div.className=classname;
+    div.textContent=text;
+    panel.append(div);
+  }
+  function button(text,action,primary=false) {
+    const el=document.createElement("button");
+    el.type="button";el.textContent=text;
+    if(primary)el.className="primary";
+    el.addEventListener("pointerdown",e=>e.preventDefault());
+    el.addEventListener("click",e=>{e.stopPropagation();action();});
+    panel.append(el);
+  }
+  function message(text) {if(!panel)return;panel.replaceChildren();line(text);}
+  function assign(input,value) {
+    if (!visible(input) || typeof value!=="string")return false;
+    if(input.maxLength>=0 && input.maxLength<value.length)return false;
+    const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value")?.set;
+    if(!setter)return false;
+    setter.call(input,value);
+    input.dispatchEvent(new Event("input",{bubbles:true}));
+    input.dispatchEvent(new Event("change",{bubbles:true}));
+    return true;
+  }
+  function liveDraft(ctx) {
+    if (!draft)return false;
+    if(draft.origin!==location.origin || draft.pass!==ctx.pass ||
+       draft.pass.value!==draft.password || Date.now()-draft.created>5*60*1000) {
+      draft=null;return false;
+    }
+    return true;
+  }
+  function title(ctx) {
+    setup();
+    panel.replaceChildren();
+    line("🔐 BoshaVault","top");
+    line(location.hostname,"sub");
+    position(ctx.anchor);
+  }
+  async function fill(ctx,id) {
+    const at=origin;
+    message("Confirm this login in the BoshaVault Windows window…");
+    try {
+      const answer=await chrome.runtime.sendMessage({op:"fill",entryId:id});
+      if(at!==location.origin || focus?.pass!==ctx.pass || !ctx.pass.isConnected) {hide();return;}
+      if(answer?.status!=="filled"){message(answer?.message || "Fill canceled.");return;}
+      if(ctx.user?.isConnected) assign(ctx.user,answer.username);
+      assign(ctx.pass,answer.password);
+      hide();
+    } catch {message("BoshaVault did not respond. Please retry.");}
+  }
+  function generate(ctx,length,symbols) {
+    if (!visible(ctx.pass)) {hide();return;}
+    const allowed=ctx.pass.maxLength>=0?ctx.pass.maxLength:64;
+    const actual=Math.min(length,allowed);
+    if(actual<16) {
+      message("This page limits passwords to fewer than 16 characters. BoshaVault won't generate a weak password.");
       return;
     }
-    current=reply.accounts.slice(0,10);
-    for(const account of current) {
-      if (!account?.id || typeof account.username !== "string") continue;
-      row((account.title||"Saved login")+" · "+account.username,()=>fill(context,account.id));
-    }
-    place(context.anchor);
+    // Only the deliberate button click creates a secret.
+    const secret=BoshaPassword.generate(actual,symbols);
+    if (!assign(ctx.pass,secret)) {message("This password field rejected the generated value.");return;}
+    const confirmationFilled=ctx.confirm ? assign(ctx.confirm,secret):false;
+    draft={pass:ctx.pass,password:secret,origin:location.origin,created:Date.now()};
+    showDraft(ctx,confirmationFilled);
   }
-  function rowMessage(message) {
-    if (!panel) return;
-    panel.replaceChildren();const div=document.createElement("div");div.className="msg";div.textContent=message;panel.append(div);
+  function showDraft(ctx,confirmationFilled) {
+    title(ctx);
+    line("Strong password generated and filled ("+draft.password.length+" characters)."+
+      (ctx.confirm && !confirmationFilled?" Review the confirmation field.":"")+
+      " Complete signup on the website separately.");
+    const username=(ctx.user?.value||"").trim();
+    line("Username/email: "+(username || "Not found here — enter it in Windows before saving."),"sub");
+    button("Save username + password in BoshaVault",()=>save(ctx),true);
+    button("Regenerate a new 24-character password",()=>generate(ctx,24,true));
+    button("Close (keep values in form)",hide);
   }
-  function assign(el,value) {
-    if (!el || !shown(el) || typeof value !== "string") return;
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value")?.set;
-    if (!setter) return;
-    setter.call(el,value);
-    el.dispatchEvent(new Event("input",{bubbles:true}));
-    el.dispatchEvent(new Event("change",{bubbles:true}));
-  }
-  async function fill(context,id) {
-    const at=origin;
-    rowMessage("Approve this fill in the BoshaVault Windows window…");
+  async function save(ctx) {
+    if(!liveDraft(ctx)){message("The form changed. Focus the password field again to regenerate.");return;}
+    if(location.origin!==origin || !ctx.pass.isConnected){hide();return;}
+    const username=(ctx.user?.value||"").trim();
+    const password=draft.password;
+    message("Review the website and username in BoshaVault Windows, then choose Save encrypted login.");
     try {
-      const reply=await chrome.runtime.sendMessage({op:"fill",entryId:id});
-      // Verify the same live form and origin after foreground Windows approval.
-      if (at !== location.origin || !context.pass.isConnected || focus !== context) {hide();return;}
-      if (reply?.status !== "filled") {
-        rowMessage(reply?.message || "Fill canceled. Focus the field again to retry.");
-        return;
+      // Username and generated password leave the content script ONLY at this
+      // explicit Save click. No background password-field reading or storage.
+      const answer=await chrome.runtime.sendMessage({op:"save",username,password});
+      if(location.origin!==origin || !ctx.pass.isConnected){hide();return;}
+      if(answer?.status==="saved"){
+        draft=null;
+        message("Saved encrypted in BoshaVault. Submit the signup form on this website when ready.");
+      }else if(answer?.status==="locked"){
+        message("Unlock BoshaVault on Windows, then focus this field and click Save again.");
+      }else{
+        message(answer?.message || "Not saved. The password is still in the form — do not leave this page until you save it.");
       }
-      if (context.user?.isConnected) assign(context.user,reply.username);
-      assign(context.pass,reply.password);
-      hide();
-    } catch {rowMessage("BoshaVault did not respond. Reopen the app and retry.");}
+    } catch {message("Could not save. Keep this page open and retry after starting BoshaVault.");}
+  }
+  function render(ctx,reply) {
+    if(!ctx.pass.isConnected || !focus || focus.pass!==ctx.pass || location.origin!==origin)return;
+    if(liveDraft(ctx)){showDraft(ctx,false);return;}
+    title(ctx);
+    if(reply?.status==="ok" && Array.isArray(reply.accounts)) {
+      for(const account of reply.accounts.slice(0,10)){
+        if(!account || typeof account.id!=="string" || typeof account.username!=="string")continue;
+        button((account.title||"Saved login")+" · "+account.username,()=>fill(ctx,account.id));
+      }
+      if(reply.accounts.length)line("Creating a new account instead?","sub");
+    } else if(reply?.status==="locked"){
+      button("Unlock BoshaVault on Windows",async()=>{
+        message("Unlock in BoshaVault, then focus the password field again.");
+        await chrome.runtime.sendMessage({op:"open"}).catch(()=>{});
+      });
+    } else if(reply?.status==="unavailable"){
+      line("Windows vault is disconnected. Generating still works, but saving needs BoshaVault running.");
+    }
+    button("Generate strong password · 24 characters",()=>generate(ctx,24,true),true);
+    button("Generate extra-long password · 32 characters",()=>generate(ctx,32,true));
+    button("Generate without symbols · 24 characters",()=>generate(ctx,24,false));
+    position(ctx.anchor);
   }
   let debounce;
-  document.addEventListener("focusin",e=>{
-    const ctx=credentialContext(e.target);
-    if (!ctx) {hide();focus=null;return;}
-    focus=ctx; origin=location.origin;
-    const ticket=++seq;
-    hide();
-    clearTimeout(debounce);
+  document.addEventListener("focusin",event=>{
+    // Clicking inside our shadow popup retargets to its host: don't close it.
+    if(frame && (event.target===frame || frame.contains(event.target)))return;
+    const ctx=credentialContext(event.target);
+    if(!ctx){hide();focus=null;return;}
+    focus=ctx;origin=location.origin;
+    const ticket=++sequence;
+    hide();clearTimeout(debounce);
     debounce=setTimeout(async()=>{
-      try {
-        const reply=await chrome.runtime.sendMessage({op:"list"});
-        if(ticket===seq && focus===ctx && location.origin===origin) render(ctx,reply);
-      }catch { /* Do not inject into unsupported or disconnected pages. */ }
-    },180);
+      let response;
+      try {response=await chrome.runtime.sendMessage({op:"list"});}
+      catch{response={status:"unavailable"};}
+      if(ticket===sequence && focus===ctx && location.origin===origin)render(ctx,response);
+    },140);
   },true);
-  document.addEventListener("pointerdown",e=>{
-    if(frame && !frame.contains(e.target) && !(e.target instanceof HTMLInputElement))hide();
+  document.addEventListener("pointerdown",event=>{
+    if(frame && !frame.contains(event.target) && !(event.target instanceof HTMLInputElement))hide();
   },true);
-  window.addEventListener("scroll",()=>{if(frame&&focus)place(focus.anchor);},{passive:true});
-  window.addEventListener("resize",()=>{if(frame&&focus)place(focus.anchor);});
-  window.addEventListener("pagehide",hide);
+  window.addEventListener("scroll",()=>{if(frame&&focus)position(focus.anchor);},{passive:true});
+  window.addEventListener("resize",()=>{if(frame&&focus)position(focus.anchor);});
+  window.addEventListener("pagehide",()=>{draft=null;hide();});
 })();
