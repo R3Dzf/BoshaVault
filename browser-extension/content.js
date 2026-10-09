@@ -272,7 +272,10 @@
     },140);
   },true);
   document.addEventListener("pointerdown",event=>{
-    if(frame && !frame.contains(event.target) && !(event.target instanceof HTMLInputElement))hide();
+    // Closed Shadow DOM retargets popup clicks to the host element. Hiding on
+    // host pointerdown removed the buttons before the click handler could run.
+    if(frame && event.target!==frame && !frame.contains(event.target) &&
+       !(event.target instanceof HTMLInputElement))hide();
   },true);
   window.addEventListener("scroll",()=>{if(frame&&focus)position(focus.anchor);},{passive:true});
   window.addEventListener("resize",()=>{if(frame&&focus)position(focus.anchor);});
