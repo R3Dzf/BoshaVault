@@ -22,5 +22,21 @@ final class Ui {
     static Button button(Context c,String s,boolean primary,Runnable r){Button b=new Button(c);b.setText(s);b.setTextSize(13);b.setAllCaps(false);b.setTextColor(primary?Color.WHITE:PURPLE);b.setTypeface(null,Typeface.BOLD);b.setBackground(shape(primary?PURPLE:SOFT,dp(c,12)));b.setMinHeight(dp(c,46));b.setPadding(dp(c,12),dp(c,10),dp(c,12),dp(c,10));LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2);p.topMargin=dp(c,10);b.setLayoutParams(p);b.setOnClickListener(v->r.run());return b;}
     static EditText field(LinearLayout parent,String label,String value,boolean secret,int max){Context c=parent.getContext();parent.addView(text(c,label,12,MUTED,false));EditText e=new EditText(c);e.setText(value);e.setTextSize(14);e.setTextColor(INK);e.setSingleLine(true);e.setInputType(secret?InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD:InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);e.setImeOptions(EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING|EditorInfo.IME_ACTION_NEXT);e.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(max)});e.setBackground(shape(Color.WHITE,dp(c,10)));e.setPadding(dp(c,12),dp(c,10),dp(c,12),dp(c,10));LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,dp(c,46));p.topMargin=dp(c,7);p.bottomMargin=dp(c,15);parent.addView(e,p);return e;}
     static LinearLayout screen(Activity a){a.getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE,WindowManager.LayoutParams.FLAG_SECURE);a.getWindow().setStatusBarColor(BG);a.getWindow().setNavigationBarColor(BG);LinearLayout root=column(a);root.setBackgroundColor(BG);root.setPadding(dp(a,23),dp(a,25),dp(a,23),dp(a,26));ScrollView s=new ScrollView(a);s.setFillViewport(true);s.addView(root);a.setContentView(s);if(Build.VERSION.SDK_INT>=35)s.setOnApplyWindowInsetsListener((v,insets)->{android.graphics.Insets sys=insets.getInsets(WindowInsets.Type.systemBars());s.setPadding(sys.left,sys.top,sys.right,sys.bottom);return insets;});return root;}
-    static void error(Activity a,Exception e){new AlertDialog.Builder(a).setTitle("BoshaVault").setMessage(e.getMessage()!=null&&e.getMessage().length()<220?e.getMessage():"The action could not be completed. Your encrypted file is preserved.").setPositiveButton("OK",null).show();}
+    static void error(Activity a,Exception e){
+        // Keep the useful AndroidKeyStore exception class even if its original
+        // message is empty or too long. Do not log vault contents or keys.
+        String type=e.getClass().getSimpleName();
+        String message=e.getMessage();
+        Throwable cause=e.getCause();
+        if((message==null||message.trim().isEmpty())&&cause!=null){
+            type=type+" / "+cause.getClass().getSimpleName();
+            message=cause.getMessage();
+        }
+        if(message==null||message.trim().isEmpty())message="Android supplied no further error details.";
+        message=message.replace('\r',' ').replace('\n',' ').trim();
+        if(message.length()>360)message=message.substring(0,357)+"...";
+        new AlertDialog.Builder(a).setTitle("BoshaVault · "+type)
+            .setMessage(message+"\n\nYour encrypted vault was not deleted. Unlock with your master passphrase.")
+            .setPositiveButton("OK",null).show();
+    }
 }
