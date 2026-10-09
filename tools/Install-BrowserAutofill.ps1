@@ -6,9 +6,25 @@ param(
     [ValidateSet('Chrome','Edge')][string]$Browser,
     [Parameter(Mandatory=$true)]
     [ValidatePattern('^[a-p]{32}$')][string]$ExtensionId,
-    [string]$AppFolder = $PSScriptRoot
+    [string]$AppFolder
 )
 $ErrorActionPreference = 'Stop'
+# PowerShell 5.1 may evaluate a parameter's default `$PSScriptRoot`
+# before the script path is populated; resolve it in the script body.
+if ([string]::IsNullOrWhiteSpace($AppFolder)) {
+    $executingScript = $PSCommandPath
+    if ([string]::IsNullOrWhiteSpace($executingScript)) {
+        $executingScript = $MyInvocation.MyCommand.Path
+    }
+    if ([string]::IsNullOrWhiteSpace($executingScript)) {
+        throw 'Cannot locate the installer script. Pass -AppFolder with the extracted BoshaVault Windows directory.'
+    }
+    $AppFolder = Split-Path -Parent $executingScript
+}
+if ([string]::IsNullOrWhiteSpace($AppFolder)) {
+    throw 'AppFolder cannot be empty. Extract the complete BoshaVault-Windows-x64 ZIP.'
+}
+$AppFolder = (Resolve-Path -LiteralPath $AppFolder -ErrorAction Stop).ProviderPath
 $binary = Join-Path $AppFolder 'BoshaVault.NativeHost.exe'
 $desktop = Join-Path $AppFolder 'BoshaVault.exe'
 if (!(Test-Path -LiteralPath $binary -PathType Leaf) -or !(Test-Path -LiteralPath $desktop -PathType Leaf)) {
