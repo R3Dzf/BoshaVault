@@ -99,7 +99,7 @@ try
             "bitwarden", []), "Bitwarden 2FA fields refuse silent data loss");
         string bw = "folder,favorite,type,name,notes,fields,reprompt,login_uri,login_username,login_password,login_totp\n" +
             "My Folder,1,login,Service,Notes,,0,https://example.org,hello@example.org,GoodLongPassword1234!,\n" +
-            ",0,card,Bank,,,,,,,,\n";
+            ",0,card,Bank,,,,,,,\n";
         using var bitwardenPlan = CredentialCsvImport.Prepare(Encoding.UTF8.GetBytes(bw),
             "bitwarden", importSession.Data.Entries);
         Check(bitwardenPlan.Entries.Count == 1 && bitwardenPlan.SkippedNonLogin == 1 &&
