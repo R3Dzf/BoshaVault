@@ -120,7 +120,8 @@
     message("Confirm this login in the BoshaVault Windows window…");
     try {
       const answer=await chrome.runtime.sendMessage({op:"fill",entryId:id});
-      if(at!==location.origin || focus?.pass!==ctx.pass || !ctx.pass.isConnected) {hide();return;}
+      if(at!==location.origin || focus?.pass!==ctx.pass || !ctx.pass.isConnected ||
+         !safeFormDestination(ctx.form)) {hide();return;}
       if(answer?.status!=="filled"){message(answer?.message || "Fill canceled.");return;}
       if(ctx.user?.isConnected) assign(ctx.user,answer.username);
       assign(ctx.pass,answer.password);
@@ -128,7 +129,7 @@
     } catch {message("BoshaVault did not respond. Please retry.");}
   }
   function generate(ctx,length,symbols) {
-    if (!visible(ctx.pass)) {hide();return;}
+    if (!visible(ctx.pass) || !safeFormDestination(ctx.form)) {hide();return;}
     const allowed=ctx.pass.maxLength>=0?ctx.pass.maxLength:64;
     const actual=Math.min(length,allowed);
     if(actual<16) {
@@ -155,6 +156,7 @@
   }
   async function save(ctx) {
     if(!liveDraft(ctx)){message("The form changed. Focus the password field again to regenerate.");return;}
+    if (!safeFormDestination(ctx.form)){message("This form submits to a different site. BoshaVault will not save it.");return;}
     if(location.origin!==origin || !ctx.pass.isConnected){hide();return;}
     const username=(ctx.user?.value||"").trim();
     const password=draft.password;
@@ -178,6 +180,8 @@
     if(!ctx.pass.isConnected || !focus || focus.pass!==ctx.pass || location.origin!==origin)return;
     if(liveDraft(ctx)){showDraft(ctx,false);return;}
     title(ctx);
+    if(typeof reply?.warning==="string" && reply.warning.length>0)
+      line("⚠️ "+reply.warning);
     if(reply?.status==="ok" && Array.isArray(reply.accounts)) {
       for(const account of reply.accounts.slice(0,10)){
         if(!account || typeof account.id!=="string" || typeof account.username!=="string")continue;
