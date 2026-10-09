@@ -1,9 +1,21 @@
-<!doctype html><html lang="en"><meta charset="utf-8"><title>BoshaVault</title>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>BoshaVault Autofill</title>
 <style>
-body{width:290px;padding:18px;font:14px system-ui,sans-serif;background:#f8f7fd;color:#242335}
-h1{font-size:18px;color:#7762df;margin:0 0 9px}
-p{line-height:1.5}small{color:#6b657d}
-</style>
-<h1>BoshaVault Autofill</h1>
-<p>Unlock BoshaVault on Windows, then focus a password field on a verified HTTPS site. Choose a matching login, then confirm on the Windows app.</p>
-<small>Chrome and Edge preview · On-device only · No clipboard or cloud sync.</small></html>
+body{box-sizing:border-box;margin:0;width:315px;background:#faf9ff;color:#2a2740;font:13px "Segoe UI",system-ui,sans-serif}
+header{padding:15px 15px 12px;background:#fff;border-bottom:1px solid #e6e1f2}
+h1{font-size:17px;margin:0 0 5px;color:#5943bf}
+small{display:block;color:#767086;overflow-wrap:anywhere;line-height:1.5}
+main{padding:15px}
+button{display:block;width:100%;border:1px solid #dfd8f7;background:#f1edff;color:#45318f;padding:11px;border-radius:9px;font:600 13px "Segoe UI",system-ui;cursor:pointer;margin-bottom:9px}
+button.primary{background:#7762df;color:white;border-color:#7762df}
+button:hover{filter:brightness(.95)}
+#status{font-size:12px;line-height:1.5;padding:10px;border-radius:9px;background:#fff;min-height:21px;overflow-wrap:anywhere}
+footer{padding:0 15px 15px;color:#888;font-size:11px;line-height:1.5}
+</style></head><body>
+<header><h1>🔐 BoshaVault</h1><small id="site">Detecting current HTTPS website…</small></header>
+<main>
+<button class="primary" id="show">Show saved logins</button>
+<button id="save">Save this website in BoshaVault</button>
+<p id="status" role="status" aria-live="polite">Keep BoshaVault Windows running and unlocked.</p>
+</main><footer>Exact HTTPS website matching · User-approved filling · Local-only connection</footer>
+<script src="popup.js"></script>
+</body></html>
