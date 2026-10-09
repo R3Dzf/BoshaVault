@@ -24,6 +24,41 @@ public partial class MainWindow
             var activeSession = session;
             if (activeSession == null || !activeSession.IsOpen)
                 return new() { Status = "locked", Message = "Unlock BoshaVault on Windows first." };
+            if (request.Op == "update")
+            {
+                var existing=activeSession.Data.Entries.FirstOrDefault(e =>
+                    !e.Deleted && e.Id==request.EntryId && e.Url.Length>0 &&
+                    OriginPolicy.Matches(e.Url,request.Origin));
+                if(existing==null)
+                    return new() { Status="denied",Message="No exact saved login matched this website." };
+                if(existing.Password==request.Password)
+                    return new() { Status="denied",Message="Generated password matches the existing one." };
+                int updateStamp=generation;
+                BringToFront();
+                bool accepted=MessageBox.Show(this,
+                    "Update THIS saved login?\n\nBrowser-reported HTTPS host: "+host+
+                    "\nAccount: "+existing.Title+"\nSaved username: "+existing.Username+
+                    (request.Username.Length>0 && request.Username!=existing.Username
+                        ? "\nPage username differs: "+request.Username+" (saved username will stay unchanged)." : "")+
+                    "\n\nA new generated password will replace the existing saved password. "+
+                    "Make sure you have changed the password on the real website. "+
+                    "The previous encrypted file backup may contain the old password.\n\n"+
+                    "BoshaVault will not submit any form or verify that the site accepted the change.",
+                    "BoshaVault · Confirm password update",
+                    MessageBoxButton.YesNo,MessageBoxImage.Warning,MessageBoxResult.No)
+                    ==MessageBoxResult.Yes;
+                if(!accepted || generation!=updateStamp || session!=activeSession || !activeSession.IsOpen)
+                    return new(){Status="denied",Message="Password update canceled."};
+                if(!OriginPolicy.Matches(existing.Url,request.Origin))
+                    return new(){Status="denied",Message="Saved website changed."};
+                var changed=existing.Clone();
+                changed.Password=request.Password;
+                activeSession.Upsert(changed);
+                selected=changed;
+                Refresh();
+                lastActivity=DateTime.UtcNow;
+                return new(){Status="updated",Message="Encrypted saved password updated. Confirm the new password works on the website."};
+            }
             if (request.Op == "save")
             {
                 // The extension never persists generated passwords. This dialog
