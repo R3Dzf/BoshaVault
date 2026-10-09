@@ -1,0 +1,112 @@
+name: Build BoshaVault (Windows and Android)
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Windows x64 / .NET 10
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Core, storage, and crypto tests
+        run: dotnet run --project src/BoshaVault.Tests -c Release
+      - name: Desktop tests
+        run: dotnet run --project src/BoshaVault.Tests -c Release -- --desktop-tests
+      - name: Certificate tests
+        run: dotnet run --project src/BoshaVault.Tests -c Release -- --tls-certificate-tests
+      - name: TLS / Schannel handshake test
+        run: dotnet run --project src/BoshaVault.Tests -c Release -- --tls-handshake-tests
+      - name: Publish Windows x64 executable
+        run: >-
+          dotnet publish src/BoshaVault.Windows
+          --configuration Release
+          --runtime win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:DebugType=None
+          -p:DebugSymbols=false
+          --output dist/windows
+      - name: Archive Windows build
+        shell: pwsh
+        run: Compress-Archive -Path 'dist/windows/*' -DestinationPath 'dist/BoshaVault-Windows-x64.zip' -Force
+      - name: Upload Windows build
+        uses: actions/upload-artifact@v4
+        with:
+          name: BoshaVault-Windows-x64
+          path: dist/BoshaVault-Windows-x64.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  android:
+    name: Android 9+ / SDK 35
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Android SDK 35 platform and build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager --install 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Build and verify signed Android APK
+        shell: bash
+        env:
+          STABLE_KEYSTORE_BASE64: ${{ secrets.BOSHAVAULT_ANDROID_KEYSTORE_BASE64 }}
+          STABLE_KEYSTORE_PASSWORD: ${{ secrets.BOSHAVAULT_ANDROID_KEYSTORE_PASSWORD }}
+          STABLE_KEY_ALIAS: ${{ secrets.BOSHAVAULT_ANDROID_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          STORE="$RUNNER_TEMP/boshavault-signing.p12"
+          if [[ -n "$STABLE_KEYSTORE_BASE64" && -n "$STABLE_KEYSTORE_PASSWORD" && -n "$STABLE_KEY_ALIAS" ]]; then
+            printf '%s' "$STABLE_KEYSTORE_BASE64" | base64 --decode > "$STORE"
+            chmod 600 "$STORE"
+            SIGNING_PASSWORD="$STABLE_KEYSTORE_PASSWORD"
+            SIGNING_ALIAS="$STABLE_KEY_ALIAS"
+            NOTICE='Signed with the project-provided signing certificate. Verify its certificate fingerprint before updating an installed app.'
+          else
+            if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+              echo '::error::Version-tagged builds require all three Android signing secrets. Refusing to release a temporary-key APK.'
+              exit 1
+            fi
+            SIGNING_PASSWORD="$(openssl rand -hex 24)"
+            SIGNING_ALIAS='boshavault-test'
+            keytool -genkeypair -noprompt -alias "$SIGNING_ALIAS" -keyalg RSA -keysize 3072 -validity 7 -storetype PKCS12 -keystore "$STORE" -storepass "$SIGNING_PASSWORD" -keypass "$SIGNING_PASSWORD" -dname 'CN=BoshaVault CI test,O=Temporary build,C=US'
+            NOTICE='TEMPORARY CI SIGNING KEY. This APK is only for installation/testing on a clean test device. It CANNOT upgrade an existing APK signed with a different certificate, and the signing key is discarded after this run. Never uninstall an existing vault without a verified encrypted backup.'
+          fi
+          BOSHAVAULT_KEYSTORE_PASSWORD="$SIGNING_PASSWORD" python tools/build-android.py --sdk "$ANDROID_HOME/platforms/android-35" --tools "$ANDROID_HOME/build-tools/35.0.0" --keystore "$STORE" --alias "$SIGNING_ALIAS"
+          printf '%s\n' "$NOTICE" > dist/ANDROID-SIGNING-NOTICE.txt
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs dist/BoshaVault-Android.apk
+          unset SIGNING_PASSWORD STABLE_KEYSTORE_PASSWORD STABLE_KEYSTORE_BASE64
+      - name: Upload Android APK and signing notice
+        uses: actions/upload-artifact@v4
+        with:
+          name: BoshaVault-Android-APK
+          path: |
+            dist/BoshaVault-Android.apk
+            dist/ANDROID-SIGNING-NOTICE.txt
+          if-no-files-found: error
+          retention-days: 14

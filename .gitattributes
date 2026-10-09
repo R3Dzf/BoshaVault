@@ -1,0 +1,7 @@
+* text=auto
+*.png binary
+*.ico binary
+*.jar binary
+*.apk binary
+*.zip binary
+*.p12 binary

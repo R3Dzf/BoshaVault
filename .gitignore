@@ -1,0 +1,27 @@
+bin/
+obj/
+dist/
+build-deps/
+*.boshavault
+*.boshavault.previous
+*.boshavault.lock
+*.p12
+*.jks
+*.keystore
+*.import
+*.tmp
+local.properties
+# Local secrets, signing, diagnostics and user data
+*.pfx
+*.pem
+*.key
+*.der
+*.mobileprovision
+*.log
+.env
+.env.*
+secrets/
+private/
+*.bak
+__pycache__/
+*.py[cod]
