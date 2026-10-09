@@ -216,6 +216,21 @@ try
     Check(VaultCodec.Parse(a.ExportEncrypted()).KeyEpoch == 2, "merging an old backup cannot downgrade current key epoch");
     Check(OriginPolicy.Matches("https://accounts.example.com/login", "https://accounts.example.com/another") && !OriginPolicy.Matches("https://example.com", "https://example.com.evil.test") && !OriginPolicy.Matches("https://example.com", "https://example-login.com") && !OriginPolicy.Matches("https://example.com", "http://example.com"), "origin policy rejects lookalikes / insecure scheme / different subdomain");
     Check(!OriginPolicy.Matches("https://example.com", "https://evil.test@example.com") && !OriginPolicy.Matches("https://example.com", "https://example.com:8443"), "embedded credentials and custom ports rejected");
+    Check(OriginPolicy.Matches("https://www.github.com/login","https://github.com/login") &&
+        OriginPolicy.Matches("https://github.com","https://www.github.com") &&
+        !OriginPolicy.Matches("https://secure.github.com","https://github.com") &&
+        !OriginPolicy.Matches("https://github.com.attacker.test","https://github.com"),
+        "www and bare HTTPS alias matches, but other subdomains and phishing suffixes cannot match");
+    Check(BrowserAutofillProtocol.Validate(new BrowserAutofillRequest {
+        Op="capture",Origin="https://github.com",Username="demo@email.test" })=="github.com",
+        "browser site capture accepts reviewed hostname and username without sending any password");
+    var serializedBrowser=JsonSerializer.Serialize(new BrowserAutofillResponse {
+        Status="ok",Accounts=[new BrowserAccount {Id=Guid.NewGuid().ToString(),Title="Demo",Username="demo"}] },
+        JsonOptions.Strict);
+    Check(serializedBrowser.Contains("\\"accounts\\":") &&
+        serializedBrowser.Contains("\\"username\\":") &&
+        serializedBrowser.Contains("\\"status\\":"),
+        "browser IPC exposes expected camelCase JSON response fields");
     Check(OriginPolicy.LooksLikeSavedHostname("paypa1.com",["paypal.com"]) &&
         OriginPolicy.LooksLikeSavedHostname("paypal.com.phish.test",["paypal.com"]) &&
         OriginPolicy.LooksLikeSavedHostname("xn--example-fra.test",["paypal.com"]) &&
