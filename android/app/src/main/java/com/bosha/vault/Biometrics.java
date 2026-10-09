@@ -62,6 +62,8 @@ final class Biometrics {
             disable(a);KeyGenerator generator=KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES,"AndroidKeyStore");KeyGenParameterSpec.Builder b=new KeyGenParameterSpec.Builder(ALIAS,KeyProperties.PURPOSE_ENCRYPT|KeyProperties.PURPOSE_DECRYPT).setKeySize(256).setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).setUserAuthenticationRequired(true).setInvalidatedByBiometricEnrollment(true);
             if(Build.VERSION.SDK_INT>=30)b.setUserAuthenticationParameters(0,KeyProperties.AUTH_BIOMETRIC_STRONG);else b.setUserAuthenticationValidityDurationSeconds(-1);
             generator.init(b.build());generator.generateKey();Cipher cipher=cipher();KeyStore ks=KeyStore.getInstance("AndroidKeyStore");ks.load(null);cipher.init(Cipher.ENCRYPT_MODE,ks.getKey(ALIAS,null));cipher.updateAAD("BoshaVault biometric key v1".getBytes(StandardCharsets.UTF_8));
+            final byte[] nonce=cipher.getIV();
+            if(nonce==null || nonce.length!=12)throw new Exception("Invalid encryption nonce.");
             stage="Biometric prompt initialization";
             prompt(a,"Enable fingerprint unlock",cipher,(actual,error)->{
                 try{
