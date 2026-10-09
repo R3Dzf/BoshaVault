@@ -15,10 +15,11 @@ import org.json.JSONObject;
 
 final class Biometrics {
     private static final String ALIAS="BoshaVault.biometric.v1";
+    private static final String CBC_ALIAS="BoshaVault.biometric.cbc.v2";
     interface Result { void done(byte[] key,Exception error); }
     static File file(Activity a){return new File(a.getFilesDir(),"biometric.wrap");}
     static boolean available(Activity a){return file(a).exists();}
-    static void disable(Activity a)throws Exception{Files.deleteIfExists(file(a).toPath());KeyStore ks=KeyStore.getInstance("AndroidKeyStore");ks.load(null);if(ks.containsAlias(ALIAS))ks.deleteEntry(ALIAS);}
+    static void disable(Activity a)throws Exception{Files.deleteIfExists(file(a).toPath());KeyStore ks=KeyStore.getInstance("AndroidKeyStore");ks.load(null);if(ks.containsAlias(ALIAS))ks.deleteEntry(ALIAS);if(ks.containsAlias(CBC_ALIAS))ks.deleteEntry(CBC_ALIAS);}
     // CryptoObject decryption requires a strong biometric authenticator; a device
     // may unlock its screen with a weaker fingerprint but be unable to protect keys.
     static void verifySupport(Activity a) throws Exception {
@@ -48,28 +49,40 @@ final class Biometrics {
         }
     }
     private static Exception stepError(String step,Exception e) {
-        String type=e.getClass().getSimpleName();
-        String detail=e.getMessage();
-        if(detail==null || detail.trim().isEmpty())detail="Android rejected the biometric operation.";
-        if(detail.length()>95)detail=detail.substring(0,95)+"...";
-        return new Exception(step+" ("+type+"): "+detail,e);
+        StringBuilder message=new StringBuilder(step);
+        Throwable t=e;
+        int depth=0;
+        while(t!=null && depth<4){
+            message.append(depth==0?" (":"; cause ");
+            message.append(t.getClass().getSimpleName());
+            String detail=t.getMessage();
+            if(detail!=null&&!detail.trim().isEmpty()){
+                detail=detail.replace('\\n',' ').replace('\\r',' ');
+                message.append(": ").append(detail.substring(0,Math.min(110,detail.length())));
+            }
+            if(depth==0)message.append(")");
+            t=t.getCause();
+            depth++;
+        }
+        return new Exception(message.toString(),e);
     }
     static void enable(Activity a,byte[] secret,Result callback){
         String stage="Biometric support check";
         try{
             verifySupport(a);
             stage="Android Keystore key creation";
-            disable(a);KeyGenerator generator=KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES,"AndroidKeyStore");KeyGenParameterSpec.Builder b=new KeyGenParameterSpec.Builder(ALIAS,KeyProperties.PURPOSE_ENCRYPT|KeyProperties.PURPOSE_DECRYPT).setKeySize(256).setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).setUserAuthenticationRequired(true).setInvalidatedByBiometricEnrollment(true);
+            disable(a);KeyGenerator generator=KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES,"AndroidKeyStore");KeyGenParameterSpec.Builder b=new KeyGenParameterSpec.Builder(CBC_ALIAS,KeyProperties.PURPOSE_ENCRYPT|KeyProperties.PURPOSE_DECRYPT).setKeySize(256).setBlockModes(KeyProperties.BLOCK_MODE_CBC).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_PKCS7).setUserAuthenticationRequired(true).setInvalidatedByBiometricEnrollment(true);
             if(Build.VERSION.SDK_INT>=30)b.setUserAuthenticationParameters(0,KeyProperties.AUTH_BIOMETRIC_STRONG);else b.setUserAuthenticationValidityDurationSeconds(-1);
-            generator.init(b.build());generator.generateKey();Cipher cipher=cipher();KeyStore ks=KeyStore.getInstance("AndroidKeyStore");ks.load(null);cipher.init(Cipher.ENCRYPT_MODE,ks.getKey(ALIAS,null));cipher.updateAAD("BoshaVault biometric key v1".getBytes(StandardCharsets.UTF_8));
+            generator.init(b.build());generator.generateKey();Cipher cipher=Cipher.getInstance("AES/CBC/PKCS7Padding");KeyStore ks=KeyStore.getInstance("AndroidKeyStore");ks.load(null);cipher.init(Cipher.ENCRYPT_MODE,ks.getKey(CBC_ALIAS,null));
             final byte[] nonce=cipher.getIV();
-            if(nonce==null || nonce.length!=12)throw new Exception("Invalid encryption nonce.");
+            if(nonce==null || nonce.length!=16)throw new Exception("Invalid CBC initialization vector.");
             stage="Biometric prompt initialization";
             prompt(a,"Enable fingerprint unlock",cipher,(actual,error)->{
                 try{
                     if(error!=null){callback.done(null,error);return;}
                     byte[] ct=actual.doFinal(secret);
-                    JSONObject box=new JSONObject().put("nonce",VaultEngine.b64(actual.getIV())).put("ciphertext",VaultEngine.b64(ct));
+                    if(ct.length!=48)throw new Exception("Invalid CBC-wrapped key length.");
+                    JSONObject box=new JSONObject().put("mode","cbc-v2").put("iv",VaultEngine.b64(nonce)).put("ciphertext",VaultEngine.b64(ct));
                     File wrap=file(a),tmp=new File(a.getFilesDir(),"biometric.wrap.tmp");
                     try{
                         Files.write(tmp.toPath(),box.toString().getBytes(StandardCharsets.UTF_8));
@@ -85,9 +98,35 @@ final class Biometrics {
     }
     static void unlock(Activity a,Result callback){
         try{
-            JSONObject box=StrictJson.object(VaultEngine.utf8(Files.readAllBytes(file(a).toPath())));StrictJson.keys(box,"nonce","ciphertext");KeyStore ks=KeyStore.getInstance("AndroidKeyStore");ks.load(null);Cipher cipher=cipher();cipher.init(Cipher.DECRYPT_MODE,ks.getKey(ALIAS,null),new GCMParameterSpec(128,VaultEngine.decode(box.getString("nonce"),12)));cipher.updateAAD("BoshaVault biometric key v1".getBytes(StandardCharsets.UTF_8));
-            prompt(a,"Unlock your private space",cipher,(actual,error)->{try{if(error!=null){callback.done(null,error);return;}callback.done(actual.doFinal(VaultEngine.decode(box.getString("ciphertext"),48)),null);}catch(Exception e){callback.done(null,e);}});
-        }catch(Exception e){callback.done(null,e);}
+            JSONObject box=StrictJson.object(VaultEngine.utf8(Files.readAllBytes(file(a).toPath())));
+            boolean cbc=box.optString("mode","").equals("cbc-v2");
+            if(cbc)StrictJson.keys(box,"mode","iv","ciphertext");
+            else StrictJson.keys(box,"nonce","ciphertext");
+            KeyStore ks=KeyStore.getInstance("AndroidKeyStore");ks.load(null);
+            Cipher cipher;
+            byte[] wrapped=VaultEngine.decode(box.getString("ciphertext"),48);
+            if(cbc){
+                cipher=Cipher.getInstance("AES/CBC/PKCS7Padding");
+                cipher.init(Cipher.DECRYPT_MODE,ks.getKey(CBC_ALIAS,null),
+                        new javax.crypto.spec.IvParameterSpec(VaultEngine.decode(box.getString("iv"),16)));
+            }else{
+                cipher=cipher();
+                cipher.init(Cipher.DECRYPT_MODE,ks.getKey(ALIAS,null),
+                        new GCMParameterSpec(128,VaultEngine.decode(box.getString("nonce"),12)));
+                cipher.updateAAD("BoshaVault biometric key v1".getBytes(StandardCharsets.UTF_8));
+            }
+            prompt(a,"Unlock your private space",cipher,(actual,error)->{
+                try{
+                    if(error!=null){callback.done(null,error);return;}
+                    if(actual==null)throw new Exception("Android returned no authenticated cipher.");
+                    byte[] key=actual.doFinal(wrapped);
+                    if(key.length!=32){Arrays.fill(key,(byte)0);throw new Exception("Biometric quick-unlock key has invalid length.");}
+                    // The full vault AES-GCM tag is checked by openWithKey before it opens.
+                    callback.done(key,null);
+                }catch(Exception e){callback.done(null,stepError("Fingerprint quick unlock failed",e));}
+                finally{Arrays.fill(wrapped,(byte)0);}
+            });
+        }catch(Exception e){callback.done(null,stepError("Preparing fingerprint unlock failed",e));}
     }
     private static Cipher cipher()throws Exception{return Cipher.getInstance("AES/GCM/NoPadding");}
     interface CipherResult{void done(Cipher c,Exception e);}
