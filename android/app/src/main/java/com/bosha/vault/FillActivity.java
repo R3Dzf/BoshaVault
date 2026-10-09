@@ -4,6 +4,7 @@ import android.app.*;
 import android.content.*;
 import android.os.*;
 import android.service.autofill.Dataset;
+import android.service.autofill.FillResponse;
 import android.view.autofill.*;
 import android.widget.*;
 import java.util.*;
@@ -63,7 +64,7 @@ public final class FillActivity extends Activity {
     }
     private void confirmLink(JSONObject e){new AlertDialog.Builder(this).setTitle("Share this login with this app?").setMessage(e.optString("title")+"\n\nApp: "+target.pkg+"\nCertificate SHA-256:\n"+target.certificate+"\n\nOnly approve the official app you intended to use. This links only the selected login to that app identity.").setNegativeButton("Cancel",null).setPositiveButton("Link & fill",(d,w)->run(()->engine.trust(target.pkg,target.certificate,false,e.getString("id")),()->deliver(e))).show();}
     private void deliver(JSONObject entry){
-        try{target.validate(this);RemoteViews label=new RemoteViews(getPackageName(),android.R.layout.simple_list_item_1);label.setTextViewText(android.R.id.text1,entry.getString("username"));Dataset.Builder dataset=new Dataset.Builder(label);if(target.user!=null)dataset.setValue(target.user,AutofillValue.forText(entry.getString("username")));if(target.password!=null)dataset.setValue(target.password,AutofillValue.forText(entry.getString("password")));Intent result=new Intent().putExtra(AutofillManager.EXTRA_AUTHENTICATION_RESULT,dataset.build());setResult(RESULT_OK,result);AutofillStatus.report(this,"AUTH_DELIVERED");engine.close();finish();}
+        try{target.validate(this);RemoteViews label=new RemoteViews(getPackageName(),android.R.layout.simple_list_item_1);label.setTextViewText(android.R.id.text1,entry.getString("username"));Dataset.Builder dataset=new Dataset.Builder(label);if(target.user!=null)dataset.setValue(target.user,AutofillValue.forText(entry.getString("username")));if(target.password!=null)dataset.setValue(target.password,AutofillValue.forText(entry.getString("password")));FillResponse response=new FillResponse.Builder().addDataset(dataset.build()).build();Intent result=new Intent().putExtra(AutofillManager.EXTRA_AUTHENTICATION_RESULT,response);setResult(RESULT_OK,result);AutofillStatus.report(this,"AUTH_DELIVERED");engine.close();finish();}
         catch(Exception e){Ui.error(this,e);finish();}
     }
     @Override protected void onStop(){super.onStop();stopped=true;if(engine!=null)worker.execute(engine::close);finish();}
