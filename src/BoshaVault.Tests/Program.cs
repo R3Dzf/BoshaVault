@@ -10,7 +10,7 @@ string devA = "11111111-1111-1111-1111-111111111111", devB = "22222222-2222-2222
 string password = "correct horse battery staple café 🔑";
 int passed = 0;
 void Check(bool value, string name) { if (!value) throw new Exception("FAIL: " + name); Console.WriteLine("PASS " + name); passed++; }
-async Task Reject(Func<Task> action, string name) { bool rejected = false; try { await action(); } catch (Exception ex) when (ex is VaultException or IOException or JsonException) { rejected = true; } Check(rejected, name); }
+async Task Reject(Func<Task> action, string name) { bool rejected = false; try { await action(); } catch (Exception ex) when (ex is VaultException or IOException or JsonException or InvalidDataException) { rejected = true; } Check(rejected, name); }
 void RejectNow(Action action, string name) { bool rejected = false; try { action(); } catch (Exception ex) when (ex is VaultException or IOException or JsonException or FormatException) { rejected = true; } Check(rejected, name); }
 VaultData Clone(VaultData d) => JsonSerializer.Deserialize<VaultData>(JsonSerializer.Serialize(d, JsonOptions.Strict), JsonOptions.Strict)!;
 try
@@ -127,6 +127,28 @@ try
     Check(VaultCodec.Parse(a.ExportEncrypted()).KeyEpoch == 2, "merging an old backup cannot downgrade current key epoch");
     Check(OriginPolicy.Matches("https://accounts.example.com/login", "https://accounts.example.com/another") && !OriginPolicy.Matches("https://example.com", "https://example.com.evil.test") && !OriginPolicy.Matches("https://example.com", "https://example-login.com") && !OriginPolicy.Matches("https://example.com", "http://example.com"), "origin policy rejects lookalikes / insecure scheme / different subdomain");
     Check(!OriginPolicy.Matches("https://example.com", "https://evil.test@example.com") && !OriginPolicy.Matches("https://example.com", "https://example.com:8443"), "embedded credentials and custom ports rejected");
+    Check(BrowserAutofillProtocol.Validate(new BrowserAutofillRequest { Op="list", Origin="https://accounts.example.com" })=="accounts.example.com",
+        "native browser requests accept exact HTTPS origin");
+    foreach (string invalid in new[] { "http://accounts.example.com", "https://evil.test@accounts.example.com",
+        "https://accounts.example.com:8080", "https://accounts.example.com.evil.test/path", "https://accounts.example.com?q=1",
+        "file:///etc/passwd", "https://accounts.example.com/#section" })
+        RejectNow(()=>BrowserAutofillProtocol.Validate(new BrowserAutofillRequest { Op="list", Origin=invalid }),
+            "unsafe browser origin rejected");
+    RejectNow(()=>BrowserAutofillProtocol.Validate(new BrowserAutofillRequest { Op="fill", Origin="https://accounts.example.com", EntryId="invalid" }),
+        "unrecognized login identity rejected");
+    using (var pipeData=new MemoryStream())
+    {
+        await BrowserAutofillProtocol.WriteAsync(pipeData,new BrowserAutofillRequest { Op="list",Origin="https://accounts.example.com" },CancellationToken.None);
+        pipeData.Position=0;
+        var decoded=await BrowserAutofillProtocol.ReadAsync<BrowserAutofillRequest>(pipeData,CancellationToken.None);
+        Check(decoded.Op=="list"&&decoded.Origin=="https://accounts.example.com","binary native messaging frame roundtrip");
+    }
+    await Reject(async()=> {
+        using var tooBig=new MemoryStream();
+        tooBig.Write(BitConverter.GetBytes(BrowserAutofillProtocol.MaxBytes+1));
+        tooBig.Position=0;
+        await BrowserAutofillProtocol.ReadAsync<BrowserAutofillRequest>(tooBig,CancellationToken.None);
+    }, "oversized native message rejected");
     var generated = Enumerable.Range(0, 1000).Select(_ => PasswordGenerator.Generate(24)).ToList();
     Check(generated.Distinct().Count() == 1000 && generated.All(p => p.Length == 24 && p.Any(char.IsLower) && p.Any(char.IsUpper) && p.Any(char.IsDigit) && p.Any(c=>!char.IsLetterOrDigit(c))), "random generator length / required groups / collision sample");
     a.Dispose(); RejectNow(() => a.ExportEncrypted(), "locked session cannot export or read secrets");
