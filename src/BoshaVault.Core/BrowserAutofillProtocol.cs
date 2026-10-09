@@ -21,6 +21,8 @@ public sealed class BrowserAccount
     public string Id { get; set; } = "";
     public string Title { get; set; } = "";
     public string Username { get; set; } = "";
+    public string Website { get; set; } = "";
+    public bool Related { get; set; }
 }
 public sealed class BrowserAutofillResponse
 {
