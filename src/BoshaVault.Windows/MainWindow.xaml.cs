@@ -219,6 +219,19 @@ public partial class MainWindow : Window
             catch (Exception ex) when (ex is VaultException or IOException) { if (stamp == generation && d.IsVisible) note.Text = ex.Message; }
             finally { oldPassword = ""; newPassword = ""; change.IsEnabled = true; }
         }, true);
+        d.Action("View local password health report", () => {
+            if (session == null) return;
+            var review = PasswordHealth.Audit(session.Data.Entries);
+            var popup = new FormDialog(this, "Password health · local check", 540);
+            popup.Label($"Reviewed: {review.Total} logins. At risk: {review.AtRisk}. Reused: {review.Reused}. Short: {review.Short}. Common: {review.CommonPassword}. Predictable: {review.Predictable}.");
+            popup.Label("Results are calculated on this device only. No passwords or website history leave your vault. This is a limited local check, not an online breach database.");
+            if(review.Findings.Count==0) popup.Label("No obvious issues detected by the current local rules.");
+            foreach(var finding in review.Findings.Take(35))
+                popup.Label(finding.Title + ": " + string.Join("; ",finding.Reasons));
+            if(review.Findings.Count>35) popup.Label($"Plus {review.Findings.Count-35} more entries. Review the vault list for the rest.");
+            popup.Action("Close",popup.Close,true);
+            popup.ShowDialog();
+        });
         d.Label("No reset service exists. Old backups are not revoked by changing the passphrase. Windows quick unlock is intentionally unavailable in this release.");
         d.Action("Lock & move to tray", HideToTray);
         d.Action("Exit BoshaVault", ExitApplication);
