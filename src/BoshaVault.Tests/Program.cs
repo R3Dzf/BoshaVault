@@ -216,6 +216,17 @@ try
     Check(VaultCodec.Parse(a.ExportEncrypted()).KeyEpoch == 2, "merging an old backup cannot downgrade current key epoch");
     Check(OriginPolicy.Matches("https://accounts.example.com/login", "https://accounts.example.com/another") && !OriginPolicy.Matches("https://example.com", "https://example.com.evil.test") && !OriginPolicy.Matches("https://example.com", "https://example-login.com") && !OriginPolicy.Matches("https://example.com", "http://example.com"), "origin policy rejects lookalikes / insecure scheme / different subdomain");
     Check(!OriginPolicy.Matches("https://example.com", "https://evil.test@example.com") && !OriginPolicy.Matches("https://example.com", "https://example.com:8443"), "embedded credentials and custom ports rejected");
+    Check(OriginPolicy.LooksLikeSavedHostname("paypa1.com",["paypal.com"]) &&
+        OriginPolicy.LooksLikeSavedHostname("paypal.com.phish.test",["paypal.com"]) &&
+        OriginPolicy.LooksLikeSavedHostname("xn--example-fra.test",["paypal.com"]) &&
+        !OriginPolicy.LooksLikeSavedHostname("github.com",["github.com"]) &&
+        !OriginPolicy.LooksLikeSavedHostname("unrelated.example",["github.com"]),
+        "phishing warning detects punycode, lookalike edits and fake hostname prefixes");
+    Check(BrowserAutofillProtocol.Validate(new BrowserAutofillRequest {
+        Op = "update", Origin = "https://github.com", EntryId = Guid.NewGuid().ToString(),
+        Username = "member", Password = "RandomNewSecret12!AB" }) == "github.com",
+        "browser password update validates exact HTTPS host and saved entry identity");
+
     Check(BrowserAutofillProtocol.Validate(new BrowserAutofillRequest { Op="list", Origin="https://accounts.example.com" })=="accounts.example.com",
         "native browser requests accept exact HTTPS origin");
     foreach (string invalid in new[] { "http://accounts.example.com", "https://evil.test@accounts.example.com",
