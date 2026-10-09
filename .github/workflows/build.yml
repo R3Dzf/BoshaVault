@@ -100,12 +100,14 @@ jobs:
       - name: Test Chrome and Edge native host registration
         shell: pwsh
         run: |
-          powershell -NoProfile -ExecutionPolicy Bypass -File dist/windows/Install-BrowserAutofill.ps1 -Browser Chrome -ExtensionId 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' -AppFolder dist/windows
+          powershell -NoProfile -ExecutionPolicy Bypass -File dist/windows/Install-BrowserAutofill.ps1 -Browser Chrome -ExtensionId 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
           powershell -NoProfile -ExecutionPolicy Bypass -File dist/windows/Install-BrowserAutofill.ps1 -Browser Edge -ExtensionId 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' -AppFolder dist/windows
           $hostManifest = Join-Path $env:LOCALAPPDATA 'BoshaVault/NativeMessaging/com.boshavault.desktop.json'
           $saved = Get-Content $hostManifest -Raw | ConvertFrom-Json
           if (@($saved.allowed_origins).Count -ne 2) { throw 'Expected two allowed browser extension origins' }
           if ($saved.path -notlike '*BoshaVault.NativeHost.exe') { throw 'Native host path missing' }
+          $expectedHost = (Resolve-Path 'dist/windows/BoshaVault.NativeHost.exe').Path
+          if ($saved.path -ne $expectedHost) { throw "Auto-detected AppFolder is incorrect: $($saved.path)" }
           $chromeReg=(Get-Item 'HKCU:/Software/Google/Chrome/NativeMessagingHosts/com.boshavault.desktop').GetValue('')
           $edgeReg=(Get-Item 'HKCU:/Software/Microsoft/Edge/NativeMessagingHosts/com.boshavault.desktop').GetValue('')
           if ($chromeReg -ne $hostManifest -or $edgeReg -ne $hostManifest) { throw 'Native host registry registration mismatch' }
