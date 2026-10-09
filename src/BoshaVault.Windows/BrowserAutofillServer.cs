@@ -34,7 +34,7 @@ internal sealed class BrowserAutofillServer : IDisposable
                     using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
                     timeout.CancelAfter(TimeSpan.FromSeconds(45));
                     var request = await BrowserAutofillProtocol.ReadAsync<BrowserAutofillRequest>(pipe, timeout.Token).ConfigureAwait(false);
-                    if (request.Op == "save") timeout.CancelAfter(TimeSpan.FromSeconds(120));
+                    if (request.Op is "save" or "capture" or "update") timeout.CancelAfter(TimeSpan.FromSeconds(120));
                     BrowserAutofillResponse response = await dispatcher.InvokeAsync(() => handler(request),
                         DispatcherPriority.Normal, timeout.Token).Task.ConfigureAwait(false);
                     await BrowserAutofillProtocol.WriteAsync(pipe, response, timeout.Token).ConfigureAwait(false);
