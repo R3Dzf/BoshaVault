@@ -28,7 +28,7 @@ public partial class MainWindow
             {
                 // The extension never persists generated passwords. This dialog
                 // is the mandatory review/consent boundary before storing one.
-                int stamp = generation;
+                int saveStamp = generation;
                 BringToFront();
                 var dialog = new FormDialog(this, "Save generated login", 510);
                 dialog.Label("Verified destination: https://" + host + "\nThis creates a new entry; it does not register an account at the site.");
@@ -71,7 +71,7 @@ public partial class MainWindow
                 dialog.Action("Cancel", () => dialog.DialogResult = false);
                 bool approved = dialog.ShowDialog() == true;
                 user.Clear();title.Clear();
-                if (!approved || generation != stamp || session != activeSession || !activeSession.IsOpen)
+                if (!approved || generation != saveStamp || session != activeSession || !activeSession.IsOpen)
                     return new() { Status = "denied", Message = "Saving was canceled. The website form still contains the generated password." };
                 var item = new VaultEntry {
                     Title = chosenTitle, Username = chosenUser, Password = request.Password,
