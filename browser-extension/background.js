@@ -25,31 +25,32 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     const page = new URL(sender.url || sender.tab.url);
     const tabUrl = new URL(sender.tab.url);
     if (page.protocol !== "https:" || page.origin !== tabUrl.origin ||
-        page.hostname !== tabUrl.hostname || !["list", "fill", "open", "save"].includes(message?.op)) {
+        page.hostname !== tabUrl.hostname || !["list", "fill", "open", "save", "update"].includes(message?.op)) {
       return {status: "denied"};
     }
-    if (message.op === "fill" && !/^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(message.entryId || "")) {
+    if (["fill","update"].includes(message.op) && !/^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(message.entryId || "")) {
       return {status: "denied"};
     }
-    if (message.op === "save" && (
+    if (["save","update"].includes(message.op) && (
       typeof message.username !== "string" || message.username.length > 2000 ||
       /[\r\n\0]/.test(message.username) ||
       typeof message.password !== "string" || message.password.length < 16 ||
       message.password.length > 128 || !/^[!-~]+$/.test(message.password))) {
       return {status:"denied", message:"Invalid generated password or username."};
     }
-    if (["fill","save"].includes(message.op) && !(await sameActiveDocument(sender,page.origin)))
+    if (["fill","save","update"].includes(message.op) && !(await sameActiveDocument(sender,page.origin)))
       return {status:"denied", message:"Browser page changed. Retry on the intended website."};
     const answer = await chrome.runtime.sendNativeMessage(NATIVE, {
-      op: message.op, origin: page.origin, entryId: message.op === "fill" ? message.entryId : "",
-      username: message.op === "save" ? message.username : "",
-      password: message.op === "save" ? message.password : ""
+      op: message.op, origin: page.origin, entryId: ["fill","update"].includes(message.op) ? message.entryId : "",
+      username: ["save","update"].includes(message.op) ? message.username : "",
+      password: ["save","update"].includes(message.op) ? message.password : ""
     });
     if (!answer || typeof answer.status !== "string") return {status: "unavailable"};
     // Navigation during Windows confirmation must not deliver a secret to a
     // different page, even in the same tab.
     if ((message.op === "fill" && answer.status === "filled") ||
-        (message.op === "save" && answer.status === "saved")) {
+        (message.op === "save" && answer.status === "saved") ||
+        (message.op === "update" && answer.status === "updated")) {
       if (!(await sameActiveDocument(sender,page.origin))) {
         return {status:"denied",message:"The tab navigated during approval. Secret was not delivered."};
       }
