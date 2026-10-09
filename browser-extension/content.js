@@ -256,11 +256,9 @@
     }catch {message("Could not connect to BoshaVault Windows. Check that it is open and unlocked.");}
   }
   let debounce;
-  document.addEventListener("focusin",event=>{
-    // Clicking inside our shadow popup retargets to its host: don't close it.
-    if(frame && (event.target===frame || frame.contains(event.target)))return;
-    const ctx=credentialContext(event.target);
-    if(!ctx){hide();focus=null;return;}
+  function showForInput(input) {
+    const ctx=credentialContext(input);
+    if(!ctx){hide();focus=null;return false;}
     focus=ctx;origin=location.origin;
     const ticket=++sequence;
     hide();clearTimeout(debounce);
@@ -269,8 +267,33 @@
       try {response=await chrome.runtime.sendMessage({op:"list"});}
       catch{response={status:"unavailable"};}
       if(ticket===sequence && focus===ctx && location.origin===origin)render(ctx,response);
-    },140);
+    },100);
+    return true;
+  }
+  document.addEventListener("focusin",event=>{
+    if(frame && (event.target===frame || frame.contains(event.target)))return;
+    showForInput(event.target);
   },true);
+  chrome.runtime.onMessage.addListener((message,_sender,reply)=>{
+    if(message?.op==="showSuggestions"){
+      const candidates=[document.activeElement,
+        ...document.querySelectorAll('input[type="password"],input[type="email"],input[type="text"],input[type="tel"]')];
+      const candidate=candidates.find(el=>credentialContext(el));
+      if(!candidate){reply({status:"no-fields"});return;}
+      showForInput(candidate);
+      reply({status:"ok"});
+      return;
+    }
+    if(message?.op==="captureSite") {
+      // Only the user-initiated extension popup sends this request.
+      const usernameInput=[...document.querySelectorAll("input")].find(isUsername);
+      const username=(usernameInput?.value||"").trim();
+      chrome.runtime.sendMessage({op:"capture",username})
+        .then(response=>reply({status:response?.status||"error",message:response?.message||""}))
+        .catch(()=>reply({status:"unavailable",message:"Windows app is disconnected."}));
+      return true;
+    }
+  });
   document.addEventListener("pointerdown",event=>{
     // Closed Shadow DOM retargets popup clicks to the host element. Hiding on
     // host pointerdown removed the buttons before the click handler could run.
