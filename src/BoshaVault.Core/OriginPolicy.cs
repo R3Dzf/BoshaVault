@@ -17,7 +17,16 @@ public static class OriginPolicy
     }
     public static bool Matches(string storedUrl, string requestedUrl)
     {
-        try { return ExactHost(storedUrl) == ExactHost(requestedUrl); }
+        try
+        {
+            string stored = ExactHost(storedUrl), requested = ExactHost(requestedUrl);
+            if (stored == requested) return true;
+            // Only the literal www. label may be normalized. This is not
+            // suffix matching: accounts.example.com is NOT example.com.
+            string Plain(string host) => host.StartsWith("www.", StringComparison.Ordinal)
+                ? host[4..] : host;
+            return Plain(stored) == Plain(requested);
+        }
         catch (VaultException) { return false; }
     }
     // Heuristic warning only; never authorizes Autofill or replaces exact-match
