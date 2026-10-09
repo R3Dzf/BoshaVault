@@ -24,6 +24,26 @@ public partial class MainWindow
             var activeSession = session;
             if (activeSession == null || !activeSession.IsOpen)
                 return new() { Status = "locked", Message = "Unlock BoshaVault on Windows first." };
+            if (request.Op == "capture")
+            {
+                int captureStamp=generation;
+                BringToFront();
+                var captured=FormDialog.Edit(this,null,"https://"+host+"/",request.Username);
+                if(captured==null)
+                    return new(){Status="denied",Message="Saving a new login was canceled."};
+                if(generation!=captureStamp || session!=activeSession || !activeSession.IsOpen ||
+                   !OriginPolicy.Matches(captured.Url,request.Origin))
+                    return new(){Status="denied",Message="Site changed or vault locked during save."};
+                if(activeSession.Data.Entries.Any(e=>!e.Deleted && e.Url.Length>0 &&
+                    e.Username.Equals(captured.Username,StringComparison.OrdinalIgnoreCase) &&
+                    OriginPolicy.Matches(e.Url,captured.Url)))
+                    return new(){Status="denied",Message="That account already exists; edit it in BoshaVault."};
+                activeSession.Upsert(captured);
+                selected=captured;
+                Refresh();
+                lastActivity=DateTime.UtcNow;
+                return new(){Status="saved",Message="Saved the current site to your encrypted vault."};
+            }
             if (request.Op == "update")
             {
                 var existing=activeSession.Data.Entries.FirstOrDefault(e =>
