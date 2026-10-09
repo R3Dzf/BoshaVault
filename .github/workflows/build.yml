@@ -7,6 +7,12 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      signed_release:
+        description: 'Use permanent Android signing key (requires repository secrets)'
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -77,9 +83,10 @@ jobs:
       - name: Build and verify signed Android APK
         shell: bash
         env:
-          STABLE_KEYSTORE_BASE64: ${{ secrets.BOSHAVAULT_ANDROID_KEYSTORE_BASE64 }}
-          STABLE_KEYSTORE_PASSWORD: ${{ secrets.BOSHAVAULT_ANDROID_KEYSTORE_PASSWORD }}
-          STABLE_KEY_ALIAS: ${{ secrets.BOSHAVAULT_ANDROID_KEY_ALIAS }}
+          SIGNED_RELEASE: ${{ (github.event_name == 'workflow_dispatch' && inputs.signed_release && github.ref == 'refs/heads/main') || startsWith(github.ref, 'refs/tags/v') }}
+          STABLE_KEYSTORE_BASE64: ${{ ((github.event_name == 'workflow_dispatch' && inputs.signed_release && github.ref == 'refs/heads/main') || startsWith(github.ref, 'refs/tags/v')) && secrets.BOSHAVAULT_ANDROID_KEYSTORE_BASE64 || '' }}
+          STABLE_KEYSTORE_PASSWORD: ${{ ((github.event_name == 'workflow_dispatch' && inputs.signed_release && github.ref == 'refs/heads/main') || startsWith(github.ref, 'refs/tags/v')) && secrets.BOSHAVAULT_ANDROID_KEYSTORE_PASSWORD || '' }}
+          STABLE_KEY_ALIAS: ${{ ((github.event_name == 'workflow_dispatch' && inputs.signed_release && github.ref == 'refs/heads/main') || startsWith(github.ref, 'refs/tags/v')) && secrets.BOSHAVAULT_ANDROID_KEY_ALIAS || '' }}
         run: |
           set -euo pipefail
           STORE="$RUNNER_TEMP/boshavault-signing.p12"
@@ -90,8 +97,8 @@ jobs:
             SIGNING_ALIAS="$STABLE_KEY_ALIAS"
             NOTICE='Signed with the project-provided signing certificate. Verify its certificate fingerprint before updating an installed app.'
           else
-            if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-              echo '::error::Version-tagged builds require all three Android signing secrets. Refusing to release a temporary-key APK.'
+            if [[ "$SIGNED_RELEASE" == "true" ]]; then
+              echo '::error::Signed releases require all three Android signing secrets. Refusing to release a temporary-key APK.'
               exit 1
             fi
             SIGNING_PASSWORD="$(openssl rand -hex 24)"
