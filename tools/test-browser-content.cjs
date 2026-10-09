@@ -29,8 +29,10 @@ class HTMLInputElement extends FakeElement { constructor(type){super("input");th
 class HTMLFormElement extends FakeElement {
   constructor(){super("form");this.fields=[]; }
   querySelectorAll(selector){
+    if(selector==="[formaction]")return [];
+    if(selector.startsWith("input:not"))return this.fields.filter(f=>f.type!=="password");
     if(selector.includes("password"))return this.fields.filter(f=>f.type==="password");
-    return this.fields.filter(f=>f.type!=="password");
+    return this.fields;
   }
   getAttribute(){return null;}
 }
