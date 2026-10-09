@@ -62,6 +62,51 @@ try
         await Task.Delay(300); File.Delete(exchange + "/pairing.txt");
         return;
     }
+    // Chrome/Bitwarden CSV imports never expose secrets to logs, and commits are atomic.
+    string importFile = temp + "/csv-test.boshavault";
+    using (var importSession = await VaultSession.Create(importFile, password, devA))
+    {
+        string chromeCsv = "name,url,username,password,note\r\n" +
+            "\"Example, Login\",https://accounts.example.com/login,demo@example.com,Strong!Pass123456789,\"line one\nline two\"\r\n" +
+            "Spoof,https://accounts.example.com.attacker.test,user@example.com,Strong!Pass123456789,Nope\r\n" +
+            "Duplicate,https://accounts.example.com/other,demo@example.com,Strong!Pass123456789,Same\r\n" +
+            "Insecure,http://example.com,bad@example.com,Strong!Pass123456789,Nope\r\n";
+        byte[] inputCsv = Encoding.UTF8.GetBytes(chromeCsv);
+        using var plan = CredentialCsvImport.Prepare(inputCsv, "chrome", importSession.Data.Entries);
+        Check(plan.Entries.Count == 2 && plan.SkippedDuplicate == 1 && plan.SkippedUnsafe == 1,
+            "CSV parser supports quoted multiline fields and skips duplicate/insecure records");
+        Check(plan.Entries[0].Notes == "line one\nline two",
+            "CSV preserves quoted note newlines without corrupting fields");
+        int beforeImport = importSession.Data.Entries.Count;
+        Check(importSession.ImportEntries(plan.Entries) == 2 &&
+            importSession.Data.Entries.Count == beforeImport + 2,
+            "validated browser CSV entries commit atomically into encrypted vault");
+        using var again = CredentialCsvImport.Prepare(inputCsv, "chrome", importSession.Data.Entries);
+        Check(again.Entries.Count == 0 && again.SkippedDuplicate == 3,
+            "reimport prevents overwriting or duplicating saved logins");
+        byte[] beforeBadImport = importSession.ExportEncrypted();
+        var malformed = new VaultEntry { Id = importSession.Data.Entries[0].Id,
+            Title = "Bad", Username = "xx", Password = "StrongPassword1234", Url = "https://example.com/" };
+        RejectNow(() => importSession.ImportEntries([malformed]), "duplicate entry identifier aborts import");
+        Check(beforeBadImport.SequenceEqual(importSession.ExportEncrypted()),
+            "failed atomic import cannot partially rewrite vault file");
+        RejectNow(() => CredentialCsvImport.Prepare(
+            Encoding.UTF8.GetBytes("name,url,username,password\n\"unterminated,https://example.com,x,y"),
+            "chrome", []), "malformed quote CSV rejected");
+        RejectNow(() => CredentialCsvImport.Prepare(
+            Encoding.UTF8.GetBytes("folder,favorite,type,name,notes,fields,reprompt,login_uri,login_username,login_password,login_totp\n" +
+            "Private,0,login,TOTP,, ,0,https://example.com,a@example.com,PASSWORD,TOTP_SECRET"),
+            "bitwarden", []), "Bitwarden 2FA fields refuse silent data loss");
+        string bw = "folder,favorite,type,name,notes,fields,reprompt,login_uri,login_username,login_password,login_totp\n" +
+            "My Folder,1,login,Service,Notes,,0,https://example.org,hello@example.org,GoodLongPassword1234!,\n" +
+            ",0,card,Bank,,,,,,,,\n";
+        using var bitwardenPlan = CredentialCsvImport.Prepare(Encoding.UTF8.GetBytes(bw),
+            "bitwarden", importSession.Data.Entries);
+        Check(bitwardenPlan.Entries.Count == 1 && bitwardenPlan.SkippedNonLogin == 1 &&
+            bitwardenPlan.Entries[0].Folder == "My Folder",
+            "Bitwarden import respects login-only type and folder metadata");
+        CryptographicOperations.ZeroMemory(inputCsv);
+    }
     string path = temp + "/a.boshavault";
     using var a = await VaultSession.Create(path, password, devA);
     var entry = new VaultEntry { Title = "Demo Mail", Username = "demo@example.com", Password = "OnlySyntheticTestSecret-7!", Url = "https://example.com/login", Notes = "ملاحظات تجريبية", Favorite = true };
