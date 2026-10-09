@@ -19,7 +19,8 @@ function setup({changed=false,tabOrigin=host}={}) {
       async sendNativeMessage(name,message){
         nativeCalls++;
         assert.equal(name,"com.boshavault.desktop");
-        return {status:"filled",username:"fakeuser",password:"fake-password-to-protect"};
+        return message.op==="update" ? {status:"updated"} :
+          {status:"filled",username:"fakeuser",password:"fake-password-to-protect"};
       }
     },
     webNavigation:{async getFrame(){
@@ -64,7 +65,7 @@ function setup({changed=false,tabOrigin=host}={}) {
   scenario=setup();
   reply=await scenario.request({op:"update",entryId,
     username:"user@example.com",password:"CorrectStrongRandom1234!"});
-  assert.equal(reply.status,"filled","synthetic transport response passes when document is live");
+  assert.equal(reply.status,"updated","user-approved synthetic password update passes when document is live");
   assert.equal(scenario.nativeCalls(),1);
   console.log("PASS Chromium extension document identity, navigation race, origin, and invalid ID checks");
 })().catch(e=>{console.error(e);process.exitCode=1;});
