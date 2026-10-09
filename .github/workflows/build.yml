@@ -67,13 +67,13 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Set up Android SDK command-line tools
-        uses: android-actions/setup-android@v3
       - name: Install Android SDK 35 platform and build tools
         shell: bash
         run: |
           set -euo pipefail
-          sdkmanager --install 'platforms;android-35' 'build-tools;35.0.0'
+          SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager -print -quit)"
+          test -n "$SDKMANAGER" || { echo 'sdkmanager not found under ANDROID_HOME'; exit 1; }
+          "$SDKMANAGER" --install 'platforms;android-35' 'build-tools;35.0.0'
       - name: Build and verify signed Android APK
         shell: bash
         env:
