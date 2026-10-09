@@ -17,7 +17,7 @@ public static class TotpEngine
         List<byte> data=[];
         foreach(char c in value)
         {
-            int n=c<='Z'?c-'A':c-'2'+26;
+            int n=(c>='A' && c<='Z')?c-'A':c-'2'+26;
             buffer=(buffer<<5)|n;
             bits+=5;
             if(bits>=8)
