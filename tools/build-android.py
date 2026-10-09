@@ -29,7 +29,7 @@ def main():
   manifest=work/'AndroidManifest.xml'
   manifest.write_text(xml,encoding='utf-8')
  run(tools/'aapt2','compile','--dir',app/'res','-o',res)
- run(tools/'aapt2','link','-o',compiled,'--manifest',manifest,'-I',android,'--min-sdk-version','28','--target-sdk-version','35','--version-code','7','--version-name','1.3.3-autofill-launch-fix',res)
+ run(tools/'aapt2','link','-o',compiled,'--manifest',manifest,'-I',android,'--min-sdk-version','28','--target-sdk-version','35','--version-code','8','--version-name','1.3.4-autofill-result-fix',res)
  classpath=os.pathsep.join(str(DEPS/name) for name in ('bcprov.jar','zxing-core.jar'))
  run('java','-jar',DEPS/'ecj.jar','-1.8','-warn:none','-bootclasspath',str(android)+os.pathsep+str(tools/'core-lambda-stubs.jar'),'-cp',classpath,'-d',classes,*sorted((app/'java').rglob('*.java')))
  jar=work/'app.jar'
