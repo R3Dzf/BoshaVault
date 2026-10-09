@@ -9,6 +9,7 @@ public sealed class DesktopPreferences
     public int Version { get; set; } = 1;
     public int AutoLockMinutes { get; set; } = 2;
     public bool TrayTipShown { get; set; }
+    public bool BrowserAutofillEnabled { get; set; } = true;
     private static readonly JsonSerializerOptions Options = new() { UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow, MaxDepth = 4 };
     public static bool ValidTimeout(int minutes) => minutes is 1 or 2 or 5 or 10;
 
