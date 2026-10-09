@@ -11,11 +11,11 @@
 | Supabase owner-scoped RLS schema | Migration committed, **not deployed** | Dedicated project, org/cost approval, adversarial two-account SQL/API tests |
 | Supabase authenticated REST transfer | Windows/.NET core transport with synthetic tests | Secure Auth login, protected refresh tokens, merge orchestration, Android implementation |
 | TOTP | RFC 6238 engine with test vectors, **not wired to vault** | Secret field format, encrypted persistence, QR provisioning, clock drift and backup tests |
-| Phishing-resistant Autofill | Exact HTTPS-host matching currently, other protections planned | Unicode IDN/homograph analysis, per-site trust, extension origin hardening |
-| Smart Save & credential updates | Generator reviewed save exists; comprehensive detection absent | Track successful login/signup, password-change form, duplicate safe update, never auto-submit |
+| Phishing-resistant Autofill | Exact HTTPS-host matching + generic near-match/IDN warnings, form action origin checks, and Chrome document ID checks implemented in preview | Threat model malicious page JavaScript, compromised browser, cross-origin AJAX, iframe/re-auth, and user spoofing; independent audit |
+| Smart Save & credential updates | User-driven Generate, Save and Update Existing with explicit Windows review implemented | Automated login/signup success detection and safe change-password form handling are not yet implemented |
 | Windows Hello | Not implemented | User verification, Windows protected-key design, recovery fallback, tested hardware |
 | Passkeys/WebAuthn | Not implemented | Browser protocol integration, RP ID isolation, device/private-key secure storage, recovery |
-| Import from Chrome/Bitwarden | Not implemented | Validated CSV parsers, duplicate confirmation, plaintext file safety warning, no secret logs |
+| Import from Chrome/Bitwarden | Windows 1.5 preview: bounded local CSV parser, duplicate/unsafe row filtering, preview, atomic encrypted import | More providers/formats and Android direct import need tests; Bitwarden records with TOTP/custom fields are refused rather than silently lost |
 | Publisher-signed Windows releases | Not implemented (no publisher signing certificate) | Real certificate, Authenticode verification, reproducible build and signed update manifest |
 | Auto updates | Not implemented | Signed manifest verification, rollback safeguards, transparent consent and install recovery |
 | Device approvals/revocation | Not implemented for cloud | Per-device cryptographic enroll, revoke Supabase sessions, cloud-key rekey and offline snapshot warnings |
