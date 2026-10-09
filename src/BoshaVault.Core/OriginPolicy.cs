@@ -1,3 +1,5 @@
+using Nager.PublicSuffix;
+using Nager.PublicSuffix.RuleProviders;
 using System.Globalization;
 
 namespace BoshaVault.Core;
@@ -29,6 +31,53 @@ public static class OriginPolicy
         }
         catch (VaultException) { return false; }
     }
+    public enum DomainRelation { None, Exact, Related }
+
+    // The pinned offline PSL includes PRIVATE rules, e.g. github.io; two
+    // independent tenants must NEVER be grouped by naïve last-two-label logic.
+    private static readonly Lazy<DomainParser?> PublicSuffixParser = new(() =>
+    {
+        try
+        {
+            string listPath=Path.Combine(AppContext.BaseDirectory,"public_suffix_list.dat");
+            if(!File.Exists(listPath))return null; // fail closed: exact matches still work
+            var provider=new LocalFileRuleProvider(listPath);
+            provider.BuildAsync().GetAwaiter().GetResult();
+            return new DomainParser(provider);
+        }
+        catch { return null; } // never turn PSL unavailability into permissive matching
+    },System.Threading.LazyThreadSafetyMode.ExecutionAndPublication);
+
+    public static string? RegistrableDomain(string host)
+    {
+        if(host.Length is < 4 or > 253 || host.EndsWith('.'))return null;
+        try
+        {
+            var domain=PublicSuffixParser.Value?.Parse(host);
+            string? registrable=domain?.RegistrableDomain;
+            if(string.IsNullOrWhiteSpace(registrable))return null;
+            registrable=registrable.ToLowerInvariant();
+            // Sanity: parser must never permit a partial-string match.
+            if(host!=registrable && !host.EndsWith("."+registrable,StringComparison.Ordinal))
+                return null;
+            return registrable;
+        }
+        catch { return null; }
+    }
+    public static DomainRelation Relation(string storedUrl,string requestedUrl)
+    {
+        try
+        {
+            string saved=ExactHost(storedUrl),requested=ExactHost(requestedUrl);
+            if(Matches(storedUrl,requestedUrl))return DomainRelation.Exact;
+            string? a=RegistrableDomain(saved),b=RegistrableDomain(requested);
+            if(a!=null && b!=null && string.Equals(a,b,StringComparison.Ordinal))
+                return DomainRelation.Related;
+        }
+        catch(VaultException) { }
+        return DomainRelation.None;
+    }
+
     // Heuristic warning only; never authorizes Autofill or replaces exact-match
     // policy. No saved hostname is disclosed to an untrusted browser site.
     public static bool LooksLikeSavedHostname(string requestedHost,IEnumerable<string> savedHosts)
