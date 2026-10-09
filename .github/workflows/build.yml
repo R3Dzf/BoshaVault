@@ -78,8 +78,10 @@ jobs:
           node --check browser-extension/background.js
           node --check browser-extension/content.js
           node --check browser-extension/password-utils.js
+          node --check browser-extension/popup.js
           node tools/test-browser-generator.cjs
           node tools/test-browser-security.cjs
+          node tools/test-browser-content.cjs
           Get-Content browser-extension/manifest.json -Raw | ConvertFrom-Json | Out-Null
           $tokens = $null
           $parseErrors = $null
