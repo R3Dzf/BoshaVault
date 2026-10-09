@@ -288,10 +288,19 @@
       // Only the user-initiated extension popup sends this request.
       const usernameInput=[...document.querySelectorAll("input")].find(isUsername);
       const username=(usernameInput?.value||"").trim();
+      // Reply before Windows opens a modal: the browser action popup closes
+      // when the user switches to Windows, but the content script remains alive.
+      reply({status:"started"});
       chrome.runtime.sendMessage({op:"capture",username})
-        .then(response=>reply({status:response?.status||"error",message:response?.message||""}))
-        .catch(()=>reply({status:"unavailable",message:"Windows app is disconnected."}));
-      return true;
+        .then(response=>{
+          if(response?.status!=="saved") {
+            // No credentials are included in this UI status.
+            const ctx=credentialContext(document.activeElement);
+            if(ctx){title(ctx);message(response?.message||"Site capture was canceled.");}
+          }
+        })
+        .catch(()=>{});
+      return;
     }
   });
   document.addEventListener("pointerdown",event=>{
