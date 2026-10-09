@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "BoshaVault Autofill (Local Preview)",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "User-approved local autofill through the BoshaVault Windows app. No cloud service.",
   "permissions": ["nativeMessaging", "webNavigation", "activeTab"],
   "host_permissions": ["https://*/*"],
