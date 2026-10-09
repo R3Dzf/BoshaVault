@@ -163,7 +163,7 @@
     const username=(ctx.user?.value||"").trim();
     line("Username/email: "+(username || "Not found here — enter it in Windows before saving."),"sub");
     button("Save username + password in BoshaVault",()=>save(ctx),true);
-    for(const entry of savedMatches.slice(0,5)) {
+    for(const entry of savedMatches.filter(e=>!e.related).slice(0,5)) {
       if(typeof entry.id!=="string" || typeof entry.username!=="string")continue;
       button("Update saved password · "+entry.username,()=>updatePassword(ctx,entry.id));
     }
@@ -222,11 +222,19 @@
       line("⚠️ "+reply.warning);
     savedMatches=reply?.status==="ok" && Array.isArray(reply.accounts) ? reply.accounts.slice(0,10) : [];
     if(reply?.status==="ok" && Array.isArray(reply.accounts)) {
-      for(const account of reply.accounts.slice(0,10)){
+      for(const account of reply.accounts.slice(0,20)){
         if(!account || typeof account.id!=="string" || typeof account.username!=="string")continue;
-        button((account.title||"Saved login")+" · "+account.username,()=>fill(ctx,account.id));
+        const exact = account.related !== true;
+        const savedHost = typeof account.website === "string" ? account.website : "";
+        const hint = exact ? "✓ Exact match" : "↗ Related domain · Review before filling";
+        button(hint+" · "+(account.title||"Saved login")+" · "+account.username+
+          (exact?"":" · saved: "+savedHost),()=>fill(ctx,account.id),exact);
       }
-      if(reply.accounts.length)line("Want to create a different account instead?","sub");
+      if(reply.accounts.some(x=>x?.related===true)){
+        line("Related accounts are from another subdomain of this site's registrable domain. " +
+          "Only fill after checking both URLs in the Windows confirmation.","sub");
+      }
+      if(reply.accounts.length)line("Creating a different account?","sub");
       else line("No saved accounts for this HTTPS host. Try saving this website, or check the saved website address.","sub");
     } else if(reply?.status==="locked"){
       button("Unlock BoshaVault on Windows",async()=>{
