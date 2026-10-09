@@ -43,8 +43,9 @@ public sealed class FormDialog : Window
         Label(label);
         var box = new TextBox { Text = initial, MaxLength = max,
             Margin = new Thickness(0, 0, 0, 8), MinHeight = 0,
-            Height = multi ? 76 : 38, FontSize = 13,
-            Padding = new Thickness(10, multi ? 9 : 7, 10, multi ? 9 : 7),
+            MinHeight = multi ? 110 : 50, FontSize = 15,
+            VerticalAlignment = VerticalAlignment.Stretch,
+            Padding = new Thickness(13, multi ? 10 : 0, 13, multi ? 10 : 0),
             AcceptsReturn = multi,
             VerticalContentAlignment = multi ? VerticalAlignment.Top : VerticalAlignment.Center,
             TextWrapping = multi ? TextWrapping.Wrap : TextWrapping.NoWrap };
@@ -54,8 +55,9 @@ public sealed class FormDialog : Window
     {
         Label(label);
         var p = new PasswordBox { MaxLength = 1024,
-            Height = 38, MinHeight = 0, FontSize = 13,
-            Padding = new Thickness(10, 7, 10, 7),
+            MinHeight = 50, FontSize = 15,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            Padding = new Thickness(13, 0, 13, 0),
             Margin = new Thickness(0, 0, 0, 8) };
         Body.Children.Add(p); return p;
     }
@@ -128,7 +130,8 @@ public sealed class FormDialog : Window
 
         dialog.Label("Password");
         var password = new PasswordBox { Password = entry.Password, MaxLength=4096,
-            Height=38, MinHeight=0, FontSize=13, Padding=new Thickness(10,7,10,7),
+            MinHeight=50, FontSize=15, VerticalContentAlignment=VerticalAlignment.Center,
+            Padding=new Thickness(13,0,13,0),
             Margin=new Thickness(0,0,0,6) };
         dialog.Body.Children.Add(password);
         var helpers = new Grid { Margin=new Thickness(0,0,0,8) };
