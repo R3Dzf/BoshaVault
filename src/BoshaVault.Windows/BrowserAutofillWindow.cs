@@ -138,10 +138,15 @@ public partial class MainWindow
                 lastActivity = DateTime.UtcNow;
                 return new() { Status = "saved", Message = "Saved to your encrypted BoshaVault vault. Complete signup on the website separately." };
             }
+            // Exact matches are always first. Related eTLD+1 accounts are
+            // SUGGESTIONS only, never silently filled or used for updates.
             var matches = activeSession.Data.Entries
-                .Where(e => !e.Deleted && e.Password.Length != 0 && e.Url.Length > 0 &&
-                    OriginPolicy.Matches(e.Url, request.Origin))
-                .OrderBy(e => e.Title, StringComparer.OrdinalIgnoreCase).Take(10).ToArray();
+                .Where(e => !e.Deleted && e.Password.Length != 0 && e.Url.Length > 0)
+                .Select(e => (Entry:e, Relation:OriginPolicy.Relation(e.Url,request.Origin)))
+                .Where(x => x.Relation != OriginPolicy.DomainRelation.None)
+                .OrderBy(x => x.Relation == OriginPolicy.DomainRelation.Exact ? 0 : 1)
+                .ThenBy(x => x.Entry.Title,StringComparer.OrdinalIgnoreCase)
+                .Take(20).ToArray();
             if (request.Op == "list")
             {
                 var hosts=activeSession.Data.Entries.Where(e=>!e.Deleted && e.Url.Length>0)
@@ -155,28 +160,43 @@ public partial class MainWindow
                     Warning=suspicious
                         ? "Caution: this domain may resemble another saved login, or use international characters. Verify the exact address before creating an account."
                         : "",
-                    Accounts=matches.Select(e=>new BrowserAccount {
-                        Id=e.Id,Title=e.Title,Username=e.Username }).ToList()
+                    Accounts=matches.Select(x=>new BrowserAccount {
+                        Id=x.Entry.Id,Title=x.Entry.Title,Username=x.Entry.Username,
+                        Website=OriginPolicy.ExactHost(x.Entry.Url),
+                        Related=x.Relation==OriginPolicy.DomainRelation.Related
+                    }).ToList()
                 };
             }
-            var target = matches.FirstOrDefault(e => string.Equals(e.Id, request.EntryId, StringComparison.Ordinal));
-            if (target == null) return new() { Status = "denied", Message = "No exact website match." };
+            var match = matches.FirstOrDefault(x => string.Equals(x.Entry.Id,request.EntryId,StringComparison.Ordinal));
+            if(match.Entry == null)
+                return new() { Status="denied",Message="No safe website match for this account." };
+            var target=match.Entry;
+            bool related=match.Relation==OriginPolicy.DomainRelation.Related;
+            string savedHost=OriginPolicy.ExactHost(target.Url);
 
             // Foreground notice must name the destination and account.
             int stamp = generation;
             BringToFront();
             bool allowed = MessageBox.Show(this,
-                "Allow this one-time fill?\n\nWebsite (exact HTTPS host): " + host +
+                (related ? "RELATED DOMAIN — EXTRA CAUTION\n\n" :
+                    "Allow this one-time fill?\n\n") +
+                "CURRENT browser site: https://" + host +
+                "\nSAVED login website: https://" + savedHost +
                 "\nSaved login: " + target.Title +
                 "\nUsername: " + target.Username +
-                "\n\nOnly approve if you are currently signing in at this website.\n" +
-                "BoshaVault will release the selected username and password to your browser.",
+                (related ? "\n\nThe saved and requested hosts are DIFFERENT but share a registrable domain. " +
+                    "Only click Yes if you independently trust BOTH sites and expect to use this login there. " +
+                    "Review the browser address bar carefully; this may disclose your password to the current site." :
+                    "\n\nOnly approve if you are currently signing in at this website.") +
+                "\n\nThis fills only after your explicit approval.",
                 "BoshaVault · Confirm browser Autofill", MessageBoxButton.YesNo,
                 MessageBoxImage.Question, MessageBoxResult.No) == MessageBoxResult.Yes;
             if (!allowed || generation != stamp || session != activeSession || !activeSession.IsOpen)
                 return new() { Status = "denied", Message = "Browser fill canceled." };
-            if (!OriginPolicy.Matches(target.Url, request.Origin))
-                return new() { Status = "denied", Message = "Origin changed." };
+            var verified=OriginPolicy.Relation(target.Url,request.Origin);
+            if(verified==OriginPolicy.DomainRelation.None ||
+               verified!=match.Relation)
+                return new(){Status="denied",Message="Domain trust relationship changed."};
             lastActivity = DateTime.UtcNow;
             return new() { Status = "filled", Username = target.Username, Password = target.Password };
         }
