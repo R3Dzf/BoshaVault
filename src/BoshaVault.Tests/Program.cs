@@ -231,6 +231,27 @@ try
         serializedBrowser.Contains(@"""username"":") &&
         serializedBrowser.Contains(@"""status"":"),
         "browser IPC exposes expected camelCase JSON response fields");
+    Check(OriginPolicy.Relation("https://www.google.com","https://myaccount.google.com")
+            ==OriginPolicy.DomainRelation.Related &&
+          OriginPolicy.Relation("https://google.com","https://www.google.com")
+            ==OriginPolicy.DomainRelation.Exact &&
+          OriginPolicy.Relation("https://accounts.example.co.uk","https://shop.example.co.uk")
+            ==OriginPolicy.DomainRelation.Related,
+        "offline public suffix list recognizes verified related HTTPS subdomains and www exact alias");
+    Check(OriginPolicy.Relation("https://alice.github.io","https://bob.github.io")
+            ==OriginPolicy.DomainRelation.None &&
+          OriginPolicy.Relation("https://google.com","https://google.com.evil.test")
+            ==OriginPolicy.DomainRelation.None &&
+          OriginPolicy.Relation("https://google.com","https://lookalike-google.com")
+            ==OriginPolicy.DomainRelation.None &&
+          OriginPolicy.Relation("https://myaccount.google.com","http://accounts.google.com")
+            ==OriginPolicy.DomainRelation.None,
+        "private suffix tenant isolation and phishing/replay/insecure origin deny related fill");
+    Check(OriginPolicy.Relation("https://foo.blogspot.com","https://bar.blogspot.com")
+            ==OriginPolicy.DomainRelation.None &&
+          OriginPolicy.Relation("https://alice.appspot.com","https://bob.appspot.com")
+            ==OriginPolicy.DomainRelation.None,
+        "PSL private suffixes never permit cross-tenant password matching");
     Check(OriginPolicy.LooksLikeSavedHostname("paypa1.com",["paypal.com"]) &&
         OriginPolicy.LooksLikeSavedHostname("paypal.com.phish.test",["paypal.com"]) &&
         OriginPolicy.LooksLikeSavedHostname("xn--example-fra.test",["paypal.com"]) &&
