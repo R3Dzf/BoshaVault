@@ -1,0 +1,57 @@
+# Security model and limits
+
+The program is a preview implementation. It has not undergone independent code review, penetration testing, native device validation, or a security audit. Strong primitives are necessary, but do not make the surrounding application invulnerable. Decryption is computationally difficult without the right keys and a strong passphrase; it is never honestly described as impossible.
+
+## What is encrypted
+
+Names, usernames, passwords, website URLs, notes, folders, favorites, trash contents, revision vectors and app approvals all live inside the authenticated encrypted payload. The visible envelope contains format/version, random vault ID, key epoch, KDF settings and salt, ciphertext lengths, nonces, and authentication tags. These reveal existence, size and changes of a vault, not the credential contents. The local device ID is public metadata.
+
+The normalized UTF-8 master passphrase derives a 32-byte wrapping key using Argon2id version 1.3, 64 MiB, 3 passes, 4 lanes and a random 16-byte salt. A separately generated 32-byte vault key encrypts the payload with AES-256-GCM. That key is wrapped using AES-256-GCM under the derived wrapping key. Every encryption gets a fresh 12-byte random nonce and 16-byte tag. Nonce reuse is not deliberately possible through the API; random collisions remain probabilistically possible. The wrapper and payload have domain-separated associated data binding vault identity, key epoch, KDF parameters/salt and wrapper fields.
+
+Master passwords are not stored. Password changes generate a new salt and a fresh random vault key, reencrypt all current contents and advance the authenticated key epoch. The prior local encrypted snapshot is removed. External old backups are not revoked, and deleted passwords may survive there. The old vault key is tested to fail against the newly rotated current file. Simultaneous independent rotations at the same epoch refuse automatic merge.
+
+File parsing rejects duplicate/unknown properties, unknown versions, unsafe KDF parameters, malformed Base64, wrong nonce/tag sizes, oversized files, invalid entry IDs/revisions and excessive nesting. Authentication failures never produce usable plaintext. Writes use a separate file lock, optimistic file-hash checks, a flushed temporary file and atomic replacement. An encrypted `.previous` snapshot retains the last ordinary update. Android writes use app-private internal storage and disable cloud/device-transfer backups. No plaintext export is implemented.
+
+## Device and filling boundaries
+
+| Threat | Handling | Limit |
+|---|---|---|
+| Stolen locked vault file | Argon2id + AES-GCM, secret key wrapping | A weak master passphrase permits offline guesses; UI backoff does not stop those |
+| Modified encrypted header/payload | AEAD, strict parsing, bounded allocation | A valid old file can be replayed; no tamper-proof rollback anchor exists |
+| Lookalike website | Exact normalized HTTPS host matching on Android | The approved browser must report the real document origin correctly |
+| Malicious native app | Package + signing certificate + per-entry explicit binding | First approval relies on the user choosing the genuine installed app |
+| Unverified WebView / absent web origin / ambiguous form | Refuse Autofill | Fewer sites/forms are supported; copying is a separate manual action |
+| Network interception | TLS 1.2/1.3 + out-of-band SHA-256 certificate pin | Someone holding the entire temporary pairing code can retrieve ciphertext |
+| Old changes / concurrent offline edits | Entry version vectors, tombstones, deterministic conflict copies | Manual review of conflict copies; rollback of an entire local file is still possible |
+| Another app reading clipboard | Short lifetime, no Windows history/cloud opt-in, Android sensitive flag | Other apps may read before clearance; timers cannot run after process death |
+| Screen capture | Windows display affinity / Android FLAG_SECURE | Best effort only; cannot stop cameras, system/privileged recording or a hostile OS |
+| Malware on an unlocked device | Minimize retained references and key lifetime, lock on system/app events | Cannot stop a privileged infostealer, debugger, keyboard capture or token/cookie theft |
+
+The whole payload is decrypted while a session is open. It is NOT record-by-record isolation. Managed .NET/Java strings, serialization temporaries, cipher-internal copies and UI/system buffers cannot be reliably zeroized. The key arrays and mutable byte buffers owned by the app are wiped where feasible, and models are cleared at lock. This is best-effort hygiene rather than a guarantee of erasing all RAM, swap or crash remnants. No memory dump or log feature exists.
+
+Windows has no browser DOM/origin connection and therefore implements no blind typing, injection, keyboard monitoring or accessibility scraping. Ctrl+Alt+P is a registered global shortcut, not a keyboard hook. User-triggered copy/paste exposes secrets to the clipboard and to whichever destination the user pastes into. No clipboard feature can make that action safe on a compromised desktop.
+
+Android Autofill is system-bound (`BIND_AUTOFILL_SERVICE`), uses an unexported authentication activity, a bounded in-process request store with expiring random handles, and an immutable PendingIntent. It does not send passwords until the user unlocks, approves the destination identity if needed, and selects a login. Browser credentials are filtered by exact origin; native app links are per credential. Cross-origin username/password fields, multiple candidate password fields and unverified WebViews are refused. No accessibility service, overlay permission, clipboard watcher or network breach check is installed. Camera permission is optional and requested only for explicit in-app QR scanning; camera frames are processed locally in memory and not saved or uploaded.
+
+Android biometric quick unlock uses an authenticated Android Keystore AES key and BiometricPrompt CryptoObject; it is not merely a dialog followed by unrestricted decryption. Strong biometrics are selected where the platform offers that API. Enrollment changes invalidate the key. Changing/adopting a rotated vault key disables prior quick unlock. Exact hardware protection and biometric support depend on the device. Windows Hello/DPAPI quick unlock is not included.
+
+The LAN listener is temporary and binds the selected local private IPv4 address. Its opaque token has 256 bits of randomness, is compared in fixed time and sent in an Authorization header under pinned TLS, not in a URL. Requests have bounded headers/bodies, fixed paths, limited attempts, no compression or chunked parsing, a timeout and a 3-minute session window. A completed session cannot be replayed. The server never starts automatically and never logs pairing codes, vault contents or passphrases. A user-initiated active transfer temporarily defers idle locking only within the existing three-minute session deadline; explicit lock, session lock, suspend, tray close and exit still terminate it. The locally generated QR encodes the same BV1 temporary pairing capability as manual paste, including the private endpoint, certificate pin and random token. It contains no vault passphrase or plaintext credentials. Anyone who photographs it during its active lifetime can use the temporary capability; show it only to your own device. The QR is cleared after completion, expiration or window closure. Android validates scanned codes with the same strict private-IP parser before returning them to the transfer screen, and requires an explicit Connect & transfer tap before contacting the endpoint. The scanning activity is unexported and releases the camera when paused. Only encrypted vault bytes are transferred. Denial of service by a reachable client is still possible within the bounded session window.
+
+## Before real account use
+
+Complete the documented native-device checks and obtain an independent security review. Use a trusted, updated OS. In the user's current context, there was a recent suspected malware infection: this app does not establish that the laptop is clean. It also cannot invalidate stolen browser cookies, revoke account sessions or replace account security controls.
+
+Export encrypted backups regularly and keep one off-device. Test restoration with fake data first. Do not delete the old copy until verified. Preserve your own private APK signing key if building future releases. The preview Windows EXE is unsigned; do not disable Defender or disregard an actual threat detection to run it.
+
+Design references: [RFC 9106](https://www.rfc-editor.org/rfc/rfc9106.html), [Microsoft AES-GCM requirements](https://learn.microsoft.com/dotnet/api/system.security.cryptography.aesgcm.encrypt), [Android Autofill security](https://developer.android.com/reference/android/service/autofill/AutofillService), [Android biometric CryptoObject](https://developer.android.com/identity/sign-in/biometric-auth).
+
+
+## Windows desktop lifecycle (1.2)
+
+The main-window close action is a secure hide: session data/key references and the owned clipboard are cleared, dialogs are closed and transfers are stopped before moving to tray. An unlock finishing after that action cannot reopen the vault because its generation is invalidated. Reopen does not bypass the master passphrase. Explicit Exit, logoff and shutdown release the tray icon, hotkey, IPC listener and vault session. If tray initialization fails, the normal window stays accessible and close exits instead of invisibly stranding the process.
+
+Optional start-at-sign-in writes only this app's value under the current user's Run key. It launches with --background, with a locked vault and no network listener. No password is stored in startup settings. Preferences contain only schema, auto-lock choice and whether the first tray hint was shown; corrupt or unsupported preferences revert to a two-minute lock timeout.
+
+A same-user named pipe carries a process ID and one fixed activation byte to bring forward the existing window. CurrentUserOnly restricts it, reads/connects are bounded, and it carries no vault data, commands, paths or passphrases. This does not defend against malware running as the same user.
+
+Windows Schannel does not reliably support EphemeralKeySet certificates. The temporary TLS certificate is therefore imported with UserKeySet (without PersistKeySet) on Windows; .NET manages a temporary user key container and normal certificate disposal releases it. A crash may leave a container behind. This contains only the short-lived TLS signing key, never the vault key or master passphrase; the pairing token dies with the process and the certificate expires. The PFX import bytes are zeroed after loading. No certificate-store trust is added. See https://learn.microsoft.com/en-us/dotnet/core/extensions/sslstream-troubleshooting .
