@@ -46,7 +46,7 @@ final class AutofillStatus {
             case "READY":detail="Android was given a BoshaVault suggestion. Whether it is shown depends on the target app and keyboard.";break;
             case "SERVICE_CALLED":detail="The service received the request but did not produce a suggestion.";break;
             case "INTERNAL_ERROR":detail="The service hit an unexpected failure. No private form data was recorded.";break;
-            default:detail="No Autofill request received yet. Open a login form and tap a password field.";break;
+            default:detail="Autofill state: "+code;break;
         }
         long time=p.getLong("time",0L);
         return "Last request: "+(time==0L?"never":DateFormat.getDateTimeInstance(DateFormat.SHORT,DateFormat.SHORT).format(new Date(time)))
