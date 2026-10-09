@@ -1,6 +1,22 @@
 "use strict";
 
 const NATIVE = "com.boshavault.desktop";
+// The sender's live Chromium document ID is the security boundary. Tab URLs
+// alone are insufficient when a tab navigates during a native approval dialog.
+async function sameActiveDocument(sender, expectedOrigin) {
+  if (!sender.tab?.id || sender.frameId !== 0 || !sender.documentId)
+    return false;
+  const frame = await chrome.webNavigation.getFrame({tabId:sender.tab.id,frameId:0});
+  const tab = await chrome.tabs.get(sender.tab.id);
+  if (!frame || frame.documentId !== sender.documentId || !tab.url)
+    return false;
+  if (tab.pendingUrl) return false;
+  try {
+    return new URL(frame.url).origin === expectedOrigin &&
+      new URL(tab.url).origin === expectedOrigin;
+  } catch { return false; }
+}
+
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
   (async () => {
     if (!sender.tab || sender.frameId !== 0 || sender.id !== chrome.runtime.id) {
@@ -22,6 +38,8 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       message.password.length > 128 || !/^[!-~]+$/.test(message.password))) {
       return {status:"denied", message:"Invalid generated password or username."};
     }
+    if (["fill","save"].includes(message.op) && !(await sameActiveDocument(sender,page.origin)))
+      return {status:"denied", message:"Browser page changed. Retry on the intended website."};
     const answer = await chrome.runtime.sendNativeMessage(NATIVE, {
       op: message.op, origin: page.origin, entryId: message.op === "fill" ? message.entryId : "",
       username: message.op === "save" ? message.username : "",
@@ -32,10 +50,8 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     // different page, even in the same tab.
     if ((message.op === "fill" && answer.status === "filled") ||
         (message.op === "save" && answer.status === "saved")) {
-      const tabNow = await chrome.tabs.get(sender.tab.id);
-      if (!tabNow.url || new URL(tabNow.url).origin !== page.origin ||
-          (sender.documentId && tabNow.documentId && sender.documentId !== tabNow.documentId)) {
-        return {status: "denied"};
+      if (!(await sameActiveDocument(sender,page.origin))) {
+        return {status:"denied",message:"The tab navigated during approval. Secret was not delivered."};
       }
       if (message.op === "fill" &&
           (typeof answer.username !== "string" || typeof answer.password !== "string")) {
