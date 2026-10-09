@@ -19,16 +19,67 @@ final class Biometrics {
     static File file(Activity a){return new File(a.getFilesDir(),"biometric.wrap");}
     static boolean available(Activity a){return file(a).exists();}
     static void disable(Activity a)throws Exception{Files.deleteIfExists(file(a).toPath());KeyStore ks=KeyStore.getInstance("AndroidKeyStore");ks.load(null);if(ks.containsAlias(ALIAS))ks.deleteEntry(ALIAS);}
+    // CryptoObject decryption requires a strong biometric authenticator; a device
+    // may unlock its screen with a weaker fingerprint but be unable to protect keys.
+    static void verifySupport(Activity a) throws Exception {
+        android.app.KeyguardManager guard=(android.app.KeyguardManager)a.getSystemService(Activity.KEYGUARD_SERVICE);
+        if(guard==null || !guard.isDeviceSecure())throw new Exception("Set up a secure screen lock (PIN, pattern or password) in Android Settings first.");
+        if(Build.VERSION.SDK_INT>=30){
+            android.hardware.biometrics.BiometricManager manager=a.getSystemService(android.hardware.biometrics.BiometricManager.class);
+            if(manager==null)throw new Exception("Android biometric service is unavailable on this device.");
+            int status=manager.canAuthenticate(android.hardware.biometrics.BiometricManager.Authenticators.BIOMETRIC_STRONG);
+            if(status==android.hardware.biometrics.BiometricManager.BIOMETRIC_SUCCESS)return;
+            if(status==android.hardware.biometrics.BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED)
+                throw new Exception("Enroll a strong fingerprint or other strong biometric in Android Settings before enabling quick unlock.");
+            if(status==android.hardware.biometrics.BiometricManager.BIOMETRIC_ERROR_HW_UNAVAILABLE)
+                throw new Exception("The biometric sensor is temporarily unavailable. Try again after unlocking the phone.");
+            if(status==android.hardware.biometrics.BiometricManager.BIOMETRIC_ERROR_NO_HARDWARE)
+                throw new Exception("No Android-approved strong biometric sensor is available. Continue using your master passphrase.");
+            throw new Exception("This phone cannot authenticate with BIOMETRIC_STRONG (Android status "+status+"). Your master passphrase still works.");
+        }
+        if(Build.VERSION.SDK_INT==29){
+            android.hardware.biometrics.BiometricManager manager=a.getSystemService(android.hardware.biometrics.BiometricManager.class);
+            if(manager==null || manager.canAuthenticate()!=android.hardware.biometrics.BiometricManager.BIOMETRIC_SUCCESS)
+                throw new Exception("Enroll a supported biometric in Android Settings and try again.");
+        } else {
+            android.hardware.fingerprint.FingerprintManager manager=(android.hardware.fingerprint.FingerprintManager)a.getSystemService(Activity.FINGERPRINT_SERVICE);
+            if(manager==null || !manager.isHardwareDetected() || !manager.hasEnrolledFingerprints())
+                throw new Exception("This phone has no enrolled hardware fingerprint available for secure quick unlock.");
+        }
+    }
+    private static Exception stepError(String step,Exception e) {
+        String type=e.getClass().getSimpleName();
+        String detail=e.getMessage();
+        if(detail==null || detail.trim().isEmpty())detail="Android rejected the biometric operation.";
+        if(detail.length()>95)detail=detail.substring(0,95)+"...";
+        return new Exception(step+" ("+type+"): "+detail,e);
+    }
     static void enable(Activity a,byte[] secret,Result callback){
+        String stage="Biometric support check";
         try{
+            verifySupport(a);
+            stage="Android Keystore key creation";
             disable(a);KeyGenerator generator=KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES,"AndroidKeyStore");KeyGenParameterSpec.Builder b=new KeyGenParameterSpec.Builder(ALIAS,KeyProperties.PURPOSE_ENCRYPT|KeyProperties.PURPOSE_DECRYPT).setKeySize(256).setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).setUserAuthenticationRequired(true).setInvalidatedByBiometricEnrollment(true);
             if(Build.VERSION.SDK_INT>=30)b.setUserAuthenticationParameters(0,KeyProperties.AUTH_BIOMETRIC_STRONG);else b.setUserAuthenticationValidityDurationSeconds(-1);
             generator.init(b.build());generator.generateKey();Cipher cipher=cipher();KeyStore ks=KeyStore.getInstance("AndroidKeyStore");ks.load(null);cipher.init(Cipher.ENCRYPT_MODE,ks.getKey(ALIAS,null));cipher.updateAAD("BoshaVault biometric key v1".getBytes(StandardCharsets.UTF_8));
+            stage="Biometric prompt initialization";
             prompt(a,"Enable fingerprint unlock",cipher,(actual,error)->{
-                try{if(error!=null){callback.done(null,error);return;}byte[] ct=actual.doFinal(secret);JSONObject box=new JSONObject().put("nonce",VaultEngine.b64(actual.getIV())).put("ciphertext",VaultEngine.b64(ct));Files.write(file(a).toPath(),box.toString().getBytes(StandardCharsets.UTF_8));callback.done(null,null);}
-                catch(Exception e){callback.done(null,e);}finally{Arrays.fill(secret,(byte)0);}
+                try{
+                    if(error!=null){callback.done(null,error);return;}
+                    byte[] ct=actual.doFinal(secret);
+                    JSONObject box=new JSONObject().put("nonce",VaultEngine.b64(actual.getIV())).put("ciphertext",VaultEngine.b64(ct));
+                    File wrap=file(a),tmp=new File(a.getFilesDir(),"biometric.wrap.tmp");
+                    try{
+                        Files.write(tmp.toPath(),box.toString().getBytes(StandardCharsets.UTF_8));
+                        Files.move(tmp.toPath(),wrap.toPath(),java.nio.file.StandardCopyOption.ATOMIC_MOVE,java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                    }finally{Files.deleteIfExists(tmp.toPath());}
+                    callback.done(null,null);
+                }catch(Exception e){callback.done(null,stepError("Saving fingerprint quick unlock failed",e));}
+                finally{Arrays.fill(secret,(byte)0);}
             });
-        }catch(Exception e){Arrays.fill(secret,(byte)0);callback.done(null,e);}
+        }catch(Exception e){Arrays.fill(secret,(byte)0);
+            callback.done(null,stage.equals("Biometric support check")?e:stepError(stage+" failed",e));
+        }
     }
     static void unlock(Activity a,Result callback){
         try{
