@@ -57,7 +57,7 @@ final class Biometrics {
             message.append(t.getClass().getSimpleName());
             String detail=t.getMessage();
             if(detail!=null&&!detail.trim().isEmpty()){
-                detail=detail.replace('\\n',' ').replace('\\r',' ');
+                detail=detail.replace('\n',' ').replace('\r',' ');
                 message.append(": ").append(detail.substring(0,Math.min(110,detail.length())));
             }
             if(depth==0)message.append(")");
