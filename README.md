@@ -2,7 +2,7 @@
 
 > **Pairing hotfix source update (2026-10-09):** See [`docs/PAIRING-HOTFIX-2026-10-09.md`](docs/PAIRING-HOTFIX-2026-10-09.md). This is source-only and has not passed live Windows/Android pairing. `Build-Windows-Hotfix.ps1` builds the updated desktop after running tests; `Diagnose-BoshaVault.ps1` provides read-only diagnostics. Existing signed Android APK is unchanged.
 
-# BoshaVault Windows 1.3 browser Autofill preview / Android 1.3.x
+# BoshaVault Windows 1.4 browser Autofill & signup generator preview / Android 1.3.x
 
 Native password vault for Windows x64 and Android 9+. English UI, Unicode credentials and notes. A local Chrome/Edge browser extension preview is included for user-approved filling; there is no cloud account, advertising, analytics or external synchronization service.
 
@@ -29,7 +29,7 @@ This is a working implementation and a preview build, not an independently audit
 | Biometric quick unlock | Not included | Android Keystore + biometric CryptoObject |
 | Autofill | Chrome/Edge extension preview; exact HTTPS host + Windows confirmation; manual copy fallback | System Autofill; authenticated selection |
 
-The Windows extension reads the browser's verified HTTPS origin and offers only exact-host matches after the vault is unlocked. Each credential release still requires a confirmation on Windows; it never types into arbitrary desktop applications. See [Windows browser Autofill setup](docs/WINDOWS-AUTOFILL.md). Ctrl+Alt+P brings the app forward. Copy and paste is the fallback accepted in the design discussion. Android rejects insecure or missing browser origins, ambiguous forms and unverified WebViews. A browser's signing identity must be approved on first use and match thereafter. Native-app filling requires explicitly linking each login to that package and certificate.
+The Windows extension reads the browser-reported HTTPS origin and offers only exact-host matches after the vault is unlocked. When creating a new account, its popup can generate a cryptographically random password, fill a clearly detected confirmation field, and save the generated password with the signup username/email after explicit review in Windows. Each credential release still requires a confirmation on Windows; it never types into arbitrary desktop applications. See [Windows browser Autofill setup](docs/WINDOWS-AUTOFILL.md). Ctrl+Alt+P brings the app forward. Copy and paste is the fallback accepted in the design discussion. Android rejects insecure or missing browser origins, ambiguous forms and unverified WebViews. A browser's signing identity must be approved on first use and match thereafter. Native-app filling requires explicitly linking each login to that package and certificate.
 
 No passkeys, TOTP manager, continuous/background synchronization, automatic password saving, Windows Hello unlocking, cloud sync, breach lookup or recovery service is included. LAN sync is an explicit transfer, not a promise of automatic discovery. Features absent from the UI are not hidden placeholders.
 
