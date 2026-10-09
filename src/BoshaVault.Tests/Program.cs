@@ -65,6 +65,18 @@ try
     string path = temp + "/a.boshavault";
     using var a = await VaultSession.Create(path, password, devA);
     var entry = new VaultEntry { Title = "Demo Mail", Username = "demo@example.com", Password = "OnlySyntheticTestSecret-7!", Url = "https://example.com/login", Notes = "ملاحظات تجريبية", Favorite = true };
+    Check(PasswordHealth.IsPredictable("password123") &&
+          PasswordHealth.IsPredictable("myname-123456-2026") &&
+          !PasswordHealth.IsPredictable("J8z!qA3@vM7#wN2$"),
+          "offline password health distinguishes obvious patterns from random values");
+    var healthSample = PasswordHealth.Audit(new[] {
+        new VaultEntry { Title="One", Password="password123", Username="test@test.test" },
+        new VaultEntry { Title="Two", Password="password123", Username="other@test.test" },
+        new VaultEntry { Title="Three", Password="J8z!qA3@vM7#wN2$" },
+        new VaultEntry { Title="Removed", Deleted=true, Password="password123" }
+    });
+    Check(healthSample.Total==3 && healthSample.Reused==2 && healthSample.CommonPassword==2
+       && healthSample.AtRisk==2, "password audit flags reused/common values but skips deleted entries");
     a.Upsert(entry);
     byte[] first = a.ExportEncrypted();
     // Supabase must never receive the decryptable wrapper metadata of the
