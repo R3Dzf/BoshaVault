@@ -57,6 +57,34 @@ jobs:
           -p:DebugType=None
           -p:DebugSymbols=false
           --output dist/windows
+      - name: Publish native messaging host
+        run: >-
+          dotnet publish src/BoshaVault.NativeHost
+          --configuration Release
+          --runtime win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:DebugType=None
+          -p:DebugSymbols=false
+          --output dist/nativehost
+      - name: Validate Chrome and Edge extension JavaScript
+        shell: pwsh
+        run: |
+          node --check browser-extension/background.js
+          node --check browser-extension/content.js
+          Get-Content browser-extension/manifest.json -Raw | ConvertFrom-Json | Out-Null
+          $tokens = $null
+          $parseErrors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'tools/Install-BrowserAutofill.ps1'),[ref]$tokens,[ref]$parseErrors) | Out-Null
+          if ($parseErrors.Count) { throw "Autofill installer syntax invalid: $parseErrors" }
+      - name: Bundle extension and native host with Windows
+        shell: pwsh
+        run: |
+          Copy-Item 'dist/nativehost/BoshaVault.NativeHost.exe' 'dist/windows/BoshaVault.NativeHost.exe' -Force
+          Copy-Item 'browser-extension' 'dist/windows/browser-extension' -Recurse -Force
+          Copy-Item 'tools/Install-BrowserAutofill.ps1' 'dist/windows/Install-BrowserAutofill.ps1' -Force
+          if (!(Test-Path 'dist/windows/browser-extension/manifest.json')) { throw 'Extension missing from bundle' }
       - name: Archive Windows build
         shell: pwsh
         run: Compress-Archive -Path 'dist/windows/*' -DestinationPath 'dist/BoshaVault-Windows-x64.zip' -Force
