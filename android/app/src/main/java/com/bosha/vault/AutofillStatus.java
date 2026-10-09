@@ -11,7 +11,7 @@ import java.util.Date;
 final class AutofillStatus {
     private static final String PREFS="autofill-status-v1";
     static void report(Context context,String code) {
-        if(!code.matches("SERVICE_CALLED|NO_CONTEXT|NO_ACTIVITY|NO_CREDENTIAL_FIELD|UNVERIFIED_DESTINATION|PACKAGE_NOT_VISIBLE|AMBIGUOUS_FORM|TOO_COMPLEX|BUSY|READY|INTERNAL_ERROR"))code="INTERNAL_ERROR";
+        if(!code.matches("SERVICE_CALLED|NO_CONTEXT|NO_ACTIVITY|NO_CREDENTIAL_FIELD|UNVERIFIED_DESTINATION|PACKAGE_NOT_VISIBLE|AMBIGUOUS_FORM|TOO_COMPLEX|BUSY|READY|AUTH_OPENED|AUTH_UNLOCKED|AUTH_DELIVERED|AUTH_FAILED|INTERNAL_ERROR"))code="INTERNAL_ERROR";
         context.getSharedPreferences(PREFS,Context.MODE_PRIVATE).edit()
                 .putString("code",code).putLong("time",System.currentTimeMillis()).apply();
     }
