@@ -67,6 +67,8 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Set up Android SDK command-line tools
+        uses: android-actions/setup-android@v3
       - name: Install Android SDK 35 platform and build tools
         shell: bash
         run: |
