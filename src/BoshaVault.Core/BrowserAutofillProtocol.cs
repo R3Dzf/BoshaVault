@@ -26,6 +26,7 @@ public sealed class BrowserAutofillResponse
 {
     public string Status { get; set; } = "error";
     public string Message { get; set; } = "";
+    public string Warning { get; set; } = "";
     public List<BrowserAccount> Accounts { get; set; } = [];
     public string Username { get; set; } = "";
     public string Password { get; set; } = "";
