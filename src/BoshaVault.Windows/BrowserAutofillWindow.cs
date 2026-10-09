@@ -88,8 +88,22 @@ public partial class MainWindow
                     OriginPolicy.Matches(e.Url, request.Origin))
                 .OrderBy(e => e.Title, StringComparer.OrdinalIgnoreCase).Take(10).ToArray();
             if (request.Op == "list")
-                return new() { Status = "ok", Accounts = matches.Select(e =>
-                    new BrowserAccount { Id = e.Id, Title = e.Title, Username = e.Username }).ToList() };
+            {
+                var hosts=activeSession.Data.Entries.Where(e=>!e.Deleted && e.Url.Length>0)
+                    .Select(e=>{
+                        try { return OriginPolicy.ExactHost(e.Url); }
+                        catch(VaultException) { return ""; }
+                    }).Where(x=>x.Length>0).Distinct(StringComparer.OrdinalIgnoreCase);
+                bool suspicious=matches.Length==0 && OriginPolicy.LooksLikeSavedHostname(host,hosts);
+                return new() {
+                    Status="ok",
+                    Warning=suspicious
+                        ? "Caution: this domain may resemble another saved login, or use international characters. Verify the exact address before creating an account."
+                        : "",
+                    Accounts=matches.Select(e=>new BrowserAccount {
+                        Id=e.Id,Title=e.Title,Username=e.Username }).ToList()
+                };
+            }
             var target = matches.FirstOrDefault(e => string.Equals(e.Id, request.EntryId, StringComparison.Ordinal));
             if (target == null) return new() { Status = "denied", Message = "No exact website match." };
 
