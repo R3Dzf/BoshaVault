@@ -101,6 +101,7 @@ try
     RejectNow(() => CloudSnapshotCodec.Open(cloudBlob, wrongCloudKey, vaultSlot, deviceSlot),
         "wrong cloud recovery key rejected");
     CryptographicOperations.ZeroMemory(wrongCloudKey);
+    await CloudTransportTests.Run(cloudBlob,vaultSlot,deviceSlot);
     CryptographicOperations.ZeroMemory(cloudKey);
     CryptographicOperations.ZeroMemory(cloudBlob);
     CryptographicOperations.ZeroMemory(restoredInner);
