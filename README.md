@@ -6,7 +6,7 @@
 
 Native password vault for Windows x64 and Android 9+. English UI, Unicode credentials and notes. A local Chrome/Edge browser extension preview is included for user-approved filling; there is no cloud account, advertising, analytics or external synchronization service.
 
-This is a working implementation and a preview build, not an independently audited security product. There is no promise of invulnerability or impossible decryption. See `docs/SECURITY.md` and `docs/VALIDATION.md` before using real credentials. Use synthetic credentials for initial device testing.
+New groundwork: a local Password Health report, standalone RFC 6238 TOTP engine and independently encrypted optional Supabase snapshot format are in source. **Cloud Sync, saved TOTP, Windows Hello, passkeys, CSV import and automatic signed updates are not enabled in the shipped UI yet.** See [the cloud security design](docs/CLOUD-SYNC.md) and [roadmap/status table](docs/ROADMAP-SECURITY.md).\n\nThis is a working implementation and a preview build, not an independently audited security product. There is no promise of invulnerability or impossible decryption. See `docs/SECURITY.md` and `docs/VALIDATION.md` before using real credentials. Use synthetic credentials for initial device testing.
 
 ## Included
 
