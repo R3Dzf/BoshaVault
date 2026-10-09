@@ -68,6 +68,10 @@ jobs:
           -p:DebugType=None
           -p:DebugSymbols=false
           --output dist/nativehost
+      - name: Native Messaging binary protocol smoke test
+        shell: pwsh
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File tools/Test-NativeHost.ps1 -Exe dist/nativehost/BoshaVault.NativeHost.exe
       - name: Validate Chrome and Edge extension JavaScript
         shell: pwsh
         run: |
