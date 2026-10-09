@@ -67,6 +67,32 @@ try
     var entry = new VaultEntry { Title = "Demo Mail", Username = "demo@example.com", Password = "OnlySyntheticTestSecret-7!", Url = "https://example.com/login", Notes = "ملاحظات تجريبية", Favorite = true };
     a.Upsert(entry);
     byte[] first = a.ExportEncrypted();
+    // Supabase must never receive the decryptable wrapper metadata of the
+    // underlying vault, nor the independent recovery key.
+    string recoveryCode = CloudSnapshotCodec.NewRecoveryKey();
+    byte[] cloudKey = CloudSnapshotCodec.ParseRecoveryKey(recoveryCode);
+    Guid vaultSlot = Guid.NewGuid(), deviceSlot = Guid.NewGuid();
+    byte[] cloudBlob = CloudSnapshotCodec.Seal(first, cloudKey, vaultSlot, deviceSlot);
+    Check(cloudBlob.Length > first.Length && !Encoding.UTF8.GetString(cloudBlob).Contains("BoshaVault"),
+        "outer cloud snapshot conceals internal vault format and header");
+    byte[] restoredInner = CloudSnapshotCodec.Open(cloudBlob, cloudKey, vaultSlot, deviceSlot);
+    Check(restoredInner.SequenceEqual(first), "outer AES-GCM cloud snapshot roundtrip");
+    var changedBlob = (byte[])cloudBlob.Clone();
+    changedBlob[^1] ^= 0x80;
+    RejectNow(() => CloudSnapshotCodec.Open(changedBlob, cloudKey, vaultSlot, deviceSlot),
+        "outer cloud ciphertext corruption rejected");
+    RejectNow(() => CloudSnapshotCodec.Open(cloudBlob, cloudKey, Guid.NewGuid(), deviceSlot),
+        "cloud snapshot bound to vault slot");
+    RejectNow(() => CloudSnapshotCodec.Open(cloudBlob, cloudKey, vaultSlot, Guid.NewGuid()),
+        "cloud snapshot bound to device slot");
+    byte[] wrongCloudKey = RandomNumberGenerator.GetBytes(32);
+    RejectNow(() => CloudSnapshotCodec.Open(cloudBlob, wrongCloudKey, vaultSlot, deviceSlot),
+        "wrong cloud recovery key rejected");
+    CryptographicOperations.ZeroMemory(wrongCloudKey);
+    CryptographicOperations.ZeroMemory(cloudKey);
+    CryptographicOperations.ZeroMemory(cloudBlob);
+    CryptographicOperations.ZeroMemory(restoredInner);
+
     string wire = Encoding.UTF8.GetString(first);
     Check(!wire.Contains(entry.Password) && !wire.Contains(entry.Title) && !wire.Contains(entry.Username) && !wire.Contains(entry.Notes), "all sensitive metadata encrypted");
     using (var opened = await VaultSession.Open(path, password, devB))
