@@ -46,6 +46,8 @@ public static class BrowserAutofillProtocol
     public static string Validate(BrowserAutofillRequest request)
     {
         if (request.Op is not ("list" or "fill" or "open" or "save")) throw new VaultException("Unsupported browser request.");
+        if (request.Origin is null || request.EntryId is null || request.Username is null || request.Password is null)
+            throw new VaultException("Invalid browser request fields.");
         if (request.Op == "open") return "";
         if (request.Origin.Length is < 9 or > 2048) throw new VaultException("Invalid browser origin.");
         if (!Uri.TryCreate(request.Origin, UriKind.Absolute, out var uri) ||
