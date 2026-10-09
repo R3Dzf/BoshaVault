@@ -16,6 +16,7 @@ class FakeElement {
   setAttribute(key,value){this[key]=value;}
   getAttribute(key){return this[key]||null;}
   append(...items){this.children.push(...items);}
+  replaceChildren(...items){this.children=[...items];}
   remove(){this.isConnected=false; if(popup===this)popup=null;}
   contains(other){return this!==other && this.children.includes(other);}
   attachShadow(){const shadow=new FakeElement("shadow");this.shadow=shadow;return shadow;}
