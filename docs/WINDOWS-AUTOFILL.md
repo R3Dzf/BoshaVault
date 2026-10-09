@@ -66,3 +66,25 @@ You can confirm the registration at `HKCU\Software\Google\Chrome\NativeMessaging
 5. Code signing, extension publishing and independent security assessment prior to claims of production readiness.
 
 If installation prompts demand turning off Defender, disabling browser security protections, or sharing the master passphrase outside BoshaVault, **stop**. Those steps are not part of this setup.
+
+## Generate a new password on a signup page
+
+The Chrome and Edge extension now includes **Generate & Save (preview)**.
+
+1. Open an ordinary HTTPS registration form and focus its password field. The in-page BoshaVault panel appears even if there are no matching saved logins.
+2. Choose **Generate strong password · 24 characters**, **32 characters**, or **24 characters without symbols**. It uses the browser's cryptographic random source with rejection sampling and a shuffled mix of lower/upper-case letters and numbers (plus symbols when selected).
+3. The chosen password goes into the registration password field. A confirmation field is filled only when its form metadata explicitly identifies it as a new-password/repeat/confirm field. The extension does not overwrite an identified current-password field when a new-password field exists.
+4. The extension shows the detected username/email from the *same form*. Type it into the form if missing. It is captured **only when you explicitly click Save**, not continuously stored or monitored.
+5. Click **Save username + password in BoshaVault**. Windows comes forward with **Save generated login**, showing the exact HTTPS website, an editable login name and editable username/email. Password stays masked. Confirm **Save encrypted login** to add a new entry. Existing credentials with the same username+website are not replaced or silently duplicated.
+6. Complete the actual signup on the website separately. BoshaVault never presses a signup/login/submit button by itself.
+
+If the Windows vault is locked, the extension can still generate and fill locally, but **cannot save** until you unlock it. Keep the page open and do not submit/leave the form before verifying that BoshaVault says the login was saved. No generated password or detected username is put into the clipboard, localStorage, extension storage or cloud. The live webpage can, as usual, read values explicitly filled into its own form.
+
+### Safeguards / limitations
+
+- We do **not** assume every password field is for signup. The generator is offered as a user-initiated action, never executed automatically.
+- The site may reject special characters or impose maximum password lengths. The extension obeys a supported maximum of at least 16; when the site allows fewer than 16 characters, the generator refuses instead of silently weakening its default policy.
+- Username detection is based on explicit form hints and common native field names. Multi-step signup flows may need you to enter the username manually in the Windows review dialog.
+- Complex SPAs, iframe login forms and custom shadow-DOM fields are not guaranteed to work. Chrome/Edge + real websites need device testing before production use.
+- A local process running under your Windows identity might forge native pipe requests; **Windows prompts for confirmation before saving or releasing a credential**. Review the hostname each time. This does not make a compromised computer safe.
+- Encryption of stored data is handled by the existing encrypted BoshaVault vault (Argon2id for passphrase derivation and AES-GCM for vault data). Generating a password never creates a new encryption algorithm.
