@@ -3,9 +3,32 @@ package com.bosha.vault;
 import android.content.*;
 import android.content.pm.*;
 import android.view.autofill.AutofillId;
+import android.os.Parcel;
+import android.os.Parcelable;
 import java.util.*;
 
-final class FillTarget {
+final class FillTarget implements Parcelable {
+    FillTarget(){}
+    private FillTarget(Parcel in){
+        pkg=in.readString();certificate=in.readString();domain=in.readString();scheme=in.readString();
+        userDomain=in.readString();userScheme=in.readString();
+        browser=in.readInt()!=0;explicitUsername=in.readInt()!=0;
+        user=in.readParcelable(AutofillId.class.getClassLoader());
+        password=in.readParcelable(AutofillId.class.getClassLoader());
+        created=in.readLong();
+    }
+    @Override public void writeToParcel(Parcel out,int flags){
+        out.writeString(pkg);out.writeString(certificate);out.writeString(domain);out.writeString(scheme);
+        out.writeString(userDomain);out.writeString(userScheme);
+        out.writeInt(browser?1:0);out.writeInt(explicitUsername?1:0);
+        out.writeParcelable(user,flags);out.writeParcelable(password,flags);out.writeLong(created);
+    }
+    @Override public int describeContents(){return 0;}
+    public static final Creator<FillTarget> CREATOR=new Creator<FillTarget>(){
+        @Override public FillTarget createFromParcel(Parcel in){return new FillTarget(in);}
+        @Override public FillTarget[] newArray(int size){return new FillTarget[size];}
+    };
+
     String pkg,certificate,domain,scheme,userDomain,userScheme;boolean browser,explicitUsername;
     AutofillId user,password;long created=android.os.SystemClock.elapsedRealtime();
     static final Set<String> BROWSERS=new HashSet<>(Arrays.asList("com.android.chrome","com.chrome.beta","com.chrome.dev","com.microsoft.emmx","org.mozilla.firefox","com.brave.browser","com.transsion.phoenix"));
