@@ -232,6 +232,8 @@ public partial class MainWindow : Window
             popup.Action("Close",popup.Close,true);
             popup.ShowDialog();
         });
+        d.Action("Import Chrome / Bitwarden passwords from CSV", () => ImportBrowserPasswords(d));
+        d.Label("Importing requires reviewing a local plaintext CSV. No source file is automatically deleted or uploaded.");
         d.Label("No reset service exists. Old backups are not revoked by changing the passphrase. Windows quick unlock is intentionally unavailable in this release.");
         d.Action("Lock & move to tray", HideToTray);
         d.Action("Exit BoshaVault", ExitApplication);
