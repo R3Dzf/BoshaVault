@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework></PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../BoshaVault.Core/BoshaVault.Core.csproj" />
+    <Compile Include="../BoshaVault.Windows/DesktopPreferences.cs" Link="Desktop/DesktopPreferences.cs" />
+    <Compile Include="../BoshaVault.Windows/InstanceActivationChannel.cs" Link="Desktop/InstanceActivationChannel.cs" />
+  </ItemGroup>
+</Project>
