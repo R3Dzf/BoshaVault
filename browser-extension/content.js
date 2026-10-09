@@ -32,24 +32,27 @@
     }
     return true;
   }
+  function isUsername(input) {
+    if (!(input instanceof HTMLInputElement) || !visible(input)) return false;
+    if (!["text","email","tel",""].includes(input.type)) return false;
+    const value=(input.autocomplete+" "+input.name+" "+input.id+" "+
+      (input.getAttribute("aria-label")||"")).toLowerCase();
+    return input.type==="email" || /\busername\b|\bemail\b|user|login|mail|identifier|account|phone/.test(value);
+  }
   function credentialContext(input) {
     if (!visible(input)) return null;
     const form=input.form || input.closest("form") || document;
     if (!safeFormDestination(form)) return null;
-    const pw=[...form.querySelectorAll(pwSelector)].filter(visible);
-    if (!pw.length) return null;
-    const pass=pw.find(e=>e.autocomplete==="new-password") || (pw.includes(input)?input:pw[0]);
-    if(pass.type!=="password")return null;
-    if (!pw.includes(input) && !["text","email",""].includes(input.type)) return null;
+    const pw=[...form.querySelectorAll(pwSelector)].filter(visible).filter(e=>e.type==="password");
+    if(!pw.length && !isUsername(input))return null;
+    const pass=pw.length ? (pw.find(e=>e.autocomplete==="new-password") ||
+      (pw.includes(input)?input:pw[0])) : null;
+    if (!pw.includes(input) && !isUsername(input))return null;
     const user=[...form.querySelectorAll('input:not([type="hidden"]):not([type="password"])')]
-      .filter(visible).find(e=>{
-        const hint=(e.autocomplete || "").toLowerCase();
-        return hint==="username" || hint==="email" || e.type==="email" ||
-          /user(name)?|login|email/i.test((e.name || "")+" "+(e.id || ""));
-      }) || (pw.includes(input)?null:input);
-    const confirm=pw.find(e=>e!==pass &&
+      .find(e=>isUsername(e)) || (isUsername(input)?input:null);
+    const confirm=pass ? (pw.find(e=>e!==pass &&
       (e.autocomplete==="new-password" ||
-       /confirm|repeat|verify|retype/i.test((e.name || "")+" "+(e.id || "")))) || null;
+       /confirm|repeat|verify|retype/i.test((e.name || "")+" "+(e.id || "")))) || null) : null;
     return {pass,user,confirm,anchor:input,form};
   }
   function setup() {
@@ -121,12 +124,20 @@
     message("Confirm this login in the BoshaVault Windows window…");
     try {
       const answer=await chrome.runtime.sendMessage({op:"fill",entryId:id});
-      if(at!==location.origin || focus?.pass!==ctx.pass || !ctx.pass.isConnected ||
-         !safeFormDestination(ctx.form)) {hide();return;}
+      if(at!==location.origin || focus?.anchor!==ctx.anchor ||
+       !(ctx.pass?.isConnected || ctx.user?.isConnected) ||
+       !safeFormDestination(ctx.form)) {hide();return;}
       if(answer?.status!=="filled"){message(answer?.message || "Fill canceled.");return;}
       if(ctx.user?.isConnected) assign(ctx.user,answer.username);
-      assign(ctx.pass,answer.password);
-      hide();
+      if(ctx.pass?.isConnected) {
+        if(!assign(ctx.pass,answer.password)){
+          message("Site password field rejected the password. Use BoshaVault's Copy password as a fallback.");
+          return;
+        }
+        hide();
+      }else {
+        message("Username filled. Continue to the password step and select the same account again.");
+      }
     } catch {message("BoshaVault did not respond. Please retry.");}
   }
   function generate(ctx,length,symbols) {
@@ -204,8 +215,8 @@
     } catch {message("Could not save. Keep this page open and retry after starting BoshaVault.");}
   }
   function render(ctx,reply) {
-    if(!ctx.pass.isConnected || !focus || focus.pass!==ctx.pass || location.origin!==origin)return;
-    if(liveDraft(ctx)){showDraft(ctx,false);return;}
+    if(!(ctx.pass?.isConnected || ctx.user?.isConnected) || !focus || focus.anchor!==ctx.anchor || location.origin!==origin)return;
+    if(ctx.pass && liveDraft(ctx)){showDraft(ctx,false);return;}
     title(ctx);
     if(typeof reply?.warning==="string" && reply.warning.length>0)
       line("⚠️ "+reply.warning);
@@ -215,7 +226,8 @@
         if(!account || typeof account.id!=="string" || typeof account.username!=="string")continue;
         button((account.title||"Saved login")+" · "+account.username,()=>fill(ctx,account.id));
       }
-      if(reply.accounts.length)line("Creating a new account instead?","sub");
+      if(reply.accounts.length)line("Want to create a different account instead?","sub");
+      else line("No saved accounts for this HTTPS host. Try saving this website, or check the saved website address.","sub");
     } else if(reply?.status==="locked"){
       button("Unlock BoshaVault on Windows",async()=>{
         message("Unlock in BoshaVault, then focus the password field again.");
@@ -224,10 +236,24 @@
     } else if(reply?.status==="unavailable"){
       line("Windows vault is disconnected. Generating still works, but saving needs BoshaVault running.");
     }
-    button("Generate strong password · 24 characters",()=>generate(ctx,24,true),true);
-    button("Generate extra-long password · 32 characters",()=>generate(ctx,32,true));
-    button("Generate without symbols · 24 characters",()=>generate(ctx,24,false));
+    button("Save current website in BoshaVault",()=>capture(ctx),!ctx.pass);
+    if(ctx.pass) {
+      button("Generate strong password · 24 characters",()=>generate(ctx,24,true),true);
+      button("Generate extra-long password · 32 characters",()=>generate(ctx,32,true));
+      button("Generate without symbols · 24 characters",()=>generate(ctx,24,false));
+    }
     position(ctx.anchor);
+  }
+  async function capture(ctx) {
+    if(!safeFormDestination(ctx.form)) {message("This page form targets another origin. Saving is blocked.");return;}
+    const previousOrigin=origin;
+    const username=(ctx.user?.isConnected?ctx.user.value:"").trim();
+    message("BoshaVault Windows will open a prefilled login form. Review the exact site before saving.");
+    try {
+      const reply=await chrome.runtime.sendMessage({op:"capture",username});
+      if(location.origin!==previousOrigin || !ctx.anchor.isConnected){hide();return;}
+      message(reply?.message || "Finish adding the login in BoshaVault Windows.");
+    }catch {message("Could not connect to BoshaVault Windows. Check that it is open and unlocked.");}
   }
   let debounce;
   document.addEventListener("focusin",event=>{
