@@ -34,11 +34,25 @@ public final class UiSmoke extends Instrumentation {
         // Check the interactive keyboard window on the screen, including floating dialogs.
         for(AccessibilityWindowInfo window:getUiAutomation().getWindows()){Rect bounds=new Rect();window.getBoundsInScreen(bounds);if(window.getType()==AccessibilityWindowInfo.TYPE_INPUT_METHOD&&!bounds.isEmpty())return true;}return false;
     }
+    private boolean keyboardVisible(EditText editor)throws Exception{
+        boolean[] visible={false};main(()->{
+            if(Build.VERSION.SDK_INT>=30){WindowInsets insets=editor.getRootWindowInsets();visible[0]=insets!=null&&insets.isVisible(WindowInsets.Type.ime())&&insets.getInsets(WindowInsets.Type.ime()).bottom>0;}
+        });
+        // IME accessibility windows can lag the actual dialog's window insets.
+        return visible[0]||keyboardVisible();
+    }
     private void tap(EditText field)throws Exception{
-        main(()->{field.requestFocus();field.requestRectangleOnScreen(new Rect(0,0,field.getWidth(),field.getHeight()),true);});waitForIdleSync();Rect r=new Rect();
+        main(()->{field.requestFocus();field.requestRectangleOnScreen(new Rect(0,0,field.getWidth(),field.getHeight()),true);});waitForIdleSync();
+        boolean focused=false;
+        for(int i=0;i<100&&!focused;i++){boolean[] ready={false};main(()->ready[0]=field.isAttachedToWindow()&&field.isShown()&&field.hasWindowFocus());focused=ready[0];if(!focused)SystemClock.sleep(100);}
+        if(!focused)throw new Exception("Editor window did not acquire focus.");
+        getUiAutomation().waitForIdle(150,10000);Rect r=new Rect();
         // Pointer injection uses screen coordinates; a dialog's root is offset on screen.
         main(()->{if(!field.getLocalVisibleRect(r))throw new Exception("Editor is off screen.");int[] location=new int[2];field.getLocationOnScreen(location);r.offset(location[0],location[1]);});long time=SystemClock.uptimeMillis();
-        MotionEvent down=MotionEvent.obtain(time,time,MotionEvent.ACTION_DOWN,r.centerX(),r.centerY(),0),up=MotionEvent.obtain(time,time+40,MotionEvent.ACTION_UP,r.centerX(),r.centerY(),0);down.setSource(InputDevice.SOURCE_TOUCHSCREEN);up.setSource(InputDevice.SOURCE_TOUCHSCREEN);sendPointerSync(down);sendPointerSync(up);down.recycle();up.recycle();waitForIdleSync();
+        MotionEvent down=MotionEvent.obtain(time,time,MotionEvent.ACTION_DOWN,r.centerX(),r.centerY(),0),up=MotionEvent.obtain(time,time+40,MotionEvent.ACTION_UP,r.centerX(),r.centerY(),0);down.setSource(InputDevice.SOURCE_TOUCHSCREEN);up.setSource(InputDevice.SOURCE_TOUCHSCREEN);
+        // This API waits for window/surface transitions, including the IME's separate window.
+        // Subsequent text assertions still prove the gesture reached the intended editor.
+        try{if(!getUiAutomation().injectInputEvent(down,true)||!getUiAutomation().injectInputEvent(up,true))throw new Exception("Pointer injection failed.");}finally{down.recycle();up.recycle();}waitForIdleSync();
     }
     @Override public void onCreate(Bundle arguments){super.onCreate(arguments);start();}
     @Override public void onStart(){
@@ -59,7 +73,7 @@ public final class UiSmoke extends Instrumentation {
             final AlertDialog[] dialog={null};final EditText[] email={null},password={null},confirmation={null};
             main(()->{dialog[0]=currentDialog();Window window=dialog[0].getWindow();int flags=window.getAttributes().flags;check((flags&WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM)==0,"cloud dialog allows IME connection");check((flags&WindowManager.LayoutParams.FLAG_SECURE)!=0,"cloud dialog retains screenshot protection");List<EditText> fields=new ArrayList<>();collect(window.getDecorView(),fields);check(fields.size()==4,"cloud email confirmation editor is present");email[0]=fields.get(0);password[0]=fields.get(1);confirmation[0]=fields.get(3);check(find(window.getDecorView(),Button.class,"Confirm email code")!=null,"email confirmation action is available");});
             tap(email[0]);boolean keyboard=false;
-            for(int i=0;i<40&&!keyboard;i++){keyboard=keyboardVisible();if(!keyboard)SystemClock.sleep(100);}
+            for(int i=0;i<100&&!keyboard;i++){keyboard=keyboardVisible(email[0]);if(!keyboard)SystemClock.sleep(100);}
             if(!keyboard){String[] state={""};main(()->{android.view.inputmethod.InputMethodManager ime=(android.view.inputmethod.InputMethodManager)target.getSystemService(Context.INPUT_METHOD_SERVICE);state[0]=" (fieldFocus="+email[0].hasFocus()+", windowFocus="+email[0].hasWindowFocus()+", editorConnected="+(ime!=null&&ime.isActive(email[0]))+", flags="+Integer.toHexString(dialog[0].getWindow().getAttributes().flags)+")";});throw new Exception("FAIL soft keyboard appears on cloud email field"+state[0]);}
             check(keyboard,"soft keyboard appears on cloud email field");sendStringSync("demo@example.invalid");waitForIdleSync();main(()->check(email[0].getText().toString().equals("demo@example.invalid"),"email field accepts keyboard input"));
             tap(password[0]);sendStringSync("synthetic-password-123");waitForIdleSync();main(()->{check(password[0].getText().toString().equals("synthetic-password-123"),"cloud password accepts keyboard input");check((password[0].getInputType()&android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD)!=0,"cloud password stays masked");});
