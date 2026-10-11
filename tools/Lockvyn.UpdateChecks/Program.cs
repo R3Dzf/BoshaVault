@@ -54,9 +54,17 @@ if (args.Contains("--apply-installed"))
 foreach (var scenario in new[] { "delta", "missing-base", "damaged-delta", "cancelled", "damaged-full" })
 {
     string root = Path.Combine(testRoot, scenario), packages = Path.Combine(root, "packages"); Directory.CreateDirectory(packages);
+    // Use the real Windows patcher from the trusted fixture package. The SDK
+    // falls back to a full download if Update.exe is absent, even with a valid delta.
+    string current = Path.Combine(root, "current"); Directory.CreateDirectory(current);
+    using (var package = ZipFile.OpenRead(Path.Combine(feedDir, baseline.FileName)))
+    {
+        package.Entries.Single(e => Path.GetFileName(e.FullName).Equals("Update.exe", StringComparison.OrdinalIgnoreCase)).ExtractToFile(Path.Combine(root, "Update.exe"), true);
+        package.Entries.Single(e => e.FullName.EndsWith(".nuspec", StringComparison.OrdinalIgnoreCase)).ExtractToFile(Path.Combine(current, "sq.version"), true);
+    }
     if (scenario is "delta" or "damaged-delta" or "cancelled") File.Copy(Path.Combine(feedDir, baseline.FileName), Path.Combine(packages, baseline.FileName), true);
     var source = new TrackedSource(feedDir) { DamageDelta = scenario == "damaged-delta", DamageFull = scenario == "damaged-full" };
-    var locator = new TestVelopackLocator("Lockvyn", "9.0.0", packages, root, root, Path.Combine(root, "Update.exe"), "win");
+    var locator = new TestVelopackLocator("Lockvyn", "9.0.0", packages, current, root, Path.Combine(root, "Update.exe"), "win", new FixtureLogger());
     var manager = new UpdateManager(source, new UpdateOptions { ExplicitChannel = "win" }, locator);
     var update = await manager.CheckForUpdatesAsync() ?? throw new Exception("Update not found");
     Check(update.TargetFullRelease.Version.ToString() == "9.0.1" && !update.IsDowngrade, scenario + ": upgrade target is correct");
@@ -104,6 +112,11 @@ sealed class TrackedSource(string directory) : IUpdateSource
         if ((DamageDelta && releaseEntry.Type == VelopackAssetType.Delta) || (DamageFull && releaseEntry.Type == VelopackAssetType.Full))
         { using var file = new FileStream(localFile, FileMode.Open, FileAccess.ReadWrite); file.Position = file.Length / 2; int value = file.ReadByte(); file.Position--; file.WriteByte((byte)(value ^ 1)); }
     }
+}
+sealed class FixtureLogger : IVelopackLogger
+{
+    public void Log(VelopackLogLevel level, string? message, Exception? exception = null)
+    { if (exception != null) Console.WriteLine($"SDK {level}: {message} ({exception.Message})"); }
 }
 sealed class RealTestLocator : VelopackLocator
 {
