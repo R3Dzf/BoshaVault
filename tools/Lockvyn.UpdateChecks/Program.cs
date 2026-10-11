@@ -109,8 +109,12 @@ sealed class TrackedSource(string directory) : IUpdateSource
     public Task<VelopackAssetFeed> GetReleaseFeed(IVelopackLogger logger, string? appId, string channel, Guid? stagingId = null, VelopackAsset? latestLocalRelease = null) => source.GetReleaseFeed(logger, appId, channel, stagingId, latestLocalRelease);
     public async Task DownloadReleaseEntry(IVelopackLogger logger, VelopackAsset releaseEntry, string localFile, Action<int> progress, CancellationToken cancelToken = default)
     {
+        // SimpleFileSource uses a synchronous local copy. This tracked source
+        // must honor cancellation like the application's HTTP download source.
+        cancelToken.ThrowIfCancellationRequested();
         Downloads.Add(releaseEntry.FileName); BytesRequested += releaseEntry.Size;
         await source.DownloadReleaseEntry(logger, releaseEntry, localFile, progress, cancelToken);
+        cancelToken.ThrowIfCancellationRequested();
         if ((DamageDelta && releaseEntry.Type == VelopackAssetType.Delta) || (DamageFull && releaseEntry.Type == VelopackAssetType.Full))
         { using var file = new FileStream(localFile, FileMode.Open, FileAccess.ReadWrite); file.Position = file.Length / 2; int value = file.ReadByte(); file.Position--; file.WriteByte((byte)(value ^ 1)); }
     }
