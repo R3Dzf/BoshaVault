@@ -278,13 +278,22 @@ jobs:
         run: |
           set -euo pipefail
           export PATH="$ANDROID_HOME/platform-tools:$PATH"
+          export ANDROID_USER_HOME="$RUNNER_TEMP/lockvyn-android"
+          export ANDROID_EMULATOR_HOME="$ANDROID_USER_HOME"
+          export ANDROID_AVD_HOME="$ANDROID_USER_HOME/avd"
+          mkdir -p "$ANDROID_AVD_HOME"
           AVDMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name avdmanager -print -quit)"
-          printf 'no\n' | "$AVDMANAGER" create avd --force --name BoshaVaultUi --package 'system-images;android-35;google_apis;x86_64' --device 'pixel_2'
-          "$ANDROID_HOME/emulator/emulator" -avd BoshaVaultUi -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -accel on > build-deps/emulator.log 2>&1 &
+          printf 'no\n' | "$AVDMANAGER" create avd --force --name LockvynUi --path "$ANDROID_AVD_HOME/LockvynUi.avd" --package 'system-images;android-35;google_apis;x86_64' --device 'pixel_2'
+          test -f "$ANDROID_AVD_HOME/LockvynUi.ini"
+          "$ANDROID_HOME/emulator/emulator" -list-avds
+          "$ANDROID_HOME/emulator/emulator" -avd LockvynUi -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -accel on > build-deps/emulator.log 2>&1 &
           BV_EMULATOR_PID=$!
           trap 'kill "$BV_EMULATOR_PID" || true' EXIT
+          sleep 2
+          kill -0 "$BV_EMULATOR_PID" || { cat build-deps/emulator.log; exit 1; }
           timeout 180 adb wait-for-device
           for attempt in $(seq 1 150); do
+            kill -0 "$BV_EMULATOR_PID" || { cat build-deps/emulator.log; exit 1; }
             if [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = '1' ]; then break; fi
             sleep 2
           done
