@@ -5,15 +5,18 @@
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
-    <AssemblyName>BoshaVault</AssemblyName>
-    <Product>BoshaVault</Product>
-    <Version>1.8.0-cloud-sync-preview</Version>
-    <ApplicationIcon>Assets/boshavault.ico</ApplicationIcon>
+    <AssemblyName>Lockvyn</AssemblyName>
+    <Product>Lockvyn</Product>
+    <Title>Lockvyn</Title>
+    <Description>Private password manager for Windows and Android</Description>
+    <Version>1.9.0</Version>
+    <ApplicationIcon>Assets/lockvyn.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup><ProjectReference Include="../BoshaVault.Core/BoshaVault.Core.csproj" /></ItemGroup>
   <ItemGroup>
     <Using Remove="System.Drawing" />
     <Using Remove="System.Windows.Forms" />
-    <EmbeddedResource Include="Assets/boshavault.ico" LogicalName="BoshaVault.TrayIcon" />
+    <EmbeddedResource Include="Assets/lockvyn.ico" LogicalName="Lockvyn.TrayIcon" />
+    <Resource Include="Assets/lockvyn-mark.png" />
   </ItemGroup>
 </Project>

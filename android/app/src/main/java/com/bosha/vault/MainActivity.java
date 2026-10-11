@@ -13,11 +13,18 @@ import android.widget.*;
 import java.io.*;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.function.Consumer;
 import org.json.*;
 
 public final class MainActivity extends Activity {
     private VaultEngine engine;
-    private LinearLayout root,list;
+    private LinearLayout root;
+    private ListView list;
+    private BaseAdapter entryAdapter;
+    private TextView vaultStats;
+    private final List<JSONObject> displayedEntries=new ArrayList<>();
+    private String folderFilter;
+
     private final ExecutorService worker=Executors.newSingleThreadExecutor();
     private final Handler handler=new Handler(Looper.getMainLooper());
     private volatile int epoch; private int timeout=2,attempts; private volatile boolean active; private boolean busy; private long lastTouch,retryAfter,clipboardUntil;
@@ -29,7 +36,7 @@ public final class MainActivity extends Activity {
     @Override public void onCreate(Bundle b){super.onCreate(b);try{engine=Store.engine(this);}catch(Exception e){Ui.error(this,e);finish();return;}handler.post(tick);}
     @Override protected void onStart(){super.onStart();active=true;showLock();}
     @Override protected void onResume(){super.onResume();if(scannedPairing!=null){String code=scannedPairing;scannedPairing=null;showPairing(Store.vault(this).exists(),code);}}
-    @Override protected void onStop(){super.onStop();active=false;epoch++;for(AlertDialog d:new ArrayList<>(dialogs))d.dismiss();dialogs.clear();if(root!=null)root.removeAllViews();worker.execute(()->engine.close());}
+    @Override protected void onStop(){super.onStop();active=false;epoch++;for(AlertDialog d:new ArrayList<>(dialogs))d.dismiss();dialogs.clear();displayedEntries.clear();list=null;entryAdapter=null;vaultStats=null;if(root!=null)root.removeAllViews();worker.execute(()->engine.close());}
     @Override protected void onDestroy(){handler.removeCallbacks(tick);worker.shutdown();super.onDestroy();}
     @Override public boolean dispatchTouchEvent(android.view.MotionEvent e){lastTouch=SystemClock.elapsedRealtime();return super.dispatchTouchEvent(e);}
     @Override public void onUserInteraction(){super.onUserInteraction();lastTouch=SystemClock.elapsedRealtime();}
@@ -39,10 +46,10 @@ public final class MainActivity extends Activity {
         if(busy)return;busy=true;int stamp=epoch;
         worker.execute(()->{Exception failure=null;try{action.run();}catch(Exception e){failure=e;}if(!active||stamp!=epoch)engine.close();Exception error=failure;runOnUiThread(()->{busy=false;if(!active||stamp!=epoch)return;if(error!=null)Ui.error(this,error);else done.run();});});
     }
-    private void lock(){epoch++;for(AlertDialog d:new ArrayList<>(dialogs))d.dismiss();dialogs.clear();clearClipboard();worker.execute(()->engine.close());showLock();}
+    private void lock(){epoch++;for(AlertDialog d:new ArrayList<>(dialogs))d.dismiss();dialogs.clear();displayedEntries.clear();list=null;entryAdapter=null;vaultStats=null;clearClipboard();worker.execute(()->engine.close());showLock();}
     private void toast(String s){Toast.makeText(this,s,Toast.LENGTH_LONG).show();}
     private void showLock(){
-        if(!active)return;root=Ui.screen(this);Ui.gap(root,35);LinearLayout logo=Ui.card(this,Ui.SOFT);logo.addView(Ui.text(this,"B",48,Ui.PURPLE,true));logo.addView(Ui.text(this,"Your private space.",27,Ui.INK,true));Ui.gap(logo,9);logo.addView(Ui.text(this,"Encrypted. Local. Yours.",14,Ui.MUTED,false));root.addView(logo);Ui.gap(root,25);
+        if(!active)return;root=Ui.screen(this);Ui.gap(root,35);LinearLayout logo=Ui.card(this,Ui.SOFT);logo.addView(Ui.brandIcon(this,64));logo.addView(Ui.text(this,"Your private space.",27,Ui.INK,true));Ui.gap(logo,9);logo.addView(Ui.text(this,"Encrypted. Local. Yours.",14,Ui.MUTED,false));root.addView(logo);Ui.gap(root,25);
         boolean exists=Store.vault(this).exists();root.addView(Ui.text(this,exists?"Welcome back":"Make yourself at home",25,Ui.INK,true));Ui.gap(root,9);root.addView(Ui.text(this,exists?"Unlock with your master passphrase.":"Choose a unique passphrase with at least 16 characters. A long phrase is easier to remember.",13,Ui.MUTED,false));Ui.gap(root,25);
         EditText master=Ui.field(root,"Master passphrase","",true,1024),confirm=exists?null:Ui.field(root,"Confirm passphrase","",true,1024);
         root.addView(Ui.button(this,exists?"Unlock vault →":"Create encrypted vault →",true,()->{
@@ -52,61 +59,117 @@ public final class MainActivity extends Activity {
         if(exists&&Biometrics.available(this))root.addView(Ui.button(this,"Unlock with fingerprint",false,()->Biometrics.unlock(this,(key,error)->{if(error!=null){Ui.error(this,error);return;}task(()->{try{engine.openWithKey(key);}finally{Arrays.fill(key,(byte)0);}},this::showVault);} )));
         root.addView(Ui.button(this,"Import encrypted vault",false,this::chooseImport));
         if(!exists)root.addView(Ui.button(this,"Receive from your Windows app",false,()->showPairing(false)));
-        Ui.gap(root,25);root.addView(Ui.text(this,"No account. No subscription. No extension.\nPreview release · independent review pending.\nA lost passphrase cannot be reset.",11,Ui.MUTED,false));
+        Ui.gap(root,25);root.addView(Ui.text(this,"Works offline without an account.\nA lost passphrase cannot be reset. Keep an encrypted backup.",11,Ui.MUTED,false));
         if(pendingImport!=null)handler.post(()->importPrompt(pendingImport));
     }
     private void showVault(){
-        if(!engine.isOpen()||!active)return;lastTouch=SystemClock.elapsedRealtime();root=Ui.screen(this);
-        LinearLayout top=new LinearLayout(this);top.setGravity(Gravity.CENTER_VERTICAL);top.addView(Ui.text(this,"BoshaVault",23,Ui.INK,true),new LinearLayout.LayoutParams(0,-2,1));TextView lock=Ui.text(this,"Lock",13,Ui.PURPLE,true);lock.setPadding(15,12,15,12);lock.setOnClickListener(v->lock());top.addView(lock);root.addView(top);Ui.gap(root,25);
-        root.addView(Ui.text(this,"A little peace of mind.",13,Ui.MUTED,false));Ui.gap(root,6);root.addView(Ui.text(this,filter.equals("trash")?"Your trash":filter.equals("favorites")?"Your favorites":filter.equals("health")?"Passwords to review":"Your vault",30,Ui.INK,true));Ui.gap(root,20);
-        try{
-            JSONArray entries=engine.snapshot().getJSONArray("entries");int count=0;for(int i=0;i<entries.length();i++)if(!entries.getJSONObject(i).getBoolean("deleted"))count++;
-            LinearLayout stats=Ui.card(this,Ui.SOFT);stats.addView(Ui.text(this,"SAVED LOGINS",10,Ui.PURPLE,true));stats.addView(Ui.text(this,Integer.toString(count),30,Ui.INK,true));stats.addView(Ui.text(this,"Encrypted on this device · offline first",12,Ui.MUTED,false));root.addView(stats);
-        }catch(Exception e){Ui.error(this,e);}
+        if(!engine.isOpen()||!active)return;lastTouch=SystemClock.elapsedRealtime();list=null;entryAdapter=null;displayedEntries.clear();root=Ui.fixedScreen(this);
+        LinearLayout top=new LinearLayout(this);top.setGravity(Gravity.CENTER_VERTICAL);top.addView(Ui.text(this,"Lockvyn",21,Ui.INK,true),new LinearLayout.LayoutParams(0,-2,1));
+        TextView lock=Ui.text(this,"Lock",13,Ui.PURPLE,true);lock.setPadding(Ui.dp(this,12),Ui.dp(this,12),Ui.dp(this,12),Ui.dp(this,12));lock.setOnClickListener(v->lock());top.addView(lock);root.addView(top);
+        LinearLayout heading=new LinearLayout(this);heading.setGravity(Gravity.CENTER_VERTICAL);
+        String title=filter.equals("trash")?"Your trash":filter.equals("favorites")?"Your favorites":filter.equals("health")?"Review":"Your Vault";
+        heading.addView(Ui.text(this,title,27,Ui.INK,true),new LinearLayout.LayoutParams(0,-2,1));
+        Button options=Ui.button(this,"Options",false,this::options);options.setLayoutParams(new LinearLayout.LayoutParams(-2,-2));heading.addView(options);root.addView(heading);
+        vaultStats=Ui.text(this,"",12,Ui.MUTED,false);Ui.gap(root,8);root.addView(vaultStats);Ui.gap(root,12);
         EditText find=Ui.field(root,"Search your vault",search,false,200);find.setHint("Name, username or website");find.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int a,int c,int f){}public void onTextChanged(CharSequence s,int a,int b,int c){search=s.toString();renderList();}public void afterTextChanged(Editable e){}});
-        LinearLayout tabs=new LinearLayout(this);String[] values={"all","favorites","health","trash"},labels={"All","Favorites","Review","Trash"};for(int i=0;i<4;i++){final String value=values[i];TextView t=Ui.text(this,labels[i],12,filter.equals(value)?Ui.PURPLE:Ui.MUTED,true);t.setPadding(Ui.dp(this,9),Ui.dp(this,12),Ui.dp(this,9),Ui.dp(this,12));t.setOnClickListener(v->{filter=value;showVault();});tabs.addView(t,new LinearLayout.LayoutParams(0,-2,1));}root.addView(tabs);
-        list=Ui.column(this);root.addView(list);renderList();root.addView(Ui.button(this,"+  Add login",true,()->edit(null)));Ui.gap(root,15);
-        root.addView(Ui.button(this,"Password generator",false,this::generator));root.addView(Ui.button(this,"Devices & encrypted backup",false,this::devices));root.addView(Ui.button(this,"Settings & Autofill",false,this::settings));Ui.gap(root,15);root.addView(Ui.text(this,"● Local & encrypted  ·  Locks when you leave the app",11,Ui.MUTED,false));
+        LinearLayout tabs=new LinearLayout(this);String[] values={"all","favorites","health","trash"},labels={"All","Favorites","Review","Trash"};
+        for(int i=0;i<4;i++){final String value=values[i];TextView t=Ui.text(this,labels[i],12,filter.equals(value)?Ui.PURPLE:Ui.MUTED,true);t.setGravity(Gravity.CENTER);t.setPadding(0,Ui.dp(this,12),0,Ui.dp(this,12));t.setOnClickListener(v->{filter=value;showVault();});tabs.addView(t,new LinearLayout.LayoutParams(0,-2,1));}root.addView(tabs);
+        try{
+            List<String> names=new ArrayList<>();names.add("All folders");names.addAll(FolderCatalog.choices(engine.snapshot()));Spinner folders=new Spinner(this);
+            folders.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,names));int selected=0;for(int i=1;i<names.size();i++)if(names.get(i).equalsIgnoreCase(folderFilter))selected=i;folders.setSelection(selected);root.addView(folders,new LinearLayout.LayoutParams(-1,Ui.dp(this,44)));
+            folders.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener(){public void onItemSelected(AdapterView<?> p,View v,int pos,long id){folderFilter=pos==0?null:names.get(pos);renderList();}public void onNothingSelected(AdapterView<?> p){}});
+        }catch(Exception e){Ui.error(this,e);}
+        FrameLayout area=new FrameLayout(this);list=new ListView(this);list.setDivider(null);list.setDividerHeight(0);list.setPadding(0,Ui.dp(this,6),0,0);list.setClipToPadding(false);area.addView(list,new FrameLayout.LayoutParams(-1,-1));
+        TextView empty=Ui.text(this,"No logins here. Change the section, folder or search, or use Options to add a login.",14,Ui.MUTED,false);empty.setGravity(Gravity.CENTER);empty.setPadding(Ui.dp(this,14),Ui.dp(this,14),Ui.dp(this,14),Ui.dp(this,14));area.addView(empty,new FrameLayout.LayoutParams(-1,-1));list.setEmptyView(empty);root.addView(area,new LinearLayout.LayoutParams(-1,0,1));
+        entryAdapter=new BaseAdapter(){
+            public int getCount(){return displayedEntries.size();}public Object getItem(int position){return displayedEntries.get(position);}public long getItemId(int position){return position;}
+            public View getView(int position,View recycled,ViewGroup parent){
+                LinearLayout row;TextView[] text;
+                if(recycled==null){row=Ui.column(MainActivity.this);int pad=Ui.dp(MainActivity.this,15);row.setPadding(pad,pad,pad,pad);row.setBackground(Ui.shape(android.graphics.Color.WHITE,Ui.dp(MainActivity.this,12)));text=new TextView[]{Ui.text(MainActivity.this,"",16,Ui.INK,true),Ui.text(MainActivity.this,"",12,Ui.MUTED,false),Ui.text(MainActivity.this,"",11,Ui.PURPLE,false)};for(TextView t:text){t.setSingleLine(true);t.setEllipsize(TextUtils.TruncateAt.END);row.addView(t);Ui.gap(row,5);}row.setTag(text);}else{row=(LinearLayout)recycled;text=(TextView[])row.getTag();}
+                JSONObject e=displayedEntries.get(position);text[0].setText(e.optString("title")+(e.optBoolean("favorite")?"   ★":""));text[1].setText(e.optString("username"));text[2].setText(e.optString("folder"));return row;
+            }
+        };list.setAdapter(entryAdapter);list.setOnItemClickListener((parent,view,position,id)->{if(position<displayedEntries.size())detail(displayedEntries.get(position));});renderList();
     }
     private void renderList(){
-        if(list==null||!engine.isOpen())return;list.removeAllViews();
+        if(list==null||entryAdapter==null||!engine.isOpen())return;
         try{
-            JSONArray entries=engine.snapshot().getJSONArray("entries");List<JSONObject> live=new ArrayList<>();Map<String,Integer> passwords=new HashMap<>();
-            for(int i=0;i<entries.length();i++){JSONObject e=entries.getJSONObject(i);if(!e.getBoolean("deleted"))passwords.put(e.getString("password"),passwords.getOrDefault(e.getString("password"),0)+1);}
+            JSONArray entries=engine.snapshot().getJSONArray("entries");Set<String> pending=new HashSet<>();for(PasswordHealth.Finding f:PasswordHealth.audit(entries))if(!f.acknowledged)pending.add(f.id);int count=0;displayedEntries.clear();
             for(int i=0;i<entries.length();i++){
-                JSONObject e=entries.getJSONObject(i);if(e.getBoolean("deleted")!=filter.equals("trash"))continue;if(filter.equals("favorites")&&!e.getBoolean("favorite"))continue;
-                if(filter.equals("health")&&e.getString("password").length()>=16&&passwords.getOrDefault(e.getString("password"),0)<2)continue;
-                String haystack=(e.getString("title")+" "+e.getString("username")+" "+e.getString("url")+" "+e.getString("folder")).toLowerCase(Locale.ROOT);if(!haystack.contains(search.toLowerCase(Locale.ROOT)))continue;live.add(e);
+                JSONObject e=entries.getJSONObject(i);if(!e.getBoolean("deleted"))count++;if(e.getBoolean("purged")||e.getBoolean("deleted")!=filter.equals("trash"))continue;
+                if(filter.equals("favorites")&&!e.getBoolean("favorite"))continue;if(filter.equals("health")&&!pending.contains(e.getString("id")))continue;if(folderFilter!=null&&!folderFilter.equalsIgnoreCase(e.getString("folder")))continue;
+                String haystack=(e.getString("title")+" "+e.getString("username")+" "+e.getString("url")+" "+e.getString("folder")).toLowerCase(Locale.ROOT);if(!haystack.contains(search.toLowerCase(Locale.ROOT)))continue;displayedEntries.add(e);
             }
-            live.sort(Comparator.comparing(e->e.optString("title").toLowerCase(Locale.ROOT)));
-            for(JSONObject e:live){LinearLayout card=Ui.card(this,android.graphics.Color.WHITE);TextView name=Ui.text(this,e.getString("title")+(e.getBoolean("favorite")?"   ★":""),16,Ui.INK,true);card.addView(name);Ui.gap(card,6);card.addView(Ui.text(this,e.getString("username"),12,Ui.MUTED,false));card.setOnClickListener(v->detail(e));list.addView(card);}
-            if(live.isEmpty()){LinearLayout c=Ui.card(this,Ui.GREEN);c.addView(Ui.text(this,"✧  Your private space awaits",16,Ui.INK,true));Ui.gap(c,7);c.addView(Ui.text(this,"Add a login or import an encrypted vault.",12,Ui.MUTED,false));list.addView(c);}
+            displayedEntries.sort((a,b)->{int favorite=Boolean.compare(b.optBoolean("favorite"),a.optBoolean("favorite"));return favorite!=0?favorite:a.optString("title").compareToIgnoreCase(b.optString("title"));});
+            vaultStats.setText(count+" saved logins · "+pending.size()+" to review · "+displayedEntries.size()+" shown");entryAdapter.notifyDataSetChanged();
         }catch(Exception e){Ui.error(this,e);}
     }
-    private AlertDialog dialog(String title,LinearLayout body){ScrollView scroll=new ScrollView(this);int p=Ui.dp(this,22);body.setPadding(p,p,p,p);scroll.addView(body);AlertDialog d=new AlertDialog.Builder(this).setTitle(title).setView(scroll).setNegativeButton("Close",null).create();dialogs.add(d);d.setOnDismissListener(x->dialogs.remove(d));d.show();d.getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE,WindowManager.LayoutParams.FLAG_SECURE);return d;}
+    private void options(){
+        LinearLayout b=Ui.column(this);AlertDialog d=dialog("Vault options",b);
+        b.addView(Ui.button(this,"+ Add login",true,()->{d.dismiss();edit(null);}));
+        b.addView(Ui.button(this,"Generate password",false,()->{d.dismiss();generator();}));
+        b.addView(Ui.button(this,"Folders",false,()->{d.dismiss();folders();}));
+        b.addView(Ui.button(this,"Devices & encrypted backup",false,()->{d.dismiss();devices();}));
+        b.addView(Ui.button(this,"Settings & Autofill",false,()->{d.dismiss();settings();}));
+    }
+    private void folders(){
+        try{
+            LinearLayout b=Ui.column(this);b.addView(Ui.text(this,"Folders classify your logins independently of All, Favorites, Review and Trash. Choose a folder above the list, or assign one while editing.",13,Ui.MUTED,false));List<String> names=FolderCatalog.choices(engine.snapshot());Spinner select=new Spinner(this);ArrayAdapter<String> adapter=new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,names);select.setAdapter(adapter);b.addView(select);AlertDialog d=dialog("Folders",b);
+            b.addView(Ui.button(this,"Show this folder",true,()->{folderFilter=(String)select.getSelectedItem();d.dismiss();showVault();}));
+            b.addView(Ui.button(this,"Add a new folder",false,()->addFolder(name->{if(!names.contains(name)){names.add(name);adapter.notifyDataSetChanged();}select.setSelection(names.indexOf(name));showVault();})));
+        }catch(Exception e){Ui.error(this,e);}
+    }
+    private void addFolder(Consumer<String> added){
+        LinearLayout b=Ui.column(this);EditText name=Ui.field(b,"New folder name","",false,100);AlertDialog d=dialog("New folder",b);
+        b.addView(Ui.button(this,"Add folder",true,()->{try{String typed=FolderCatalog.normalize(name.getText().toString());String canonical=typed;for(String existing:FolderCatalog.choices(engine.snapshot()))if(existing.equalsIgnoreCase(typed)){canonical=existing;break;}final String value=canonical;task(()->engine.addFolder(value),()->{d.dismiss();added.accept(value);});}catch(Exception e){toast(e.getMessage());}}));
+    }
+    private AlertDialog dialog(String title,LinearLayout body){ScrollView scroll=new ScrollView(this);int p=Ui.dp(this,22);body.setPadding(p,p,p,p);scroll.addView(body);AlertDialog d=new AlertDialog.Builder(this).setTitle(title).setView(scroll).setNegativeButton("Close",null).create();dialogs.add(d);d.setOnDismissListener(x->dialogs.remove(d));d.show();d.getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE,WindowManager.LayoutParams.FLAG_SECURE);
+        // Some forms add fields after showing. AlertDialog otherwise marks the initially
+        // non-editable window ALT_FOCUSABLE_IM and prevents the soft keyboard.
+        d.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM);d.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);return d;}
     private void detail(JSONObject entry){
         try{
-            LinearLayout b=Ui.column(this);b.addView(Ui.text(this,entry.getString("url").isEmpty()?"No website saved":VaultEngine.host(entry.getString("url")),12,Ui.MUTED,false));Ui.gap(b,16);b.addView(Ui.text(this,"Username / email",12,Ui.MUTED,false));b.addView(Ui.text(this,entry.getString("username"),16,Ui.INK,false));b.addView(Ui.button(this,"Copy username",false,()->copy(entry.optString("username"))));Ui.gap(b,15);TextView password=Ui.text(this,"••••••••••••••••",20,Ui.INK,false);b.addView(password);b.addView(Ui.button(this,"Show for 15 seconds",false,()->{password.setText(entry.optString("password"));handler.postDelayed(()->password.setText("••••••••••••••••"),15000);}));b.addView(Ui.button(this,"Copy password",true,()->copy(entry.optString("password"))));Ui.gap(b,15);b.addView(Ui.text(this,entry.getString("notes"),13,Ui.INK,false));AlertDialog d=dialog(entry.getString("title"),b);
-            b.addView(Ui.button(this,"Edit login",false,()->{d.dismiss();edit(entry);}));
-            if(!entry.getString("url").isEmpty())b.addView(Ui.button(this,"Open website",false,()->startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(entry.optString("url"))))));
+            LinearLayout b=Ui.column(this);b.addView(Ui.text(this,entry.getString("url").isEmpty()?"No website saved":VaultEngine.host(entry.getString("url")),12,Ui.MUTED,false));b.addView(Ui.text(this,"Folder: "+entry.getString("folder"),12,Ui.PURPLE,false));Ui.gap(b,16);
+            b.addView(Ui.text(this,"Username / email",12,Ui.MUTED,false));b.addView(Ui.text(this,entry.getString("username"),16,Ui.INK,false));b.addView(Ui.button(this,"Copy username",false,()->copy(entry.optString("username"))));Ui.gap(b,15);TextView password=Ui.text(this,"••••••••••••••••",20,Ui.INK,false);b.addView(password);
+            b.addView(Ui.button(this,"Show for 15 seconds",false,()->{password.setText(entry.optString("password"));handler.postDelayed(()->password.setText("••••••••••••••••"),15000);}));b.addView(Ui.button(this,"Copy password",true,()->copy(entry.optString("password"))));Ui.gap(b,15);b.addView(Ui.text(this,entry.getString("notes"),13,Ui.INK,false));AlertDialog d=dialog(entry.getString("title"),b);
+            b.addView(Ui.button(this,"Edit login",false,()->{d.dismiss();edit(entry);}));if(!entry.getString("url").isEmpty())b.addView(Ui.button(this,"Open website",false,()->startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(entry.optString("url"))))));
             boolean deleted=entry.getBoolean("deleted");b.addView(Ui.button(this,deleted?"Restore login":"Move to trash",false,()->task(()->{JSONObject copy=new JSONObject(entry.toString());copy.put("deleted",!deleted);engine.upsert(copy);},()->{d.dismiss();showVault();})));
+            if(deleted)b.addView(Ui.button(this,"Delete permanently",false,()->new AlertDialog.Builder(this).setTitle("Delete permanently?").setMessage("Remove this login from the vault with no restore option? Older exported backups and unsynced devices may still hold their previous encrypted copy.").setNegativeButton("Cancel",null).setPositiveButton("Delete permanently",(x,w)->task(()->engine.deletePermanently(entry.getString("id")),()->{clearClipboard();d.dismiss();toast("Permanently deleted. Sync your other devices.");showVault();})).show()));
+            if(!deleted)for(PasswordHealth.Finding f:PasswordHealth.audit(engine.snapshot().getJSONArray("entries")))if(f.id.equals(entry.getString("id"))){
+                b.addView(Ui.text(this,(f.acknowledged?"Reviewed: ":"Review: ")+String.join("; ",f.reasons),12,Ui.MUTED,false));
+                if(!f.acknowledged)b.addView(Ui.button(this,"I reviewed this login",false,()->new AlertDialog.Builder(this).setTitle("Confirm review").setMessage("I checked the warnings and accept this password for this login. Remove it from Review? Warnings return if the password or its risks change.").setNegativeButton("Cancel",null).setPositiveButton("Confirm review",(x,w)->task(()->engine.acknowledgeReview(entry.getString("id")),()->{d.dismiss();showVault();})).show()));
+            }
         }catch(Exception e){Ui.error(this,e);}
     }
     private void edit(JSONObject original){
         try{
             JSONObject entry=original==null?VaultEngine.blank():new JSONObject(original.toString());LinearLayout b=Ui.column(this);EditText title=Ui.field(b,"Name",entry.getString("title"),false,200),username=Ui.field(b,"Username / email",entry.getString("username"),false,2000),password=Ui.field(b,"Password",entry.getString("password"),true,4096);
-            b.addView(Ui.button(this,"Generate a strong password",false,()->{try{password.setText(VaultEngine.generate(24,true));}catch(Exception e){Ui.error(this,e);}}));Ui.gap(b,15);EditText url=Ui.field(b,"Website (https://example.com)",entry.getString("url"),false,2048),folder=Ui.field(b,"Folder",entry.getString("folder"),false,100),notes=Ui.field(b,"Private notes",entry.getString("notes"),false,32000);notes.setSingleLine(false);notes.setMinLines(2);CheckBox favorite=new CheckBox(this);favorite.setText("Add to favorites");favorite.setChecked(entry.getBoolean("favorite"));b.addView(favorite);AlertDialog d=dialog(original==null?"Add a new login":"Edit login",b);
+            b.addView(Ui.button(this,"Generate password · choose rules",false,()->generator(value->password.setText(value))));Ui.gap(b,15);EditText url=Ui.field(b,"Website (https://example.com)",entry.getString("url"),false,2048);
+            b.addView(Ui.text(this,"Folder",12,Ui.MUTED,false));List<String> names=FolderCatalog.choices(engine.snapshot());String current=entry.getString("folder");if(!names.contains(current)&&!current.isEmpty())names.add(current);Spinner folder=new Spinner(this);ArrayAdapter<String> adapter=new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,names);folder.setAdapter(adapter);folder.setSelection(Math.max(0,names.indexOf(current)));b.addView(folder);
+            b.addView(Ui.button(this,"+ New folder",false,()->addFolder(name->{if(!names.contains(name)){names.add(name);adapter.notifyDataSetChanged();}folder.setSelection(names.indexOf(name));})));
+            EditText notes=Ui.field(b,"Private notes",entry.getString("notes"),false,32000);notes.setSingleLine(false);notes.setMinLines(2);CheckBox favorite=new CheckBox(this);favorite.setText("Add to favorites");favorite.setChecked(entry.getBoolean("favorite"));b.addView(favorite);AlertDialog d=dialog(original==null?"Add a new login":"Edit login",b);
             b.addView(Ui.button(this,"Save login",true,()->{
-                try{if(title.getText().toString().trim().isEmpty())throw new Exception("Give this login a name.");String website=url.getText().toString().trim();if(!website.isEmpty())VaultEngine.host(website);entry.put("title",title.getText().toString().trim()).put("username",username.getText().toString()).put("password",password.getText().toString()).put("url",website).put("folder",folder.getText().toString()).put("notes",notes.getText().toString()).put("favorite",favorite.isChecked()).put("deleted",false);task(()->engine.upsert(entry),()->{password.setText("");username.setText("");notes.setText("");d.dismiss();showVault();});}catch(Exception e){Ui.error(this,e);}
+                try{if(title.getText().toString().trim().isEmpty())throw new Exception("Give this login a name.");String website=url.getText().toString().trim();if(!website.isEmpty())VaultEngine.host(website);entry.put("title",title.getText().toString().trim()).put("username",username.getText().toString()).put("password",password.getText().toString()).put("url",website).put("folder",FolderCatalog.normalize((String)folder.getSelectedItem())).put("notes",notes.getText().toString()).put("favorite",favorite.isChecked());task(()->engine.upsert(entry),()->{password.setText("");username.setText("");notes.setText("");d.dismiss();showVault();});}catch(Exception e){Ui.error(this,e);}
             }));
         }catch(Exception e){Ui.error(this,e);}
     }
-    private void generator(){
-        LinearLayout b=Ui.column(this);EditText value=Ui.field(b,"Generated on this device","",false,128);value.setFocusable(false);try{value.setText(VaultEngine.generate(24,true));}catch(Exception e){Ui.error(this,e);}TextView label=Ui.text(this,"Length: 24",13,Ui.MUTED,false);b.addView(label);SeekBar length=new SeekBar(this);length.setMax(48);length.setProgress(8);b.addView(length);length.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){public void onProgressChanged(SeekBar s,int p,boolean u){label.setText("Length: "+(p+16));}public void onStartTrackingTouch(SeekBar s){}public void onStopTrackingTouch(SeekBar s){}});CheckBox symbols=new CheckBox(this);symbols.setText("Include symbols");symbols.setChecked(true);b.addView(symbols);b.addView(Ui.button(this,"Generate again",false,()->{try{value.setText(VaultEngine.generate(length.getProgress()+16,symbols.isChecked()));}catch(Exception e){Ui.error(this,e);}}));b.addView(Ui.button(this,"Copy password",true,()->copy(value.getText().toString())));dialog("Make a stronger password",b);
+    private void generator(){generator(null);}
+    private void generator(Consumer<String> use){
+        PasswordOptions defaults=GeneratorPreferences.load(this);LinearLayout b=Ui.column(this);b.addView(Ui.text(this,"Default length starts at 24. Choose the website's required rules; 16 or more characters are recommended.",13,Ui.MUTED,false));
+        EditText value=Ui.field(b,"Generated on this device","",false,128);value.setKeyListener(null);EditText length=Ui.field(b,"Length (8–128)",Integer.toString(defaults.length),false,3);length.setInputType(InputType.TYPE_CLASS_NUMBER);
+        CheckBox lower=check(b,"Lowercase letters (a–z)",defaults.lowercase),upper=check(b,"Uppercase letters (A–Z)",defaults.uppercase),digits=check(b,"Digits (0–9)",defaults.digits),symbols=check(b,"Symbols",defaults.symbols),ambiguous=check(b,"Exclude ambiguous characters (0, O, 1, I, l)",defaults.excludeAmbiguous);
+        EditText allowed=Ui.field(b,"Allowed symbols (only these will be used)",defaults.allowedSymbols,false,32),minDigits=Ui.field(b,"Minimum digits when enabled",Integer.toString(defaults.minimumDigits),false,3),minSymbols=Ui.field(b,"Minimum symbols when enabled",Integer.toString(defaults.minimumSymbols),false,3);minDigits.setInputType(InputType.TYPE_CLASS_NUMBER);minSymbols.setInputType(InputType.TYPE_CLASS_NUMBER);
+        TextView status=Ui.text(this,"",12,Ui.MUTED,false);b.addView(status);
+        Callable<PasswordOptions> read=()->{PasswordOptions o=new PasswordOptions();o.length=Integer.parseInt(length.getText().toString());o.lowercase=lower.isChecked();o.uppercase=upper.isChecked();o.digits=digits.isChecked();o.symbols=symbols.isChecked();o.excludeAmbiguous=ambiguous.isChecked();o.allowedSymbols=allowed.getText().toString();o.minimumDigits=Integer.parseInt(minDigits.getText().toString());o.minimumSymbols=Integer.parseInt(minSymbols.getText().toString());o.validate();return o;};
+        TextWatcher changed=new TextWatcher(){public void beforeTextChanged(CharSequence s,int a,int c,int f){}public void onTextChanged(CharSequence s,int a,int c,int n){value.setText("");}public void afterTextChanged(Editable e){}};for(EditText field:new EditText[]{length,allowed,minDigits,minSymbols})field.addTextChangedListener(changed);for(CheckBox c:new CheckBox[]{lower,upper,digits,symbols,ambiguous})c.setOnCheckedChangeListener((button,enabled)->value.setText(""));
+        try{value.setText(defaults.generate());}catch(Exception e){status.setText(e.getMessage());}AlertDialog d=dialog("Generate password",b);
+        b.addView(Ui.button(this,"Generate again",false,()->{try{value.setText(read.call().generate());status.setText("");}catch(Exception e){status.setText(e instanceof NumberFormatException?"Enter whole numbers for length and minimum counts.":e.getMessage());}}));
+        b.addView(Ui.button(this,use==null?"Copy password":"Use this password",true,()->{try{if(value.getText().length()==0)value.setText(read.call().generate());if(use==null)copy(value.getText().toString());else{use.accept(value.getText().toString());d.dismiss();}}catch(Exception e){status.setText(e instanceof NumberFormatException?"Enter whole numbers for length and minimum counts.":e.getMessage());}}));
+        b.addView(Ui.button(this,"Save these rules as my default",false,()->{try{GeneratorPreferences.save(this,read.call());status.setText("Default rules saved on this device.");}catch(Exception e){status.setText(e instanceof NumberFormatException?"Enter whole numbers for length and minimum counts.":e.getMessage());}}));d.setOnDismissListener(x->{value.setText("");dialogs.remove(d);});
     }
-    private void copy(String value){ClipboardManager c=(ClipboardManager)getSystemService(CLIPBOARD_SERVICE);ClipData data=ClipData.newPlainText("BoshaVault",value);if(Build.VERSION.SDK_INT>=33){PersistableBundle extras=new PersistableBundle();extras.putBoolean(ClipDescription.EXTRA_IS_SENSITIVE,true);data.getDescription().setExtras(extras);}c.setPrimaryClip(data);clipboard=value;clipboardUntil=SystemClock.elapsedRealtime()+20000;handler.postDelayed(()->{if(SystemClock.elapsedRealtime()>=clipboardUntil)clearClipboard();},20000);toast("Copied. Clipboard clears in 20 seconds. Paste into the intended app.");}
+    private CheckBox check(LinearLayout body,String label,boolean enabled){CheckBox c=new CheckBox(this);c.setText(label);c.setChecked(enabled);body.addView(c);return c;}
+    private void copy(String value){ClipboardManager c=(ClipboardManager)getSystemService(CLIPBOARD_SERVICE);ClipData data=ClipData.newPlainText("Lockvyn",value);if(Build.VERSION.SDK_INT>=33){PersistableBundle extras=new PersistableBundle();extras.putBoolean(ClipDescription.EXTRA_IS_SENSITIVE,true);data.getDescription().setExtras(extras);}c.setPrimaryClip(data);clipboard=value;clipboardUntil=SystemClock.elapsedRealtime()+20000;handler.postDelayed(()->{if(SystemClock.elapsedRealtime()>=clipboardUntil)clearClipboard();},20000);toast("Copied. Clipboard clears in 20 seconds. Paste into the intended app.");}
     private void clearClipboard(){try{ClipboardManager c=(ClipboardManager)getSystemService(CLIPBOARD_SERVICE);ClipData d=c.getPrimaryClip();if(clipboard!=null&&d!=null&&d.getItemCount()>0&&clipboard.contentEquals(d.getItemAt(0).coerceToText(this)))c.clearPrimaryClip();clipboard=null;}catch(Exception ignored){}}
-    private void devices(){LinearLayout b=Ui.column(this);b.addView(Ui.text(this,"Transfer encrypted data only. Both devices stay usable offline. Keep a backup away from this phone.",13,Ui.MUTED,false));b.addView(Ui.button(this,"Export encrypted backup",true,()->{try{exportBytes=engine.export();startActivityForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT).setType("application/octet-stream").addCategory(Intent.CATEGORY_OPENABLE).putExtra(Intent.EXTRA_TITLE,"BoshaVault.boshavault"),11);}catch(Exception e){Ui.error(this,e);}}));b.addView(Ui.button(this,"Import / merge encrypted backup",false,this::chooseImport));b.addView(Ui.button(this,"Connect to Windows over Wi-Fi",false,()->showPairing(true)));b.addView(Ui.button(this,"Optional encrypted cloud sync",false,this::cloud));dialog("Devices & encrypted backup",b);}
+    private void devices(){LinearLayout b=Ui.column(this);b.addView(Ui.text(this,"Transfer encrypted data only. Both devices stay usable offline. Keep a backup away from this phone.",13,Ui.MUTED,false));b.addView(Ui.button(this,"Export encrypted backup",true,()->{try{exportBytes=engine.export();startActivityForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT).setType("application/octet-stream").addCategory(Intent.CATEGORY_OPENABLE).putExtra(Intent.EXTRA_TITLE,"Lockvyn.boshavault"),11);}catch(Exception e){Ui.error(this,e);}}));b.addView(Ui.button(this,"Import / merge encrypted backup",false,this::chooseImport));b.addView(Ui.button(this,"Connect to Windows over Wi-Fi",false,()->showPairing(true)));b.addView(Ui.button(this,"Optional encrypted cloud sync",false,this::cloud));dialog("Devices & encrypted backup",b);}
 
     private void cloudTask(TextView status,Work action,Runnable done){
         if(busy){toast("A vault operation is already running.");return;}
@@ -138,11 +201,12 @@ public final class MainActivity extends Activity {
             b.addView(Ui.button(this,"Disconnect this device",false,()->new AlertDialog.Builder(this).setTitle("Disconnect cloud?").setMessage("Keep your local vault and encrypted cloud backups, and sign out this cloud session? Keep your connection code on another trusted device first.").setNegativeButton("Cancel",null).setPositiveButton("Disconnect",(x,y)->cloudTask(status,()->client.signOut(profile,store),()->{d.dismiss();toast("Cloud session signed out. Previously issued access tokens expire normally. Local vault unchanged.");})).show()));
             b.addView(Ui.button(this,"Forget local cloud settings (offline)",false,()->new AlertDialog.Builder(this).setTitle("Forget cloud settings?").setMessage("This forgets your recovery key and saved sign-in on this phone. It does not revoke server sessions or remove cloud backups. Keep your code elsewhere first.").setNegativeButton("Cancel",null).setPositiveButton("Forget",(x,y)->cloudTask(status,store::forget,()->{d.dismiss();toast("Local settings forgotten; server session not revoked.");})).show()));
         }else{
-            b.addView(Ui.text(this,"Optional manual sync. Your data is encrypted on-device before upload. This cloud login is separate from your Supabase dashboard login.",13,Ui.MUTED,false));
-            b.addView(Ui.text(this,"For this private preview, use the email associated with your new Supabase account.",12,Ui.MUTED,false));
-            EditText email=Ui.field(b,"Cloud account email","",false,320),password=Ui.field(b,"Separate cloud password (16+ characters)","",true,1024),code=Ui.field(b,"Other device's cloud connection code (only when joining)","",true,1024);
+            b.addView(Ui.text(this,"Create a Lockvyn cloud account here with your own email. Each person uses their own account; sign in with that same account on your own devices.",13,Ui.MUTED,false));
+            b.addView(Ui.text(this,"Your offline vault needs no account. The cloud password is separate from your master passphrase.",12,Ui.MUTED,false));
+            EditText email=Ui.field(b,"Cloud account email","",false,320),password=Ui.field(b,"Separate cloud password (16+ characters)","",true,1024),code=Ui.field(b,"Other device's cloud connection code (only when joining)","",true,1024);email.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
             b.addView(Ui.text(this,"First device: create a cloud account, confirm its email, then start a new cloud vault. Second device: first transfer the same vault over Wi-Fi, then sign in with the same cloud account and paste its code.",12,Ui.MUTED,false));
             b.addView(Ui.button(this,"Create cloud account",false,()->{String secret=password.getText().toString(),address=email.getText().toString().trim();password.setText("");cloudTask(status,()->client.signUp(address,secret),()->status.setText("Confirm the account using your email, then sign in below. Local vault unchanged."));}));
+            b.addView(Ui.button(this,"Resend confirmation email",false,()->{String address=email.getText().toString().trim();cloudTask(status,()->client.resendConfirmation(address),()->status.setText("If the account is awaiting confirmation, check your email including Spam. Wait at least 60 seconds before requesting another message."));}));
             for(boolean existing:new boolean[]{false,true})b.addView(Ui.button(this,existing?"Join this vault's existing cloud":"Start a new cloud vault",!existing,()->{
                 String address=email.getText().toString().trim(),secret=password.getText().toString(),pairingCode=code.getText().toString().trim();password.setText("");code.setText("");
                 cloudTask(status,()->{
@@ -156,7 +220,7 @@ public final class MainActivity extends Activity {
         Ui.gap(b,12);b.addView(status);
     }
     private void chooseImport(){startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*").addCategory(Intent.CATEGORY_OPENABLE),12);}
-    @Override protected void onActivityResult(int request,int result,Intent intent){super.onActivityResult(request,result,intent);if(request==13){scannedPairing="";if(result==RESULT_OK&&intent!=null){String code=intent.getStringExtra(ScanQrActivity.RESULT_PAIRING);try{new LocalTransfer(code);scannedPairing=code;}catch(Exception e){toast("The scanned code is not a valid BoshaVault pairing code.");}}return;}if(result!=RESULT_OK||intent==null||intent.getData()==null){exportBytes=null;return;}Uri uri=intent.getData();
+    @Override protected void onActivityResult(int request,int result,Intent intent){super.onActivityResult(request,result,intent);if(request==13){scannedPairing="";if(result==RESULT_OK&&intent!=null){String code=intent.getStringExtra(ScanQrActivity.RESULT_PAIRING);try{new LocalTransfer(code);scannedPairing=code;}catch(Exception e){toast("The scanned code is not a valid Lockvyn pairing code.");}}return;}if(result!=RESULT_OK||intent==null||intent.getData()==null){exportBytes=null;return;}Uri uri=intent.getData();
         if(request==11&&exportBytes!=null){byte[] bytes=exportBytes;exportBytes=null;task(()->{try(OutputStream out=getContentResolver().openOutputStream(uri,"wt")){if(out==null)throw new Exception("Cannot write the backup.");out.write(bytes);}},()->toast("Encrypted backup saved."));}
         else if(request==12){task(()->{try(InputStream in=getContentResolver().openInputStream(uri)){if(in==null)throw new Exception("Cannot read this file.");pendingImport=VaultEngine.bounded(in);}},()->importPrompt(pendingImport));}
     }
@@ -195,13 +259,13 @@ public final class MainActivity extends Activity {
             providerStatus.setText(AutofillStatus.summary(this));
             lastRequest.setText(AutofillStatus.diagnostic(this));
         }));
-        b.addView(Ui.text(this,"How it appears: Tap a recognized login field in another app or browser. Android can show 'Fill with BoshaVault' near the field. Unlock, then select a matching account. If nothing appears, return here and refresh status. Verified HTTPS websites and approved apps only.",12,Ui.MUTED,false));
+        b.addView(Ui.text(this,"How it appears: Tap a recognized login field in another app or browser. Android can show 'Fill with Lockvyn' near the field. Unlock, then select a matching account. If nothing appears, return here and refresh status. Verified HTTPS websites and approved apps only.",12,Ui.MUTED,false));
         Ui.gap(b,8);
         b.addView(Ui.button(this,"Enable Android Autofill",true,()->{try{startActivity(new Intent(Settings.ACTION_REQUEST_SET_AUTOFILL_SERVICE,Uri.parse("package:"+getPackageName())));}catch(Exception e){startActivity(new Intent(Settings.ACTION_SETTINGS));}}));
         b.addView(Ui.button(this,Biometrics.available(this)?"Disable fingerprint unlock":"Enable fingerprint unlock",false,()->{
             try{if(Biometrics.available(this)){Biometrics.disable(this);toast("Fingerprint unlock disabled.");}else Biometrics.enable(this,engine.biometricKey(),(key,error)->{if(error!=null)Ui.error(this,error);else toast("Fingerprint unlock enabled for this phone.");});}catch(Exception e){Ui.error(this,e);}
         }));b.addView(Ui.button(this,"Clear Autofill diagnostics",false,()->{AutofillStatus.clear(this);lastRequest.setText(AutofillStatus.diagnostic(this));}));
         b.addView(Ui.button(this,"Revoke all Autofill app approvals",false,()->task(engine::revokeTrust,()->toast("Approvals revoked. Apps must be approved again."))));
-        Ui.gap(b,20);EditText current=Ui.field(b,"Current master passphrase","",true,1024),next=Ui.field(b,"New master passphrase (16+ characters)","",true,1024),confirm=Ui.field(b,"Confirm new passphrase","",true,1024);b.addView(Ui.button(this,"Change master passphrase",false,()->{String c=current.getText().toString(),n=next.getText().toString();if(!n.equals(confirm.getText().toString())){toast("Passphrases do not match.");return;}current.setText("");next.setText("");confirm.setText("");task(()->{engine.changePassword(c,n);Biometrics.disable(this);},()->toast("Passphrase changed. Old backups still use their original passphrase."));}));Ui.gap(b,16);b.addView(Ui.text(this,"Screenshots are blocked where Android supports it. Copying a password exposes it to the clipboard. Malware on an unlocked device can still steal data. No cloud sync, passkey storage or breach lookup is included.",11,Ui.MUTED,false));dialog("Your vault settings",b);
+        Ui.gap(b,20);EditText current=Ui.field(b,"Current master passphrase","",true,1024),next=Ui.field(b,"New master passphrase (16+ characters)","",true,1024),confirm=Ui.field(b,"Confirm new passphrase","",true,1024);b.addView(Ui.button(this,"Change master passphrase",false,()->{String c=current.getText().toString(),n=next.getText().toString();if(!n.equals(confirm.getText().toString())){toast("Passphrases do not match.");return;}current.setText("");next.setText("");confirm.setText("");task(()->{engine.changePassword(c,n);Biometrics.disable(this);},()->toast("Passphrase changed. Old backups still use their original passphrase."));}));Ui.gap(b,16);b.addView(Ui.text(this,"Screenshots are blocked where Android supports it. Copying a password exposes it to the clipboard. Malware on an unlocked device can still steal data. Optional cloud sync is available in Devices & encrypted backup. Passkeys and online breach lookup are not included.",11,Ui.MUTED,false));dialog("Your vault settings",b);
     }
 }

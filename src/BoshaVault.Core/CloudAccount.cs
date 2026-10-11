@@ -131,9 +131,26 @@ public sealed class SupabaseCloudAccount(HttpClient http)
             request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
             using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
-                throw new VaultException(response.StatusCode == System.Net.HttpStatusCode.TooManyRequests
+            {
+                string code = ""; byte[] error = await ReadBounded(response.Content, 65536, ct).ConfigureAwait(false);
+                try
+                {
+                    using var json = JsonDocument.Parse(error, new JsonDocumentOptions { MaxDepth = 16 });
+                    if (json.RootElement.ValueKind == JsonValueKind.Object && json.RootElement.TryGetProperty("code", out var value) && value.ValueKind == JsonValueKind.String) code = value.GetString() ?? "";
+                }
+                catch (JsonException) { }
+                finally { CryptographicOperations.ZeroMemory(error); }
+                string message = response.StatusCode == System.Net.HttpStatusCode.TooManyRequests
                     ? "Cloud account rate limit reached. Wait before trying again. Your offline vault is unchanged."
-                    : "Cloud sign-in was rejected. Check your email/password and confirm your email before signing in.");
+                    : code == "email_address_not_authorized"
+                    ? "Email verification delivery is not enabled for this address yet. The app owner needs to configure the email sender. You can use your vault offline without an account."
+                    : code == "email_not_confirmed"
+                    ? "Confirm your account email first. Use Resend confirmation email if needed."
+                    : path is "auth/v1/signup" or "auth/v1/resend"
+                    ? "Cloud account verification could not be completed. Check the email and password requirements, or try again later. Your offline vault is unchanged."
+                    : "Cloud sign-in was rejected. Check your email/password and confirm your email before signing in.";
+                throw new VaultException(message);
+            }
             return await ReadBounded(response.Content, 65536, ct).ConfigureAwait(false);
         }
         finally { CryptographicOperations.ZeroMemory(payload); }
@@ -186,6 +203,20 @@ public sealed class SupabaseCloudAccount(HttpClient http)
     {
         if (refreshToken.Length is < 10 or > 8192) throw new VaultException("Sign in to cloud again.");
         return ParseSession(await Post("auth/v1/token?grant_type=refresh_token", new { refresh_token = refreshToken }, null, ct));
+    }
+
+    public async Task ResendConfirmation(string email, CancellationToken ct = default)
+    {
+        if (email.Length is < 3 or > 320 || !email.Contains('@')) throw new VaultException("Enter your cloud account email.");
+        byte[] verifier = RandomNumberGenerator.GetBytes(32);
+        try
+        {
+            string encoded = Convert.ToBase64String(verifier).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+            string challenge = Convert.ToBase64String(SHA256.HashData(Encoding.ASCII.GetBytes(encoded))).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+            byte[] response = await Post("auth/v1/resend", new { type = "signup", email, code_challenge = challenge, code_challenge_method = "s256" }, null, ct);
+            CryptographicOperations.ZeroMemory(response);
+        }
+        finally { CryptographicOperations.ZeroMemory(verifier); }
     }
 
     public async Task SignOut(string accessToken, CancellationToken ct = default)

@@ -9,7 +9,7 @@ public static class CloudAccountTests
     private sealed class Handler(Guid owner) : HttpMessageHandler
     {
         public bool Rejected, InvalidSession, Oversized;
-        public string LastBody = "";
+        public string LastBody = "", ErrorCode = "";
         public readonly List<string> Paths = [];
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
@@ -19,7 +19,7 @@ public static class CloudAccountTests
                 throw new Exception("Unsafe cloud account request.");
             if (Oversized) return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(new string('x',65537)) };
             return new HttpResponseMessage(Rejected ? HttpStatusCode.BadRequest : HttpStatusCode.OK)
-            { Content = new StringContent(Rejected ? "server-error-with-private-token-never-echo" : JsonSerializer.Serialize(new
+            { Content = new StringContent(Rejected ? (ErrorCode.Length == 0 ? "server-error-with-private-token-never-echo" : JsonSerializer.Serialize(new { code = ErrorCode, message = "server-private-token-never-echo" })) : JsonSerializer.Serialize(new
                 { user = new { id = owner }, access_token = InvalidSession ? "bad\r\ntoken" : "synthetic-access-token-0123456789", refresh_token = "synthetic-refresh-token-0123456789" })) };
         }
     }
@@ -40,6 +40,11 @@ public static class CloudAccountTests
         handler.InvalidSession=false;
         await account.SignUp("synthetic@example.invalid","synthetic separate signup password");
         using(var request=JsonDocument.Parse(handler.LastBody))Check(request.RootElement.GetProperty("code_challenge_method").GetString()=="s256"&&request.RootElement.GetProperty("code_challenge").GetString()!.Length==43&&!request.RootElement.TryGetProperty("code_verifier",out _),"cloud confirmation uses PKCE and sends no verifier");
+        await account.ResendConfirmation("synthetic@example.invalid");
+        using(var request=JsonDocument.Parse(handler.LastBody))Check(handler.Paths.Last().EndsWith("/resend")&&request.RootElement.GetProperty("type").GetString()=="signup"&&request.RootElement.GetProperty("code_challenge_method").GetString()=="s256"&&!request.RootElement.TryGetProperty("password",out _)&&!request.RootElement.TryGetProperty("code_verifier",out _),"confirmation resend uses signup type and PKCE without password or verifier");
+        handler.Rejected=true;handler.ErrorCode="email_address_not_authorized";
+        try{await account.SignUp("synthetic@example.invalid","synthetic separate signup password");throw new Exception("Expected signup rejection.");}catch(VaultException ex){Check(ex.Message.Contains("app owner")&&!ex.Message.Contains("server-private"),"restricted email sender reports actionable owner setup without exposing server content");}
+        handler.Rejected=false;handler.ErrorCode="";
         handler.Oversized=true;await Reject(()=>account.SignIn("synthetic@example.invalid","synthetic password"),"cloud account refuses an oversized server response");handler.Oversized=false;
         var profile=new CloudProfile{OwnerId=owner,VaultId=vault,VaultSlot=Guid.NewGuid(),DeviceSlot=Guid.NewGuid(),Email="synthetic@example.invalid",RefreshToken=signedIn.RefreshToken,RecoveryKey=CloudSnapshotCodec.NewRecoveryKey()};
         string code=CloudPairing.Encode(profile);var decoded=CloudPairing.Decode(code,vault,owner);

@@ -6,7 +6,7 @@
  <uses-feature android:name="android.hardware.camera" android:required="false"/>
  <uses-feature android:name="android.hardware.camera.autofocus" android:required="false"/>
  <queries><intent><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent></queries>
- <application android:label="BoshaVault" android:icon="@drawable/ic_vault" android:theme="@style/VaultTheme" android:allowBackup="false" android:fullBackupContent="false" android:dataExtractionRules="@xml/data_extraction_rules" android:usesCleartextTraffic="false" android:debuggable="false" android:supportsRtl="true">
+ <application android:label="Lockvyn" android:icon="@drawable/ic_vault" android:theme="@style/VaultTheme" android:allowBackup="false" android:fullBackupContent="false" android:dataExtractionRules="@xml/data_extraction_rules" android:usesCleartextTraffic="false" android:debuggable="false" android:supportsRtl="true">
   <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTop" android:configChanges="orientation|screenSize|keyboardHidden" android:windowSoftInputMode="adjustResize"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity>
   <activity android:name=".FillActivity" android:exported="false" android:excludeFromRecents="true" android:theme="@style/VaultTheme"/>
   <activity android:name=".ScanQrActivity" android:exported="false" android:excludeFromRecents="true" android:screenOrientation="portrait" android:theme="@style/VaultTheme"/>

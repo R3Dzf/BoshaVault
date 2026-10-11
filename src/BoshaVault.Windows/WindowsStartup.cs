@@ -10,9 +10,9 @@ internal static class WindowsStartup
     {
         get
         {
-            string path = Environment.ProcessPath ?? throw new IOException("Cannot find the executable. Start the published BoshaVault.exe.");
+            string path = Environment.ProcessPath ?? throw new IOException("Cannot find the executable. Start the published Lockvyn.exe.");
             if (!path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) || Path.GetFileName(path).Equals("dotnet.exe", StringComparison.OrdinalIgnoreCase) || path.IndexOfAny(['\"', '\r', '\n']) >= 0)
-                throw new IOException("Start the published BoshaVault.exe before enabling Windows startup.");
+                throw new IOException("Start the published Lockvyn.exe before enabling Windows startup.");
             return "\"" + path + "\" --background";
         }
     }

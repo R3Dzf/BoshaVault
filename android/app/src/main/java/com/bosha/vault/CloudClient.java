@@ -25,12 +25,21 @@ final class CloudClient implements AutoCloseable {
         byte[] payload=null;
         try{
             if(body!=null){conn.setDoOutput(true);conn.setRequestProperty("Content-Type","application/json");conn.setRequestProperty("Prefer","resolution=merge-duplicates,return=minimal");payload=body.toString().getBytes(StandardCharsets.UTF_8);conn.setFixedLengthStreamingMode(payload.length);try(OutputStream out=conn.getOutputStream()){out.write(payload);}}
-            int status=conn.getResponseCode();check();if(status<200||status>=300)throw new Exception(status==429?"Cloud rate limit reached. Wait before trying again.":"Cloud request was rejected. Check your sign-in and confirm your email.");
+            int status=conn.getResponseCode();check();if(status<200||status>=300){String code=errorCode(conn);throw new Exception(status==429?"Cloud rate limit reached. Wait before trying again.":code.equals("email_address_not_authorized")?"Email verification delivery is not enabled for this address yet. The app owner needs to configure the email sender. Your vault works offline without an account.":code.equals("email_not_confirmed")?"Confirm your account email first. Use Resend confirmation email if needed.":(path.equals("auth/v1/signup")||path.equals("auth/v1/resend"))?"Cloud verification could not be completed. Check the email and password requirements, or try again later. Your offline vault is unchanged.":"Cloud request was rejected. Check your sign-in and confirm your email.");}
             if(conn.getContentLengthLong()>limit)throw new Exception("Cloud response exceeds its size limit.");
             try(InputStream in=conn.getInputStream();ByteArrayOutputStream out=new ByteArrayOutputStream()){
                 byte[] chunk=new byte[8192];int read;try{while((read=in.read(chunk))!=-1){check();if(out.size()+read>limit)throw new Exception("Cloud response exceeds its size limit.");out.write(chunk,0,read);}return out.toByteArray();}finally{Arrays.fill(chunk,(byte)0);}
             }
         }finally{if(payload!=null)Arrays.fill(payload,(byte)0);conn.disconnect();connection=null;}
+    }
+    private static String errorCode(HttpsURLConnection conn){
+        byte[] bytes=null;try(InputStream in=conn.getErrorStream();ByteArrayOutputStream out=new ByteArrayOutputStream()){
+            if(in==null)return "";byte[] chunk=new byte[1024];int n;try{while((n=in.read(chunk))!=-1){if(out.size()+n>65536)return "";out.write(chunk,0,n);}bytes=out.toByteArray();return StrictJson.object(new String(bytes,StandardCharsets.UTF_8)).optString("code","");}finally{Arrays.fill(chunk,(byte)0);}
+        }catch(Exception ignored){return "";}finally{if(bytes!=null)Arrays.fill(bytes,(byte)0);}
+    }
+    void resendConfirmation(String email)throws Exception{
+        if(email.length()<3||email.length()>320||!email.contains("@"))throw new Exception("Enter your cloud account email.");byte[] verifier=new byte[32];new java.security.SecureRandom().nextBytes(verifier);
+        try{String encoded=Base64.getUrlEncoder().withoutPadding().encodeToString(verifier);String challenge=Base64.getUrlEncoder().withoutPadding().encodeToString(MessageDigest.getInstance("SHA-256").digest(encoded.getBytes(StandardCharsets.US_ASCII)));byte[] result=request("POST","auth/v1/resend",new JSONObject().put("type","signup").put("email",email).put("code_challenge",challenge).put("code_challenge_method","s256"),null,65536);Arrays.fill(result,(byte)0);}finally{Arrays.fill(verifier,(byte)0);}
     }
     static final class Session {
         final String owner,access,refresh;

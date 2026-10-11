@@ -64,16 +64,17 @@ public sealed class FormDialog : Window
     public void Label(string text) => Body.Children.Add(new TextBlock { Text = text,
         Foreground = Brushes.Gray, FontSize = 12,
         Margin = new Thickness(0, 3, 0, 5), TextWrapping = TextWrapping.Wrap });
-    public Button Action(string text, Action click, bool primary = false)
+    public Button Action(string text, Action click, bool primary = false, bool inBody = false)
     {
         var button = new Button { Content = text, Margin = new Thickness(0, 5, 0, 0),
             MinHeight = 37, Padding = new Thickness(10, 7, 10, 7) };
         if (primary) button.Style = (Style)FindResource("Primary");
         button.Click += (_, _) => click();
-        footer.Children.Add(button); return button;
+        if (inBody) Body.Children.Add(button); else footer.Children.Add(button); return button;
     }
     public static VaultEntry? Edit(Window owner, VaultEntry? original,
-        string suggestedUrl = "", string suggestedUsername = "")
+        string suggestedUrl = "", string suggestedUsername = "", IEnumerable<string>? folders = null,
+        PasswordOptions? generatorOptions = null, Action<PasswordOptions>? saveGeneratorDefaults = null)
     {
         var dialog = new FormDialog(owner, original == null ? "Add a new login" : "Edit login", 495);
         var entry = original?.Clone() ?? new VaultEntry();
@@ -119,11 +120,11 @@ public sealed class FormDialog : Window
                 string normalized = Normalize(clipboard);
                 if(normalized.Length>0){url.Text=normalized;SuggestName();}
                 else MessageBox.Show(dialog,"Clipboard does not contain an HTTPS website.",
-                    "BoshaVault",MessageBoxButton.OK,MessageBoxImage.Information);
+                    "Lockvyn",MessageBoxButton.OK,MessageBoxImage.Information);
             }
             catch(Exception ex) when(ex is VaultException or System.Runtime.InteropServices.ExternalException)
             { MessageBox.Show(dialog,"Clipboard does not contain a usable HTTPS website URL.",
-                "BoshaVault",MessageBoxButton.OK,MessageBoxImage.Warning); }
+                "Lockvyn",MessageBoxButton.OK,MessageBoxImage.Warning); }
         };
         siteButtons.Children.Add(pasteSite);
         dialog.Body.Children.Add(siteButtons);
@@ -147,18 +148,25 @@ public sealed class FormDialog : Window
         var helperStatus = new TextBlock { FontSize=11,
             Foreground=Brushes.Gray,TextWrapping=TextWrapping.Wrap,
             Margin=new Thickness(0,0,0,7),
-            Text="Generate a unique 24-character password, then Copy if needed (clipboard clears after 20 seconds)." };
+            Text="Choose length and character rules with Generate password. Clipboard clears after 20 seconds." };
         dialog.Body.Children.Add(helperStatus);
+        var currentGeneratorRules = generatorOptions?.Clone() ?? new PasswordOptions();
         generate.Click += (_, _) => {
-            password.Password=PasswordGenerator.Generate();
-            helperStatus.Text="New strong password generated. Copy or save it to the encrypted vault.";
+            string? generated = PasswordGeneratorDialog.Show(dialog, currentGeneratorRules, saveGeneratorDefaults == null ? null : options => { saveGeneratorDefaults(options); currentGeneratorRules = options.Clone(); },
+                PrivateClipboard.Copy, true);
+            if (generated != null) { password.Password = generated; helperStatus.Text = "New password ready. Save the login to keep it."; }
         };
         copy.Click += (_, _) => {
             if(password.Password.Length==0){helperStatus.Text="Enter or generate a password first.";return;}
             PrivateClipboard.Copy(password.Password);
             helperStatus.Text="Password copied. Clipboard will be cleared automatically after 20 seconds.";
         };
-        var folder = dialog.Field("Folder", entry.Folder, 100);
+        dialog.Label("Folder — choose one or type a new name");
+        var folder = new ComboBox { IsEditable = true, IsTextSearchEnabled = true, MinHeight = 45,
+            ItemsSource = (folders ?? FolderCatalog.Defaults).Append(entry.Folder).Where(f => f.Length > 0)
+                .Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).ToList(),
+            Text = entry.Folder.Length == 0 ? "Personal" : entry.Folder, Margin = new(0, 0, 0, 8) };
+        dialog.Body.Children.Add(folder);
         var notes = dialog.Field("Private notes", entry.Notes, 32000, true);
         var favorite = new CheckBox { Content = "Add to favorites", IsChecked = entry.Favorite,
             Margin=new Thickness(0,4,0,5) };
@@ -175,10 +183,9 @@ public sealed class FormDialog : Window
                 entry.Username = username.Text;
                 entry.Password = password.Password;
                 entry.Url = normalized;
-                entry.Folder=folder.Text.Trim();
+                entry.Folder=FolderCatalog.Normalize(folder.Text);
                 entry.Notes=notes.Text;
                 entry.Favorite=favorite.IsChecked==true;
-                entry.Deleted=false;
                 dialog.DialogResult=true;
             }
             catch(VaultException ex){error.Text=ex.Message;}

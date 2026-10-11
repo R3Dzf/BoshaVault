@@ -1,6 +1,6 @@
-# Optional encrypted cloud sync preview
+# Lockvyn optional encrypted cloud sync
 
-Windows **1.8.0-cloud-sync-preview** and Android **1.4.0-cloud-sync-preview** include manual Supabase synchronization under **Devices & encrypted backup → Optional encrypted cloud sync**. It is off until you connect a cloud account. Local Wi-Fi transfer, encrypted file backups and offline vault use remain independent.
+Windows **1.9.0** and Android **1.5.0** include manual Supabase synchronization under **Options → Devices & encrypted backup → Optional encrypted cloud sync**. It is off until you connect a cloud account. Local Wi-Fi transfer, encrypted file backups and offline vault use remain independent.
 
 The dedicated project is **Orchid Ledger** in the **New Generation** organization, region `eu-central-1`, reference `ghmbcfqiomggoxgwghjs`. [Open its dashboard](https://supabase.com/dashboard/project/ghmbcfqiomggoxgwghjs). Source contains only the project URL and public publishable key; no administrative or service-role key belongs in either client.
 
@@ -8,12 +8,12 @@ The dedicated project is **Orchid Ledger** in the **New Generation** organizatio
 
 1. Export an encrypted local backup. Use synthetic entries for the first native-device test.
 2. Both devices must already hold the **same vault**. Create it on one device, then transfer it over local Wi-Fi or import its encrypted backup on the other. Cloud enrollment cannot replace an unrelated vault or initialize a new device from cloud alone.
-3. On the first device open the cloud screen, enter your email and a **separate cloud password of at least 16 characters**, and choose **Create cloud account**. This application account inside Orchid Ledger is separate from your Supabase dashboard login. Confirm its email, return to the app, enter the cloud password and choose **Start a new cloud vault**.
+3. On the first device open the cloud screen, enter your email and a **separate cloud password of at least 16 characters**, and choose **Create cloud account**. This is a Lockvyn application account. Friends create their own account here using their own email; they never need a Supabase dashboard account. Confirm its email, return to the app, enter the cloud password and choose **Start a new cloud vault**.
 4. Choose **Show & copy connection code** on Windows, or **Copy connection code for your other device** on Android. This `BVCLOUD1:` code contains a random recovery key and binds your cloud account, local vault and cloud space. It contains no refresh/access token. Keep it private and transfer it only to your own trusted device. The app clears its owned clipboard after 20 seconds where the OS permits.
 5. On the second device sign in with the same application account, paste the code in **Other device's cloud connection code**, and choose **Join this vault's existing cloud**. Starting separate spaces on both devices does not connect them.
 6. Press **Sync now** on the first device, then the second, then the first again. Each sync downloads, authenticates and merges device snapshots locally before uploading this device's current encrypted snapshot. Concurrent edits keep conflict copies for review. Sync is manual, without a background scheduler.
 
-Supabase's default email sender currently permits only organization-team addresses and has restrictive rate limits. For this private preview, use the email associated with the new Supabase account. Other recipients need a custom SMTP sender first; confirmation remains enabled. See [Supabase SMTP documentation](https://supabase.com/docs/guides/auth/auth-smtp). Signup requests use an S256 PKCE challenge, so the confirmation redirect does not carry access/refresh tokens; the app signs in separately with the password after confirmation. Real email delivery and confirmation UI still need native testing.
+Public signup is enabled, but Supabase's default email sender permits only organization-team addresses and has restrictive rate limits. A custom SMTP sender must be configured by the app owner before distributing email-based cloud signup to friends. No sender domain is currently present in the connected Resend account; that service cannot yet provide general verification delivery. Friends must not be added as Supabase organization members. Confirmation remains enabled. See [Supabase SMTP documentation](https://supabase.com/docs/guides/auth/auth-smtp). Signup and confirmation-resend requests use an S256 PKCE challenge, so the confirmation redirect does not carry access/refresh tokens; the app signs in separately with the password after confirmation. Real email delivery and confirmation UI still need native testing.
 
 ## Encryption and settings
 
@@ -27,7 +27,7 @@ Every downloaded outer snapshot and inner vault is validated before one atomic l
 
 ## Passphrase changes and disconnecting
 
-Changing the master passphrase rotates the inner vault key. The preview refuses cloud snapshots from another key epoch. Merge **all devices** over local Wi-Fi or encrypted backups using the incoming passphrase first. Then disconnect cloud on both devices, start a **new cloud vault** on one, and join it on the other with the new code. Old cloud rows remain in their old space and do not block the new one. Preserve an encrypted backup and old code if you still need those snapshots.
+Changing the master passphrase rotates the inner vault key. Lockvyn refuses cloud snapshots from another key epoch. Merge **all devices** over local Wi-Fi or encrypted backups using the incoming passphrase first. Then disconnect cloud on both devices, start a **new cloud vault** on one, and join it on the other with the new code. Old cloud rows remain in their old space and do not block the new one. Preserve an encrypted backup and old code if you still need those snapshots.
 
 **Disconnect this device** revokes this Auth session's refresh token and deletes local cloud settings. Already issued access tokens follow their normal expiration. **Forget local cloud settings (offline)** deletes settings only and cannot revoke the server session. Both actions retain local vault files and cloud snapshots.
 
@@ -44,3 +44,16 @@ Remote per-device management, mandatory Auth MFA, automatic key redistribution a
 Native Windows/Android UI, Android Keystore lifecycle, email confirmation, cancellation/backgrounding and actual two-device cloud edits still require acceptance testing. Successful automated checks are not an independent security audit. See [validation record](VALIDATION.md) and [security model](SECURITY.md).
 
 Run `dotnet run --project src/BoshaVault.Tests -c Release -- --cloud-tests`. Native DPAPI checks use `--cloud-store-tests` on Windows. The CI `cloud-interop` job creates fake fixtures, runs `tools/CloudInteropTest.java`, and verifies Java ciphertext in .NET. Opt-in `--cloud-live-tests` takes a private configuration file for two temporary confirmed Auth users; it is excluded from normal CI and must never use personal vaults.
+
+## Public email signup rollout
+
+The client signup and **Resend confirmation email** actions are ready. The remaining deployment task is transactional email delivery:
+
+1. Choose an owned sender domain or an existing SMTP service. With Resend, verify its required DNS records and sending status before using the domain.
+2. In the project dashboard, open Authentication → Email → SMTP settings and configure the provider's host, port, username, password, sender email and sender name **Lockvyn**. Keep the SMTP credential in server settings; never add it to either client or this repository.
+3. Keep email confirmation enabled and review Auth email rate limits against the provider's quota. Use a valid HTTPS confirmation destination owned by the app owner. The app signs in separately after verification; it does not consume redirect access tokens.
+4. Test signup, confirmation, resend, sign-in and independent user isolation with explicitly authorized test recipients before public distribution. The automated suites do not send real emails.
+
+Email delivery configuration is not completed by adding a public key to the app. Resend's default testing sender also has recipient restrictions; it is not a substitute for a verified sender domain.
+
+The cloud account has a separate password from the vault master passphrase. Cloud account recovery does not recover a forgotten vault passphrase. Cloud-only bootstrap on an empty device, account-password recovery UI, MFA and automatic sync remain future work; see [VAULT-UX.md](VAULT-UX.md).

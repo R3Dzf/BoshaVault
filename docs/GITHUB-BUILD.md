@@ -1,50 +1,44 @@
-# GitHub repository and build setup
+# Lockvyn builds, installation and Android signing
 
-This repository contains **the complete reviewed source snapshot** for BoshaVault Windows and Android, plus the local pairing hotfix. It does not contain production credentials, actual user vaults, APK signing keys, compiled binaries or private server data.
+The existing [R3Dzf/BoshaVault repository](https://github.com/R3Dzf/BoshaVault) now builds the Lockvyn product. Source project names, encrypted file identifiers and compatible storage paths retain their original names. The repository contains source and synthetic tests, not user vaults or private signing keys.
 
-## Create the repository
+## Build and download
 
-**Simplest path on your own Windows PC:** Extract the ZIP, open PowerShell inside its `BoshaVault` folder and run `.\Publish-To-GitHub.ps1` after installing Git and GitHub CLI, then completing `gh auth login`. The script creates a new **private** repository and pushes the complete source. If PowerShell blocks local scripts, use `powershell -NoProfile -ExecutionPolicy Bypass -File .\Publish-To-GitHub.ps1` for this one run. Do not run unreviewed scripts.
+Open **Actions → Build Lockvyn (Windows and Android)**. Pushes to main, pull requests targeting main and manual workflow runs trigger the build. The Windows, Android, cloud interoperability and Android native UI jobs must pass. Artifacts expire after 14 days.
 
-Alternatively, do it manually:
+| Artifact | Contents and installation |
+|---|---|
+| `Lockvyn-Windows-x64` | `Lockvyn-Windows-x64.zip`; extract its complete contents, then run `Lockvyn.exe`. Includes `Lockvyn.NativeHost.exe`, browser extension, registration script and Arabic `START-HERE.html`. |
+| `Lockvyn-Android` | `Lockvyn-Android.apk` and signing notice. New package `com.lockvyn.app`, label **Lockvyn**, version **1.5.0**, code **10**. Installs beside production and earlier Test/Preview packages. |
+| `Lockvyn-Android-LegacyPackage` | Compatibility APK using the original `com.bosha.vault` package and signing notice. Only the matching original certificate permits an in-place update. |
+| `Lockvyn-Android-UI-Logs` | Emulator and instrumentation logs for native keyboard/list acceptance. |
 
-1. On GitHub choose **New repository**, name it `BoshaVault`, mark it **Private** (recommended for a password manager under active security testing), and **do not** create a README or `.gitignore` online. Keep the default branch `main`.
-2. Push every file under the `BoshaVault/` source directory to the **root** of the new repository (not an extra nested BoshaVault directory). The `.github/workflows/build.yml` file must exist at repository root.
-3. Go to **Actions → Build BoshaVault (Windows and Android) → Run workflow**, push to `main`, or open a pull request. When the Windows, Android and cloud interoperability jobs pass, get the ZIP and APK under **Run → Artifacts**. Workflow artifacts expire after 14 days. `BoshaVault-Android-Test` is a separate package/storage area suitable for a preview test alongside your existing app.
-4. This CI checks builds and selected tests; **it cannot validate real phone↔PC Wi-Fi connectivity**. See `docs/PAIRING-HOTFIX-2026-10-09.md` and `Diagnose-BoshaVault.ps1`.
+Windows is self-contained x64 with .NET 10, version **1.9.0**. It has no publisher Authenticode signature. The Android application supports Android 9+, targets SDK 35 and uses pinned build dependencies. Product labels and version strings have no Preview suffix.
 
-## Important Android signing warning
+Export an encrypted backup before changing versions. Exit the old Windows app from its tray menu before replacing program files. Windows continues to find the vault under `%LOCALAPPDATA%\BoshaVault`; do not delete that directory. See [browser Autofill setup](WINDOWS-AUTOFILL.md).
 
-On a normal push or manual run **without signing secrets**, CI generates a **one-run-only test signing key** and signs the APK with it so that it can be installed *only for test usage*. It cannot upgrade the previously distributed BoshaVault Android APK or other CI builds. The temporary key is destroyed after the run. **Do not uninstall an existing vault** unless you already tested restoring its encrypted backup and know your passphrase. A Git tag `v*` build **fails** rather than accidentally shipping this temporary-key APK.
+Install the separate **Lockvyn-Android** package while keeping the old app installed. Use **Import encrypted vault** on the lock screen or **Receive from your Windows app** to move the same vault. Check its entries before relying on the new installation. Update both devices before exchanging schema 2; these versions open old schema 1 files, while old versions cannot read schema 2. See [VAULT-UX.md](VAULT-UX.md).
 
-To get a repeatably signed APK that upgrades an existing installation, the certificate and alias must match the APK you already have. The previous preview signing key is **not in the source archive or GitHub**, so simply adding a new signing key will **not** allow seamless updates of the old APK. Export an encrypted backup before any planned reinstall.
+## Android signing
 
-### Optional stable Android signing via repository secrets
+A normal push/PR run generates a temporary certificate, signs and verifies both APKs, then destroys the private key. These installable APKs cannot upgrade an installation signed by another certificate, including a previous CI run. The separate Lockvyn package avoids overwriting the old app. An existing Lockvyn installation still requires an encrypted export before any planned reinstall with a different certificate.
 
-Create a permanent PKCS#12 key *locally on a trusted computer*. Keep the `.p12` backup offline; do not email it, attach it to an issue or commit it. In **Settings → Secrets and variables → Actions**, configure:
+Tag `v*` builds and manual **signed_release** runs on main require permanent signing secrets and fail if they are absent. The matching original signing certificate and alias are required to upgrade the legacy installed APK. Creating a new key does not solve that mismatch. Current signed-release mode produces the legacy-package compatibility artifact.
 
-- `BOSHAVAULT_ANDROID_KEYSTORE_BASE64` — base64 of the `.p12` file bytes, with no spaces/newlines.
-- `BOSHAVAULT_ANDROID_KEYSTORE_PASSWORD` — password for both keystore and key.
-- `BOSHAVAULT_ANDROID_KEY_ALIAS` — alias stored in that file.
+### Configure stable signing
 
-PowerShell can produce the base64 text with:
+Create and protect a permanent PKCS#12 key on your own trusted computer. Keep its backup offline. Configure these repository Actions secrets:
 
-```powershell
-[Convert]::ToBase64String([IO.File]::ReadAllBytes('C:\private\BoshaVault-Signing.p12'))
-```
+- `BOSHAVAULT_ANDROID_KEYSTORE_BASE64`: base64 of the `.p12` bytes.
+- `BOSHAVAULT_ANDROID_KEYSTORE_PASSWORD`: password for keystore and key.
+- `BOSHAVAULT_ANDROID_KEY_ALIAS`: key alias.
 
-Never share these secret values with ChatGPT or put them in a conversation. You can optionally avoid exposing long-term production signing material to cloud CI by building and signing on your own trusted machine instead.
+The original secret names remain supported. Do not share their values in a conversation or commit them. `tools/Configure-AndroidSigning.ps1` can configure the existing workflow locally; alternatively build and sign locally without handing a permanent private key to CI.
 
-## Windows
+## What CI verifies
 
-The workflow uses `windows-latest`, .NET 10 SDK, and builds the native WPF app as a `win-x64` self-contained executable. It exercises vault and crypto tests, desktop tests, temporary certificate checks, and a *loopback* Schannel/TLS handshake. A successful loopback test **does not** prove Windows firewall rules, Wi-Fi isolation, or camera pairing on real devices.
+Windows runs core/crypto, UX, desktop, DPAPI, temporary certificate and loopback Schannel/TLS tests, publishes both executables, checks the browser extension and tests native-host registration/protocol. Cross-language tests verify encryption, schema migration, folders, review acknowledgement and permanent deletion using synthetic fixtures.
 
-The Windows executable is **not Authenticode-signed**. Don't disable antivirus for this project. The application's tray-close behavior and start-with-Windows functionality are retained from Windows version 1.2.
+The native Android job builds an isolated app plus matching-signed instrumentation, starts a fresh Android 35 emulator, creates 1,000 synthetic logins, verifies row recycling and fixed Options, opens the real cloud dialog, taps email/password fields and verifies the visible keyboard and typed input. It checks screenshot protection and password masking. It never sends a signup or real email request.
 
-## Android
-
-CI uses Java 17, Python 3.11, Android SDK platform 35 and build tools 35.0.0. The lightweight Python builder downloads Maven libraries with hard-coded SHA-256 checks. Version code is `9` (`1.4.0-cloud-sync-preview`). The cloud interoperability job uses pinned JVM-only JSON and Bouncy Castle fixtures and makes no network requests to Supabase.
-
-## What is *not* verified
-
-The project has not undergone an independent cryptographic/security audit; there is no guarantee against malware on the host. No CI service can test your home's network or whether Android/Windows agree on the exact QR and TLS connection on your devices. Test first with disposable, fake credentials.
+CI does not validate your real phone/PC Wi-Fi, camera, biometric hardware, Chrome/Edge integration or two-device cloud behavior. No independent security audit is claimed. Check [VALIDATION.md](VALIDATION.md) for actual outcomes and [CLOUD-SYNC.md](CLOUD-SYNC.md) for public signup's remaining SMTP setup.

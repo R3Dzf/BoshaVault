@@ -1,4 +1,5 @@
-using System.Text.RegularExpressions;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace BoshaVault.Core;
 
@@ -12,7 +13,7 @@ public static class PasswordHealth
         "welcome123","iloveyou","adminadmin","passw0rd","password1!"
     };
 
-    public sealed record EntryFinding(string EntryId,string Title,string[] Reasons);
+    public sealed record EntryFinding(string EntryId,string Title,string[] Reasons,string Fingerprint);
     public sealed record Report(int Total,int AtRisk,int Reused,int Short,
         int CommonPassword,int Predictable,List<EntryFinding> Findings);
 
@@ -35,13 +36,15 @@ public static class PasswordHealth
         }
         return false;
     }
-    public static Report Audit(IEnumerable<VaultEntry> source)
+    public static Report Audit(IEnumerable<VaultEntry> source, bool includeAcknowledged = false)
     {
         var entries = source.Where(e=>!e.Deleted).ToArray();
-        var reused = entries.Where(e=>!string.IsNullOrEmpty(e.Password))
+        var groups = entries.Where(e=>!string.IsNullOrEmpty(e.Password))
             .GroupBy(e=>e.Password,StringComparer.Ordinal)
-            .Where(g=>g.Count()>1)
-            .SelectMany(g=>g).Select(e=>e.Id).ToHashSet(StringComparer.Ordinal);
+            .Where(g=>g.Count()>1).ToArray();
+        var reused = groups.SelectMany(g=>g).Select(e=>e.Id).ToHashSet(StringComparer.Ordinal);
+        var groupSignatures = groups.ToDictionary(g => g.Key, g => Convert.ToHexString(SHA256.HashData(
+            Encoding.UTF8.GetBytes(string.Join(",", g.Select(e => e.Id).Order(StringComparer.Ordinal))))).ToLowerInvariant(), StringComparer.Ordinal);
         int shortCount=0, commonCount=0,predictableCount=0;
         List<EntryFinding> findings=[];
         foreach(var entry in entries)
@@ -61,7 +64,15 @@ public static class PasswordHealth
             {
                 predictableCount++;reasons.Add("Predictable password pattern");
             }
-            if(reasons.Count!=0) findings.Add(new(entry.Id,entry.Title,reasons.ToArray()));
+            if (reasons.Count != 0)
+            {
+                string peers = groupSignatures.GetValueOrDefault(entry.Password, "");
+                string b64(string value) => Convert.ToBase64String(Encoding.UTF8.GetBytes(value));
+                string material = "BVREVIEW1|" + entry.Id + "|" + b64(entry.Password) + "|" + b64(entry.Username) + "|" + string.Join(";", reasons) + "|" + peers;
+                string fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(material))).ToLowerInvariant();
+                if (includeAcknowledged || entry.ReviewAcknowledgement != fingerprint)
+                    findings.Add(new(entry.Id, entry.Title, reasons.ToArray(), fingerprint));
+            }
         }
         return new(entries.Length,findings.Count,reused.Count,shortCount,
             commonCount,predictableCount,findings);

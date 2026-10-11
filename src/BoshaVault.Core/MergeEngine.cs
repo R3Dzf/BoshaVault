@@ -16,6 +16,15 @@ public static class MergeEngine
         {
             if (!map.TryGetValue(incoming.Id, out var current)) { map[incoming.Id] = incoming.Clone(); continue; }
             int relation = Compare(current.Clock, incoming.Clock);
+            if (current.Purged || incoming.Purged)
+            {
+                if (relation == 0 && !SameFields(current, incoming)) throw new VaultException("Conflicting content with an identical revision clock.");
+                // Permanent deletion always wins; never create a credential-bearing conflict copy.
+                var tombstone = (current.Purged ? current : incoming).Clone();
+                var joinedPurge = Join(current.Clock, incoming.Clock);
+                if (Compare(tombstone.Clock, joinedPurge) != 0) Tick(joinedPurge, deviceId);
+                tombstone.Clock = joinedPurge; map[current.Id] = tombstone; continue;
+            }
             if (relation == 1) continue;
             if (relation == -1) { map[incoming.Id] = incoming.Clone(); continue; }
             bool identical = SameFields(current, incoming);
@@ -40,6 +49,8 @@ public static class MergeEngine
         }
         if (map.Count > VaultCodec.MaxEntries) throw new VaultException("Merged vault exceeds the entry limit.");
         local.Entries = map.Values.ToList();
+        foreach (string name in remote.Folders) FolderCatalog.Add(local, name);
+        FolderCatalog.Upgrade(local);
         // App trust is deliberately local: sync never silently grants a new app access.
         local.Revision = checked(Math.Max(local.Revision, remote.Revision) + 1);
         return conflicts;
@@ -62,7 +73,7 @@ public static class MergeEngine
     private static Dictionary<string, long> Join(Dictionary<string, long> a, Dictionary<string, long> b) =>
         a.Keys.Union(b.Keys).ToDictionary(k => k, k => Math.Max(a.GetValueOrDefault(k), b.GetValueOrDefault(k)));
     private static bool SameFields(VaultEntry a, VaultEntry b) =>
-        a.Title == b.Title && a.Username == b.Username && a.Password == b.Password && a.Url == b.Url && a.Notes == b.Notes && a.Folder == b.Folder && a.Favorite == b.Favorite && a.Deleted == b.Deleted;
+        a.Title == b.Title && a.Username == b.Username && a.Password == b.Password && a.Url == b.Url && a.Notes == b.Notes && a.Folder == b.Folder && a.Favorite == b.Favorite && a.Deleted == b.Deleted && a.Purged == b.Purged && a.ReviewAcknowledgement == b.ReviewAcknowledgement;
     private static string ConflictId(VaultEntry a, VaultEntry b)
     {
         string Vector(Dictionary<string, long> c) => string.Join(";", c.OrderBy(kv => kv.Key, StringComparer.Ordinal).Select(kv => $"{kv.Key}:{kv.Value}"));

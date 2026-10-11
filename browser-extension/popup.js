@@ -28,9 +28,9 @@ async function ask(command) {
     }else if(reply?.status==="no-fields"){
       status.textContent="No recognizable login input here. Click a username or password field, or use Save this website.";
     }else if(reply?.status==="started"){
-      status.textContent="Review the prefilled login form in BoshaVault Windows.";
+      status.textContent="Review the prefilled login form in Lockvyn Windows.";
     }else{
-      status.textContent=reply?.message||"BoshaVault did not respond.";
+      status.textContent=reply?.message||"Lockvyn did not respond.";
     }
   }catch{
     status.textContent="Reload the HTTPS page and retry. Ensure the extension is enabled for this site.";

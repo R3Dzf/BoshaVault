@@ -62,7 +62,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     }
     return answer;
   })().then(respond).catch(() => respond({
-    status: "unavailable", message: "Connect the local BoshaVault Windows app and register the native host."
+    status: "unavailable", message: "Connect the local Lockvyn Windows app and register the native host."
   }));
   return true;
 });

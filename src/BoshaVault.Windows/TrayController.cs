@@ -18,18 +18,18 @@ internal sealed class TrayController : IDisposable
     public TrayController(Dispatcher ui, Action open, Action lockVault, Action exit, Func<bool> isUnlocked, Func<bool> startsWithWindows, Action<bool> setStartup)
     {
         dispatcher = ui; unlocked = isUnlocked; startupEnabled = startsWithWindows;
-        using var stream = typeof(TrayController).Assembly.GetManifestResourceStream("BoshaVault.TrayIcon") ?? throw new IOException("Tray artwork is unavailable.");
+        using var stream = typeof(TrayController).Assembly.GetManifestResourceStream("Lockvyn.TrayIcon") ?? throw new IOException("Tray artwork is unavailable.");
         using var original = new Drawing.Icon(stream, new Drawing.Size(32, 32)); artwork = (Drawing.Icon)original.Clone();
         menu = new Forms.ContextMenuStrip();
         state = new Forms.ToolStripMenuItem("Vault locked") { Enabled = false }; menu.Items.Add(state); menu.Items.Add(new Forms.ToolStripSeparator());
-        var openItem = new Forms.ToolStripMenuItem("Open BoshaVault") { Font = new Drawing.Font(menu.Font, Drawing.FontStyle.Bold) };
+        var openItem = new Forms.ToolStripMenuItem("Open Lockvyn") { Font = new Drawing.Font(menu.Font, Drawing.FontStyle.Bold) };
         openItem.Click += (_, _) => Queue(open); menu.Items.Add(openItem);
         lockItem = new Forms.ToolStripMenuItem("Lock vault"); lockItem.Click += (_, _) => Queue(lockVault); menu.Items.Add(lockItem);
         menu.Items.Add(new Forms.ToolStripSeparator());
         startupItem = new Forms.ToolStripMenuItem("Start with Windows"); startupItem.Click += (_, _) => Queue(() => setStartup(!startupEnabled())); menu.Items.Add(startupItem);
         menu.Items.Add(new Forms.ToolStripSeparator());
-        var exitItem = new Forms.ToolStripMenuItem("Exit BoshaVault"); exitItem.Click += (_, _) => Queue(exit); menu.Items.Add(exitItem);
-        icon = new Forms.NotifyIcon { Icon = artwork, Text = "BoshaVault · Vault locked", ContextMenuStrip = menu, Visible = true };
+        var exitItem = new Forms.ToolStripMenuItem("Exit Lockvyn"); exitItem.Click += (_, _) => Queue(exit); menu.Items.Add(exitItem);
+        icon = new Forms.NotifyIcon { Icon = artwork, Text = "Lockvyn · Vault locked", ContextMenuStrip = menu, Visible = true };
         icon.MouseClick += (_, e) => { if (e.Button == Forms.MouseButtons.Left) Queue(open); };
         icon.BalloonTipClicked += (_, _) => Queue(open);
         menu.Opening += (_, _) => Update(); Update();
@@ -39,11 +39,11 @@ internal sealed class TrayController : IDisposable
     {
         if (disposed) return;
         bool isOpen = unlocked(); state.Text = isOpen ? "Vault unlocked" : "Vault locked";
-        lockItem.Enabled = isOpen; startupItem.Checked = startupEnabled(); icon.Text = "BoshaVault · " + state.Text;
+        lockItem.Enabled = isOpen; startupItem.Checked = startupEnabled(); icon.Text = "Lockvyn · " + state.Text;
     }
     public void ShowCloseHint()
     {
-        if (!disposed) icon.ShowBalloonTip(3500, "BoshaVault is in the tray", "Your vault is locked. Click the B icon or press Ctrl + Alt + P to open it. Right-click for Exit.", Forms.ToolTipIcon.Info);
+        if (!disposed) icon.ShowBalloonTip(3500, "Lockvyn is in the tray", "Your vault is locked. Click the shield icon or press Ctrl + Alt + P to open it. Right-click for Exit.", Forms.ToolTipIcon.Info);
     }
     public void Dispose()
     {

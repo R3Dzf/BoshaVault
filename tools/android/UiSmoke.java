@@ -1,0 +1,62 @@
+package com.bosha.vault.tests;
+
+import android.app.*;
+import android.content.*;
+import android.graphics.Rect;
+import android.os.*;
+import android.view.*;
+import android.widget.*;
+import java.lang.reflect.*;
+import java.util.*;
+import java.util.concurrent.atomic.AtomicReference;
+import org.json.*;
+
+/** Disposable emulator-only acceptance tests. Never submits signup or uploads data. */
+public final class UiSmoke extends Instrumentation {
+    private Activity activity;
+    private int passed;
+    private interface Work { void run() throws Exception; }
+    private void check(boolean good,String name)throws Exception{if(!good)throw new Exception("FAIL "+name);passed++;}
+    private void main(Work work)throws Exception{
+        AtomicReference<Exception> failure=new AtomicReference<>();runOnMainSync(()->{try{work.run();}catch(Exception e){failure.set(e);}});if(failure.get()!=null)throw failure.get();
+    }
+    private Object field(String name)throws Exception{Field f=activity.getClass().getDeclaredField(name);f.setAccessible(true);return f.get(activity);}
+    private void invoke(String name)throws Exception{Method m=activity.getClass().getDeclaredMethod(name);m.setAccessible(true);m.invoke(activity);}
+    private static <T extends View> T find(View v,Class<T> type,String text){
+        if(type.isInstance(v)&&(text==null||(v instanceof TextView&&((TextView)v).getText().toString().equals(text))))return type.cast(v);
+        if(v instanceof ViewGroup){ViewGroup group=(ViewGroup)v;for(int i=0;i<group.getChildCount();i++){T match=find(group.getChildAt(i),type,text);if(match!=null)return match;}}return null;
+    }
+    @SuppressWarnings("unchecked") private AlertDialog currentDialog()throws Exception{List<AlertDialog> all=(List<AlertDialog>)field("dialogs");return all.get(all.size()-1);}
+    private Rect visible(View view)throws Exception{Rect r=new Rect();check(view!=null&&view.getGlobalVisibleRect(r)&&r.height()>0,"view is visible");return r;}
+    private void tap(EditText field)throws Exception{
+        main(()->{field.requestFocus();field.requestRectangleOnScreen(new Rect(0,0,field.getWidth(),field.getHeight()),true);});waitForIdleSync();Rect r=new Rect();main(()->{if(!field.getGlobalVisibleRect(r))throw new Exception("Editor is off screen.");});long time=SystemClock.uptimeMillis();
+        MotionEvent down=MotionEvent.obtain(time,time,MotionEvent.ACTION_DOWN,r.centerX(),r.centerY(),0),up=MotionEvent.obtain(time,time+40,MotionEvent.ACTION_UP,r.centerX(),r.centerY(),0);down.setSource(InputDevice.SOURCE_TOUCHSCREEN);up.setSource(InputDevice.SOURCE_TOUCHSCREEN);sendPointerSync(down);sendPointerSync(up);down.recycle();up.recycle();waitForIdleSync();
+    }
+    @Override public void onCreate(Bundle arguments){super.onCreate(arguments);start();}
+    @Override public void onStart(){
+        Bundle result=new Bundle();int resultCode=Activity.RESULT_CANCELED;
+        try{
+            Context target=getTargetContext();if(!target.getPackageName().equals("com.lockvyn.app"))throw new Exception("UI smoke requires the isolated Lockvyn package.");
+            activity=startActivitySync(new Intent().setComponent(new ComponentName(target.getPackageName(),"com.bosha.vault.MainActivity")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));waitForIdleSync();
+            Object engine=field("engine");Class<?> type=engine.getClass();Method create=type.getDeclaredMethod("create",String.class);create.setAccessible(true);
+            main(()->{Field touch=activity.getClass().getDeclaredField("lastTouch");touch.setAccessible(true);touch.setLong(activity,SystemClock.elapsedRealtime());});
+            // create() refuses to overwrite an existing vault; this test never deletes one.
+            create.invoke(engine,"synthetic emulator master passphrase 2026");Method snapshot=type.getDeclaredMethod("snapshot");snapshot.setAccessible(true);JSONObject data=(JSONObject)snapshot.invoke(engine);
+            Method blank=type.getDeclaredMethod("blank");blank.setAccessible(true);JSONArray entries=new JSONArray();String device=UUID.randomUUID().toString();
+            for(int i=0;i<1000;i++){JSONObject e=(JSONObject)blank.invoke(null);e.put("title",String.format(Locale.ROOT,"Synthetic login %04d",i)).put("username","demo@example.invalid").put("password","Synthetic random secret 42!").put("clock",new JSONObject().put(device,1));entries.put(e);}data.put("entries",entries);Field body=type.getDeclaredField("data");body.setAccessible(true);body.set(engine,data);
+            main(()->invoke("showVault"));waitForIdleSync();final Rect[] before={null};
+            main(()->{ListView list=(ListView)field("list");check(list.getAdapter().getCount()==1000,"all 1000 logins are listed");check(list.getChildCount()>0&&list.getChildCount()<40,"rows are recycled instead of creating 1000 views");before[0]=visible(find(activity.findViewById(android.R.id.content),Button.class,"Options"));list.setSelection(999);});waitForIdleSync();
+            main(()->{Rect after=visible(find(activity.findViewById(android.R.id.content),Button.class,"Options"));check(before[0].equals(after),"Options stays fixed after scrolling to login 1000");invoke("cloud");});waitForIdleSync();
+            final AlertDialog[] dialog={null};final EditText[] email={null},password={null};
+            main(()->{dialog[0]=currentDialog();Window window=dialog[0].getWindow();int flags=window.getAttributes().flags;check((flags&WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM)==0,"cloud dialog allows IME connection");check((flags&WindowManager.LayoutParams.FLAG_SECURE)!=0,"cloud dialog retains screenshot protection");List<EditText> fields=new ArrayList<>();collect(window.getDecorView(),fields);check(fields.size()>=3,"cloud fields are present");email[0]=fields.get(0);password[0]=fields.get(1);});
+            tap(email[0]);boolean keyboard=false;
+            for(int i=0;i<40&&!keyboard;i++){final boolean[] shown={false};main(()->{WindowInsets insets=dialog[0].getWindow().getDecorView().getRootWindowInsets();shown[0]=insets!=null&&insets.isVisible(WindowInsets.Type.ime());});keyboard=shown[0];if(!keyboard)SystemClock.sleep(100);}
+            check(keyboard,"soft keyboard appears on cloud email field");sendStringSync("demo@example.invalid");waitForIdleSync();main(()->check(email[0].getText().toString().equals("demo@example.invalid"),"email field accepts keyboard input"));
+            tap(password[0]);sendStringSync("synthetic-password-123");waitForIdleSync();main(()->{check(password[0].getText().toString().equals("synthetic-password-123"),"cloud password accepts keyboard input");check((password[0].getInputType()&android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD)!=0,"cloud password stays masked");email[0].setText("");password[0].setText("");dialog[0].dismiss();});
+            result.putString("stream","UI_SMOKE_PASS: "+passed+" native Android keyboard and 1000-row navigation checks passed. No email or cloud request was submitted.\n");resultCode=Activity.RESULT_OK;
+        }catch(Exception e){result.putString("stream","UI_SMOKE_FAIL: "+e.toString()+"\n");}
+        finally{if(activity!=null)runOnMainSync(()->activity.finish());}
+        finish(resultCode,result);
+    }
+    private static void collect(View view,List<EditText> out){if(view instanceof EditText)out.add((EditText)view);if(view instanceof ViewGroup){ViewGroup group=(ViewGroup)view;for(int i=0;i<group.getChildCount();i++)collect(group.getChildAt(i),out);}}
+}

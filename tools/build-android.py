@@ -25,11 +25,11 @@ def main():
  if a.isolated_test_app:
   # Android package must differ so the trial APK can never overwrite the user's vault.
   # Java class names stay unchanged, so explicitly qualify manifest component names.
-  xml=manifest.read_text(encoding='utf-8').replace('package="com.bosha.vault"','package="com.bosha.vault.test"').replace('android:label="BoshaVault"','android:label="BoshaVault Test"').replace('android:name=".','android:name="com.bosha.vault.')
+  xml=manifest.read_text(encoding='utf-8').replace('package="com.bosha.vault"','package="com.lockvyn.app"').replace('android:name=".','android:name="com.bosha.vault.')
   manifest=work/'AndroidManifest.xml'
   manifest.write_text(xml,encoding='utf-8')
  run(tools/'aapt2','compile','--dir',app/'res','-o',res)
- run(tools/'aapt2','link','-o',compiled,'--manifest',manifest,'-I',android,'--min-sdk-version','28','--target-sdk-version','35','--version-code','9','--version-name','1.4.0-cloud-sync-preview',res)
+ run(tools/'aapt2','link','-o',compiled,'--manifest',manifest,'-I',android,'--min-sdk-version','28','--target-sdk-version','35','--version-code','10','--version-name','1.5.0',res)
  classpath=os.pathsep.join(str(DEPS/name) for name in ('bcprov.jar','zxing-core.jar'))
  run('java','-jar',DEPS/'ecj.jar','-1.8','-warn:none','-bootclasspath',str(android)+os.pathsep+str(tools/'core-lambda-stubs.jar'),'-cp',classpath,'-d',classes,*sorted((app/'java').rglob('*.java')))
  jar=work/'app.jar'
@@ -39,7 +39,7 @@ def main():
  run(d8,'--release','--min-api','28','--lib',android,'--output',dex,jar,DEPS/'bcprov.jar',DEPS/'zxing-core.jar')
  with zipfile.ZipFile(compiled,'a')as z:
   for f in dex.glob('*.dex'):z.write(f,f.name)
- aligned=work/'aligned.apk';run(tools/'zipalign','-f','4',compiled,aligned);out=ROOT/('dist/BoshaVault-Android-Test.apk' if a.isolated_test_app else 'dist/BoshaVault-Android.apk');out.parent.mkdir(exist_ok=True)
+ aligned=work/'aligned.apk';run(tools/'zipalign','-f','4',compiled,aligned);out=ROOT/('dist/Lockvyn-Android.apk' if a.isolated_test_app else 'dist/Lockvyn-Android-LegacyPackage.apk');out.parent.mkdir(exist_ok=True)
  signer=tools/('apksigner.bat' if os.name=='nt' else 'apksigner')
  run(signer,'sign','--ks',a.keystore,'--ks-key-alias',a.alias,'--ks-pass','env:BOSHAVAULT_KEYSTORE_PASSWORD','--key-pass','env:BOSHAVAULT_KEYSTORE_PASSWORD','--out',out,aligned)
  run(signer,'verify','--verbose',out);shutil.rmtree(work);print(out)

@@ -9,7 +9,7 @@ public static class PairingQr
     public static byte[] Render(string pairingCode)
     {
         if (!pairingCode.StartsWith("BV1:", StringComparison.Ordinal) || pairingCode.Length > 4096)
-            throw new VaultException("A BoshaVault pairing code is required.");
+            throw new VaultException("A Lockvyn pairing code is required.");
         using var data = QRCodeGenerator.GenerateQrCode(pairingCode, QRCodeGenerator.ECCLevel.M);
         using var png = new PngByteQRCode(data);
         return png.GetGraphic(8, drawQuietZones: true);

@@ -24,7 +24,7 @@ internal static class CloudSyncDialog
         var status = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 12, 0, 10) };
         void EnsureCurrent() { if (closed || !current() || !vault.IsOpen) throw new OperationCanceledException(); }
         void Status(string message) { if (!closed) status.Text = message; }
-        Button Action(string label, Func<Task> action, bool primary = false)
+        Button Action(string label, Func<Task> action, bool primary = false, bool inBody = false)
         {
             var button = d.Action(label, async () =>
             {
@@ -36,7 +36,7 @@ internal static class CloudSyncDialog
                 catch (Exception ex) when (ex is VaultException or HttpRequestException or IOException or CryptographicException or UnauthorizedAccessException or ObjectDisposedException)
                 { Status(ex is VaultException ? ex.Message : "Cloud could not be reached. Your local vault is preserved. Try again when connected."); }
                 finally { running = false; if (!closed) foreach (var b in buttons) b.IsEnabled = true; }
-            }, primary);
+            }, primary, inBody);
             buttons.Add(button); return button;
         }
         void ClearPage()
@@ -116,8 +116,8 @@ internal static class CloudSyncDialog
         void Setup()
         {
             ClearPage();
-            d.Label("Optional manual sync. Data is encrypted on this device before upload. This cloud login is separate from your Supabase dashboard login.");
-            d.Label("For this private preview, use the email associated with your new Supabase account.");
+            d.Label("Optional encrypted sync. Create a Lockvyn cloud account here using your own email. Each person uses their own account; use that same account on your own devices.");
+            d.Label("Your offline vault needs no account. The cloud account password is separate from your master passphrase.");
             var email = d.Field("Cloud account email", "", 320);
             var password = d.Secret("Cloud account password (separate from your master passphrase)");
             var join = d.Secret("Other device's cloud connection code (only when joining)"); join.MaxLength = 1024;
@@ -128,7 +128,12 @@ internal static class CloudSyncDialog
                 string secret = password.Password; password.Clear();
                 try { await auth.SignUp(email.Text.Trim(), secret, cancellation.Token); EnsureCurrent(); Status("Check your email and confirm the cloud account, then sign in below. The local vault has not changed."); }
                 finally { secret = ""; }
-            });
+            }, inBody: true);
+            Action("Resend confirmation email", async () =>
+            {
+                await auth.ResendConfirmation(email.Text.Trim(), cancellation.Token); EnsureCurrent();
+                Status("If the account is awaiting confirmation, check your email including Spam. Wait at least 60 seconds before requesting another message.");
+            }, inBody: true);
             async Task Connect(bool existing)
             {
                 string secret = password.Password, pairingCode = join.Password; password.Clear(); join.Clear();

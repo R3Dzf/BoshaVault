@@ -1,3 +1,24 @@
+# Lockvyn vault UX validation — 2026-10-11
+
+Applies to Lockvyn Windows 1.9 / Android 1.5 source. The checks below use synthetic credentials and encrypted fixtures; no personal vault is modified.
+
+| Verification | Result |
+|---|---|
+| .NET vault UX suite | 28 checks passed: folder defaults/persistence, configurable generator, review invalidation, permanent deletion, stale/concurrent merge refusal and schema 1 migration |
+| Android engine on JVM | 18 checks passed, including .NET schema 2, Unicode folders, review fingerprints, permanent deletion and real schema 1 upgrade |
+| Java → .NET UX compatibility | 3 checks passed: permanent deletion, review acknowledgement and Unicode/custom folder catalog |
+| Existing .NET core suite | 74 checks passed |
+| Cloud account/pairing/atomic merge | 17 checks passed, including confirmation resend and actionable restricted-sender errors |
+| Windows WPF compile | Zero warnings/errors using .NET SDK 10.0.100 on Linux |
+| Lockvyn identity and icon assets | Windows and native host compile; browser generator/origin/fill suites passed; XML/YAML, extension icon paths and all seven ICO sizes verified |
+| Native Android keyboard and 1,000-row navigation | Emulator-only instrumentation is included in GitHub CI; outcome pending the new build |
+
+The isolated APK is **Lockvyn** (`com.lockvyn.app`) and has separate storage from production and the earlier Test app. Export an encrypted backup and update both devices before exchanging schema 2; older builds cannot open that schema. See [VAULT-UX.md](VAULT-UX.md) for the new controls and setup.
+
+Public cloud signup still requires a configured SMTP sender. The connected Resend account currently has no sender domain. Native Windows UI, hardware Android behavior and real email confirmation remain acceptance work.
+
+---
+
 # Cloud preview validation — 2026-10-11
 
 Applies to Windows 1.8 / Android 1.4 cloud-preview source and the dedicated Orchid Ledger project. Tests used synthetic entries only. No existing personal vault, unrelated Supabase project or original Android installation was modified.

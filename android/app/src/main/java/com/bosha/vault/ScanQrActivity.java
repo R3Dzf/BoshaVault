@@ -26,7 +26,7 @@ public final class ScanQrActivity extends Activity implements SurfaceHolder.Call
         super.onCreate(state);setResult(RESULT_CANCELED);
         LinearLayout root=Ui.screen(this);
         root.addView(Ui.text(this,"Scan your Windows QR",25,Ui.INK,true));Ui.gap(root,12);
-        root.addView(Ui.text(this,"Start a private transfer on your computer. Point the camera at the QR shown in BoshaVault.",14,Ui.MUTED,false));Ui.gap(root,18);
+        root.addView(Ui.text(this,"Start a private transfer on your computer. Point the camera at the QR shown in Lockvyn.",14,Ui.MUTED,false));Ui.gap(root,18);
         previewBox=new FrameLayout(this);previewBox.setBackgroundColor(Ui.INK);
         preview=new SurfaceView(this);preview.getHolder().addCallback(this);
         previewBox.addView(preview,new FrameLayout.LayoutParams(-1,-1,Gravity.CENTER));
@@ -73,7 +73,7 @@ public final class ScanQrActivity extends Activity implements SurfaceHolder.Call
             final int width=size.width,height=size.height,stamp=++generation;
             camera.setPreviewCallbackWithBuffer((frame,source)->onFrame(frame,source,width,height,stamp));
             camera.startPreview();permissionButton.setVisibility(View.GONE);
-            status.setText("Keep the whole QR in view. Only BoshaVault pairing codes are accepted.");
+            status.setText("Keep the whole QR in view. Only Lockvyn pairing codes are accepted.");
             if(modes!=null&&Camera.Parameters.FOCUS_MODE_AUTO.equals(params.getFocusMode()))preview.setOnClickListener(v->{try{if(camera!=null)camera.autoFocus(null);}catch(RuntimeException ignored){}});
         }catch(Exception e){closeCamera();permissionButton.setVisibility(View.VISIBLE);status.setText("Cannot open the camera. Close other camera apps and retry, or paste the pairing code instead.");}
     }
@@ -99,7 +99,7 @@ public final class ScanQrActivity extends Activity implements SurfaceHolder.Call
             if(result==null)return;final String code=result;
             runOnUiThread(()->{
                 if(!resumed||completed||stamp!=generation)return;
-                try{new LocalTransfer(code);}catch(Exception ignored){status.setText("This is not a valid BoshaVault pairing QR. Scan the QR in the Windows transfer window.");return;}
+                try{new LocalTransfer(code);}catch(Exception ignored){status.setText("This is not a valid Lockvyn pairing QR. Scan the QR in the Windows transfer window.");return;}
                 completed=true;generation++;closeCamera();setResult(RESULT_OK,new Intent().putExtra(RESULT_PAIRING,code));finish();
             });
         });}catch(RejectedExecutionException ignored){Arrays.fill(pixels,(byte)0);decoding.set(false);}

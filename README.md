@@ -1,60 +1,50 @@
-> **GitHub CI:** The complete Windows + Android source can be built with [GitHub Actions](.github/workflows/build.yml). See [GitHub build, installation, and Android signing](docs/GITHUB-BUILD.md). Run [Publish-To-GitHub.ps1](Publish-To-GitHub.ps1) locally with GitHub CLI to create a private repo and upload all files. Unconfigured CI produces an APK with a temporary *test-only* signing certificate; it cannot upgrade the previous installed APK. The pairing hotfix has not been verified on actual connected devices.
+# Lockvyn — Windows 1.9 / Android 1.5
 
-> **Pairing hotfix source update (2026-10-09):** See [`docs/PAIRING-HOTFIX-2026-10-09.md`](docs/PAIRING-HOTFIX-2026-10-09.md). This is source-only and has not passed live Windows/Android pairing. `Build-Windows-Hotfix.ps1` builds the updated desktop after running tests; `Diagnose-BoshaVault.ps1` provides read-only diagnostics. Existing signed Android APK is unchanged.
+![Lockvyn shield and keyhole](design/lockvyn-mark.svg)
 
-# BoshaVault Windows 1.8 / Android 1.4 encrypted cloud sync preview
+A native password manager for Windows x64 and Android 9+. Keep an encrypted vault on your device, with optional manual encrypted cloud sync and private Wi-Fi transfer. English interface; Unicode credentials, folders and notes. No advertising or analytics.
 
-Native password vault for Windows x64 and Android 9+. English UI, Unicode credentials and notes. A local Chrome/Edge browser extension preview is included for user-approved filling. Optional manual encrypted cloud sync uses the dedicated Orchid Ledger Supabase project; the vault stays usable offline, without a cloud account. There is no advertising or analytics.
+Lockvyn is the new product name for BoshaVault. Existing encrypted `.boshavault` files, pairing codes and cloud spaces remain compatible. Windows continues using the existing data directory. Source project names and authenticated encryption identifiers retain their original names to preserve compatibility.
 
-**Windows 1.8 / Android 1.4 preview:** Devices & encrypted backup now includes opt-in cloud signup/sign-in, a private connection code for your other device, protected saved settings, Sync now and local session disconnect. Only independently encrypted device snapshots are uploaded. See [cloud setup, limits and passphrase-change instructions](docs/CLOUD-SYNC.md). Automated tests and builds do not replace a real two-device acceptance test.
+**This update:** Android cloud fields accept the keyboard; **Options** stays accessible with large vaults; preset/custom encrypted folders filter independently from All/Favorites/Review/Trash; Trash supports confirmed permanent deletion; Review supports explicit acknowledgement; the password generator has configurable saved rules (initial length **24**, range **8–128**). The shield/keyhole icon appears on Windows, Android and the browser extension. Product versions and download names have no prerelease suffix. See [the vault guide](docs/VAULT-UX.md).
 
-New groundwork: a local Password Health report, standalone RFC 6238 TOTP engine and independently encrypted optional Supabase snapshot format are in source. Windows 1.5 preview also includes **local Chrome/Bitwarden CSV import with human review**, browser document-ID origin verification, lookalike hostname warnings and user-confirmed updates to existing saved passwords. **Saved TOTP, Windows Hello, passkeys and automatic signed updates are not enabled in the UI yet.** See [the cloud security design](docs/CLOUD-SYNC.md) and [roadmap/status table](docs/ROADMAP-SECURITY.md).
+## Download and install
 
-**Windows 1.6:** fixed a closed-Shadow-DOM click bug that caused login suggestion presses to disappear without filling. Added username-first login support, live Chrome/Edge toolbar actions, optional www/bare-host match, one-click capture of the current HTTPS website/username into the new-login form, and a compact WPF dialog with Generate + Copy password buttons. Browser extension is still a hardware-untested preview. See [Windows Autofill](docs/WINDOWS-AUTOFILL.md).
+Open the successful **Build Lockvyn (Windows and Android)** run in [GitHub Actions](https://github.com/R3Dzf/BoshaVault/actions). Use the artifacts below; they expire after 14 days. Check [VALIDATION.md](docs/VALIDATION.md) for exactly what has passed.
 
-**Windows 1.7 preview:** larger correctly aligned input text in Add Login / Edit Login, plus smart Chrome/Edge suggestions for exact sites and related subdomains under the same registrable domain. Suggestions are tagged **Exact** or **Related**, and related fills show both origin and saved host in a mandatory confirmation. Uses an offline private-inclusive Public Suffix List, so unrelated tenants on `github.io` or `blogspot.com` do not share credentials. See [Windows Autofill guide](docs/WINDOWS-AUTOFILL.md).
+| Artifact | Use |
+|---|---|
+| `Lockvyn-Windows-x64` | Extract the artifact ZIP, then the included `Lockvyn-Windows-x64.zip` into a permanent folder. Start `Lockvyn.exe` without administrator privileges. .NET is bundled. |
+| `Lockvyn-Android` | Extract and install `Lockvyn-Android.apk`. Package `com.lockvyn.app` installs alongside older BoshaVault apps with separate storage. Import an encrypted backup or receive the existing Windows vault. |
+| `Lockvyn-Android-LegacyPackage` | Advanced compatibility build using `com.bosha.vault`. An update requires the original signing certificate; ordinary CI uses a temporary certificate. |
+| `Lockvyn-Android-UI-Logs` | Native emulator acceptance evidence, not an application download. |
 
-This is a working implementation and a preview build, not an independently audited security product. There is no promise of invulnerability or impossible decryption. See `docs/SECURITY.md` and `docs/VALIDATION.md` before using real credentials. Use synthetic credentials for initial device testing.
+Before updating, export an encrypted backup and verify that you know its master passphrase. **Keep the old Android app installed** while importing and checking Lockvyn. Update both devices before exchanging schema 2: these versions open old schema 1 vaults, but old versions cannot read schema 2. CI Android signing is temporary unless permanent release secrets are configured; it does not provide seamless upgrades across CI runs. See [build and signing instructions](docs/GITHUB-BUILD.md).
+
+For Windows, exit the old app completely through its tray menu before replacing program files. Keep the entire extracted bundle together, including `Lockvyn.NativeHost.exe`, `browser-extension/` and `Install-BrowserAutofill.ps1`. Windows keeps your vault under `%LOCALAPPDATA%\BoshaVault`. Closing × locks the vault and hides it in the shield tray icon. Click the icon, use **Ctrl + Alt + P**, or relaunch to reopen it; **Exit Lockvyn** fully exits. **Start with Windows** is optional and starts locked in the tray.
+
+The Windows bundle includes **START-HERE.html**, an Arabic setup guide. [Chrome/Edge Autofill setup](docs/WINDOWS-AUTOFILL.md) uses a local extension and explicit Windows confirmation before sending a password to a website. Android uses the system Autofill service. Copy and paste remains available; the app clears its owned clipboard after 20 seconds where the OS allows.
 
 ## Included
 
 | Feature | Windows | Android |
 |---|---|---|
-| Create, unlock and lock encrypted vault | Yes | Yes |
-| Add, edit, search, favorites, folders, notes | Yes | Yes |
-| Local checks for short and reused passwords | Yes | Yes |
-| Secure random password generator | Yes | Yes |
-| Trash and restore, with synchronized tombstones | Yes | Yes |
-| Encrypted file backups and conflict-preserving merge | Yes | Yes |
-| Private Wi-Fi transfer with TLS certificate pin and temporary token | Host | Client |
-| Optional encrypted cloud sync, manually triggered | Preview; DPAPI settings | Preview; Keystore settings |
-| Temporary pairing QR | Display + countdown | Offline camera scanner |
-| Master passphrase change with fresh vault key | Yes | Yes |
-| App inactivity lock | Default 2 min | Default 2 min; also on leaving app |
-| Clear owned clipboard after 20 seconds | Best effort | Best effort |
-| Quick access | Tray icon / Ctrl + Alt + P / relaunch | Launcher / native Autofill |
-| Close window | Locks vault and moves to tray; Exit is explicit | Locks when leaving app |
-| Optional start at sign-in | Locked, hidden in tray | Not included |
+| Create, unlock, lock; add/edit/search logins and notes | Yes | Yes |
+| Favorites, encrypted folders, review acknowledgement | Yes | Yes |
+| Configurable secure generator and device-local saved rules | Yes | Yes |
+| Trash, restore, permanent deletion with merge deletion markers | Yes | Yes |
+| Encrypted backups and conflict-preserving merge | Yes | Yes |
+| Private Wi-Fi transfer with pinned TLS and temporary QR | Host | Client + offline scanner |
+| Opt-in manual encrypted cloud sync | DPAPI-protected settings | Keystore-protected settings |
+| Inactivity lock and clipboard clearing | Yes | Yes; also locks when leaving app |
+| Browser Autofill | Local Chrome/Edge extension; user confirmation | Native system Autofill; authenticated selection |
 | Biometric quick unlock | Not included | Android Keystore + biometric CryptoObject |
-| Autofill | Chrome/Edge extension preview; exact HTTPS host + Windows confirmation; manual copy fallback | System Autofill; authenticated selection |
 
-The Windows extension reads the browser-reported HTTPS origin and offers only exact-host matches after the vault is unlocked. When creating a new account, its popup can generate a cryptographically random password, fill a clearly detected confirmation field, and save the generated password with the signup username/email after explicit review in Windows. Each credential release still requires a confirmation on Windows; it never types into arbitrary desktop applications. See [Windows browser Autofill setup](docs/WINDOWS-AUTOFILL.md). Ctrl+Alt+P brings the app forward. Copy and paste is the fallback accepted in the design discussion. Android rejects insecure or missing browser origins, ambiguous forms and unverified WebViews. A browser's signing identity must be approved on first use and match thereafter. Native-app filling requires explicitly linking each login to that package and certificate.
+Cloud signup happens **inside Lockvyn**. Friends need their own app account, not a Supabase dashboard account. Public confirmation email delivery still requires the owner to configure a verified SMTP sender; confirmation remains enabled. Offline vault use does not require an account. Read [cloud setup and limits](docs/CLOUD-SYNC.md).
 
-No passkeys, TOTP manager, continuous/background synchronization, automatic password saving, Windows Hello unlocking, breach lookup or cloud-only recovery service is included. LAN and cloud sync are explicit user actions. Features absent from the UI are not hidden placeholders.
+Choose a unique master passphrase of at least 16 characters. A forgotten vault passphrase cannot be reset by email; biometric access is not a backup. No independent security audit is claimed. Windows binaries have no publisher Authenticode signature. Real phone/PC Wi-Fi, camera, biometric, browser and two-device cloud acceptance still require device testing. See [security boundaries](docs/SECURITY.md), [validation](docs/VALIDATION.md) and [roadmap](docs/ROADMAP-SECURITY.md).
 
-## Run
-
-Windows: extract the full `BoshaVault-Windows-x64` artifact and start `BoshaVault.exe` without administrator privileges. Keep the native host, browser-extension folder and installer script together for Chrome/Edge autofill setup. See [installation guide](docs/WINDOWS-AUTOFILL.md). It bundles .NET 10; no separate runtime installation is required. Data is under `%LOCALAPPDATA%\BoshaVault`. The binary has no publisher Authenticode signature. Do not disable antivirus to run it.
-
-Android source builds **1.4.0-cloud-sync-preview** (version code 9). For a preview alongside your existing vault, install the **BoshaVault-Android-Test** artifact: it uses a separate package and storage. The ordinary CI APK uses a temporary signing certificate unless permanent signing is explicitly configured; it cannot upgrade an installation signed with another key. Keep the existing app installed and export a restorable encrypted backup before any migration. See [build and signing instructions](docs/GITHUB-BUILD.md).
-
-Windows tray: closing the main window with × locks the vault, clears the owned clipboard, stops a transfer and hides the window; the app stays available in the notification area. Click the B tray icon (possibly under the hidden-icons arrow), choose Open BoshaVault, press Ctrl+Alt+P, or launch the executable again to reopen the existing instance. Minimize keeps the taskbar window; normal inactivity locking still applies. Right-click the tray icon → Exit BoshaVault fully closes it. Logoff/shutdown exits normally; session lock/suspend locks the vault. A one-time notification explains the behavior.
-
-Right-click the tray icon → Start with Windows, or use the same setting in Your vault settings. This is off until you enable it, uses your user account only, and starts locked in the tray without opening an unlocked window. Use a permanent executable folder; toggle the option off/on if you move the executable. If you previously added a shortcut under shell:startup, remove that old shortcut after enabling the built-in setting to avoid a duplicate launch. Auto-lock choices persist in a small non-secret desktop.json beside the vault.
-
-For a Windows update, export an encrypted backup, exit the old version completely (the original 1.1 exits with ×; 1.2 exits through the tray), then replace the executable in its existing folder. Running the published EXE requires no administrator privileges. For the cloud preview, use the matching Android Test build alongside your current app.
-
-Choose a unique master passphrase of 16+ characters. A long passphrase with randomly chosen words is useful. Nothing is prefilled with real credentials. Forgetting it without an available biometric unlock means the vault cannot be reset. Biometric access is tied to this Android device and is not a backup.
+Passkeys, saved TOTP, Windows Hello, automatic signed updates, continuous sync and cloud-only recovery are not enabled in the UI.
 
 ## Share the same vault
 
@@ -69,7 +59,7 @@ Create the vault on ONE device, then transfer/import it onto the other. Creating
 
 Both devices must be on the same private network. A guest network may isolate clients. If Windows presents a firewall prompt, restrict the permission to the private network. The listener binds the selected local IP only and closes after completion, expiration, app locking or closing the transfer window. An explicitly active transfer may keep the vault open for its bounded three-minute window; it cannot keep it unlocked indefinitely. Closing to tray or locking Windows always stops it. Windows displays connection/expiry progress; restarting generates a new port and QR. No passphrase or plaintext credential crosses the link. Certificates are short-lived and explicitly pinned by the pairing code; Windows imports the temporary TLS key into a user key container for Schannel compatibility, without PersistKeySet, and releases it on disposal. The container carries the temporary TLS key only. No root certificate is trusted or installed. On other platforms the key remains an ephemeral import; ordinary HTTP and public-IP endpoints are refused.
 
-The in-app QR scanner runs offline, accepts only valid BoshaVault private-IP pairing codes, and neither saves camera images nor opens web URLs. The camera is released when the scanner closes or the app leaves the foreground. If permission is denied or the camera is unavailable, manual paste remains usable.
+The in-app QR scanner runs offline, accepts only valid Lockvyn private-IP pairing codes, and neither saves camera images nor opens web URLs. The camera is released when the scanner closes or the app leaves the foreground. If permission is denied or the camera is unavailable, manual paste remains usable.
 
 You can instead export, transfer and merge encrypted backups by USB or a file manager. File transfers remain encrypted. Concurrent edits create `(conflict)` copies; review those copies before changing them. App trust approvals are device-local and are not granted by merging a remote vault.
 
