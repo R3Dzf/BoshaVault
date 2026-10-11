@@ -57,9 +57,11 @@ foreach (var scenario in new[] { "delta", "missing-base", "damaged-delta", "canc
     // Use the real Windows patcher from the trusted fixture package. The SDK
     // falls back to a full download if Update.exe is absent, even with a valid delta.
     string current = Path.Combine(root, "current"); Directory.CreateDirectory(current);
+    var updater = new Velopack.NuGet.ZipPackage(Path.Combine(feedDir, baseline.FileName), loadUpdateExe: true).UpdateExeBytes
+        ?? throw new Exception("Fixture package contains no Windows updater");
+    File.WriteAllBytes(Path.Combine(root, "Update.exe"), updater);
     using (var package = ZipFile.OpenRead(Path.Combine(feedDir, baseline.FileName)))
     {
-        package.Entries.Single(e => Path.GetFileName(e.FullName).Equals("Update.exe", StringComparison.OrdinalIgnoreCase)).ExtractToFile(Path.Combine(root, "Update.exe"), true);
         package.Entries.Single(e => e.FullName.EndsWith(".nuspec", StringComparison.OrdinalIgnoreCase)).ExtractToFile(Path.Combine(current, "sq.version"), true);
     }
     if (scenario is "delta" or "damaged-delta" or "cancelled") File.Copy(Path.Combine(feedDir, baseline.FileName), Path.Combine(packages, baseline.FileName), true);
