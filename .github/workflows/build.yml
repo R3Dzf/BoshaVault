@@ -247,7 +247,7 @@ jobs:
           retention-days: 14
 
   android-ui:
-    name: Android native keyboard and 1000-login navigation
+    name: Android native email, MFA and 1000-login navigation
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -274,7 +274,7 @@ jobs:
           keytool -genkeypair -keystore build-deps/ui-demo.p12 -storepass "$BOSHAVAULT_KEYSTORE_PASSWORD" -keypass "$BOSHAVAULT_KEYSTORE_PASSWORD" -alias boshavault -keyalg RSA -keysize 2048 -validity 7 -dname 'CN=Lockvyn Disposable UI Test'
           python tools/build-android.py --sdk "$ANDROID_HOME/platforms/android-35" --tools "$ANDROID_HOME/build-tools/35.0.0" --keystore build-deps/ui-demo.p12 --isolated-test-app
           python tools/build-android-ui-test.py --sdk "$ANDROID_HOME/platforms/android-35" --tools "$ANDROID_HOME/build-tools/35.0.0" --keystore build-deps/ui-demo.p12
-      - name: Run native keyboard and scrolling acceptance tests
+      - name: Run native keyboard, email-code, MFA and scrolling acceptance tests
         shell: bash
         run: |
           set -euo pipefail
