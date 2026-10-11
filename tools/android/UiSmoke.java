@@ -6,6 +6,8 @@ import android.graphics.Rect;
 import android.os.*;
 import android.view.*;
 import android.widget.*;
+import android.accessibilityservice.AccessibilityServiceInfo;
+import android.view.accessibility.AccessibilityWindowInfo;
 import java.lang.reflect.*;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
@@ -28,6 +30,10 @@ public final class UiSmoke extends Instrumentation {
     }
     @SuppressWarnings("unchecked") private AlertDialog currentDialog()throws Exception{List<AlertDialog> all=(List<AlertDialog>)field("dialogs");return all.get(all.size()-1);}
     private Rect visible(View view)throws Exception{Rect r=new Rect();check(view!=null&&view.getGlobalVisibleRect(r)&&r.height()>0,"view is visible");return r;}
+    private boolean keyboardVisible(){
+        // Check the interactive keyboard window on the screen, including floating dialogs.
+        for(AccessibilityWindowInfo window:getUiAutomation().getWindows()){Rect bounds=new Rect();window.getBoundsInScreen(bounds);if(window.getType()==AccessibilityWindowInfo.TYPE_INPUT_METHOD&&!bounds.isEmpty())return true;}return false;
+    }
     private void tap(EditText field)throws Exception{
         main(()->{field.requestFocus();field.requestRectangleOnScreen(new Rect(0,0,field.getWidth(),field.getHeight()),true);});waitForIdleSync();Rect r=new Rect();
         // Pointer injection uses screen coordinates; a dialog's root is offset on screen.
@@ -39,6 +45,7 @@ public final class UiSmoke extends Instrumentation {
         Bundle result=new Bundle();int resultCode=Activity.RESULT_CANCELED;
         try{
             Context target=getTargetContext();if(!target.getPackageName().equals("com.lockvyn.app"))throw new Exception("UI smoke requires the isolated Lockvyn package.");
+            AccessibilityServiceInfo service=getUiAutomation().getServiceInfo();service.flags|=AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS;getUiAutomation().setServiceInfo(service);
             activity=startActivitySync(new Intent().setComponent(new ComponentName(target.getPackageName(),"com.bosha.vault.MainActivity")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));waitForIdleSync();
             Object engine=field("engine");Class<?> type=engine.getClass();Method create=type.getDeclaredMethod("create",String.class);create.setAccessible(true);
             main(()->{Field touch=activity.getClass().getDeclaredField("lastTouch");touch.setAccessible(true);touch.setLong(activity,SystemClock.elapsedRealtime());});
@@ -52,7 +59,7 @@ public final class UiSmoke extends Instrumentation {
             final AlertDialog[] dialog={null};final EditText[] email={null},password={null};
             main(()->{dialog[0]=currentDialog();Window window=dialog[0].getWindow();int flags=window.getAttributes().flags;check((flags&WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM)==0,"cloud dialog allows IME connection");check((flags&WindowManager.LayoutParams.FLAG_SECURE)!=0,"cloud dialog retains screenshot protection");List<EditText> fields=new ArrayList<>();collect(window.getDecorView(),fields);check(fields.size()>=3,"cloud fields are present");email[0]=fields.get(0);password[0]=fields.get(1);});
             tap(email[0]);boolean keyboard=false;
-            for(int i=0;i<40&&!keyboard;i++){final boolean[] shown={false};main(()->{WindowInsets insets=dialog[0].getWindow().getDecorView().getRootWindowInsets();shown[0]=insets!=null&&insets.isVisible(WindowInsets.Type.ime());});keyboard=shown[0];if(!keyboard)SystemClock.sleep(100);}
+            for(int i=0;i<40&&!keyboard;i++){keyboard=keyboardVisible();if(!keyboard)SystemClock.sleep(100);}
             if(!keyboard){String[] state={""};main(()->{android.view.inputmethod.InputMethodManager ime=(android.view.inputmethod.InputMethodManager)target.getSystemService(Context.INPUT_METHOD_SERVICE);state[0]=" (fieldFocus="+email[0].hasFocus()+", windowFocus="+email[0].hasWindowFocus()+", editorConnected="+(ime!=null&&ime.isActive(email[0]))+", flags="+Integer.toHexString(dialog[0].getWindow().getAttributes().flags)+")";});throw new Exception("FAIL soft keyboard appears on cloud email field"+state[0]);}
             check(keyboard,"soft keyboard appears on cloud email field");sendStringSync("demo@example.invalid");waitForIdleSync();main(()->check(email[0].getText().toString().equals("demo@example.invalid"),"email field accepts keyboard input"));
             tap(password[0]);sendStringSync("synthetic-password-123");waitForIdleSync();main(()->{check(password[0].getText().toString().equals("synthetic-password-123"),"cloud password accepts keyboard input");check((password[0].getInputType()&android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD)!=0,"cloud password stays masked");email[0].setText("");password[0].setText("");dialog[0].dismiss();});
