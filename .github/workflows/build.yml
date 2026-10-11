@@ -262,7 +262,7 @@ jobs:
           test -e /dev/kvm
           sudo chmod 666 /dev/kvm
           SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager -print -quit)"
-          "$SDKMANAGER" --install 'platforms;android-35' 'build-tools;35.0.0' 'emulator' 'system-images;android-35;google_apis;x86_64'
+          "$SDKMANAGER" --install 'platform-tools' 'platforms;android-35' 'build-tools;35.0.0' 'emulator' 'system-images;android-35;google_apis;x86_64'
       - name: Build isolated app and matching-signed instrumentation
         shell: bash
         env:
@@ -277,12 +277,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          export PATH="$ANDROID_HOME/platform-tools:$PATH"
           AVDMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name avdmanager -print -quit)"
           printf 'no\n' | "$AVDMANAGER" create avd --force --name BoshaVaultUi --package 'system-images;android-35;google_apis;x86_64' --device 'pixel_2'
           "$ANDROID_HOME/emulator/emulator" -avd BoshaVaultUi -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -accel on > build-deps/emulator.log 2>&1 &
           BV_EMULATOR_PID=$!
           trap 'kill "$BV_EMULATOR_PID" || true' EXIT
-          adb wait-for-device
+          timeout 180 adb wait-for-device
           for attempt in $(seq 1 150); do
             if [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = '1' ]; then break; fi
             sleep 2
