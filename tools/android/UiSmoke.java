@@ -18,9 +18,9 @@ public final class UiSmoke extends Instrumentation {
     private Activity activity;
     private int passed;
     private interface Work { void run() throws Exception; }
-    private void check(boolean good,String name)throws Exception{if(!good)throw new Exception("FAIL "+name);passed++;}
+    private void check(boolean good,String name)throws Exception{if(!good)throw new Exception("FAIL "+name);passed++;Bundle progress=new Bundle();progress.putString("stream","UI_CHECK_PASS: "+name+"\n");sendStatus(0,progress);}
     private void main(Work work)throws Exception{
-        AtomicReference<Exception> failure=new AtomicReference<>();runOnMainSync(()->{try{work.run();}catch(Exception e){failure.set(e);}});if(failure.get()!=null)throw failure.get();
+        AtomicReference<Throwable> failure=new AtomicReference<>();runOnMainSync(()->{try{work.run();}catch(Throwable e){failure.set(e);}});if(failure.get()!=null)throw new Exception("UI work failed",failure.get());
     }
     private Object field(String name)throws Exception{Field f=activity.getClass().getDeclaredField(name);f.setAccessible(true);return f.get(activity);}
     private void invoke(String name)throws Exception{Method m=activity.getClass().getDeclaredMethod(name);m.setAccessible(true);m.invoke(activity);}
@@ -82,7 +82,7 @@ public final class UiSmoke extends Instrumentation {
             main(()->{enroll.invoke(activity,null,session,enrollment,new JSONObject().put("email","fake@example.invalid"),null,(Runnable)()->{});dialog[0]=currentDialog();Window w=dialog[0].getWindow();check((w.getAttributes().flags&WindowManager.LayoutParams.FLAG_SECURE)!=0,"MFA setup protects QR and key from screenshots");ImageView qr=find(w.getDecorView(),ImageView.class,null);check(qr!=null&&qr.getDrawable()!=null,"authenticator QR rendered locally");setupQr[0]=qr;List<EditText> fields=new ArrayList<>();collect(w.getDecorView(),fields);check(fields.size()==2&&fields.get(0).getText().toString().equals("JBSWY3DPEHPK3PXP"),"manual authenticator key is available");setupKey[0]=fields.get(0);dialog[0].dismiss();});
             waitForIdleSync();main(()->{check(setupKey[0].getText().length()==0,"authenticator key cleared on close");check(setupQr[0].getDrawable()==null,"authenticator QR cleared on close");Field secret=enrollmentType.getDeclaredField("secret");secret.setAccessible(true);check(secret.get(enrollment).equals(""),"closed setup drops secret model reference");});
             result.putString("stream","UI_SMOKE_PASS: "+passed+" native Android keyboard, email-code, MFA and 1000-row navigation checks passed. No email or cloud request was submitted.\n");resultCode=Activity.RESULT_OK;
-        }catch(Exception e){result.putString("stream","UI_SMOKE_FAIL: "+e.toString()+"\n");}
+        }catch(Throwable e){result.putString("stream","UI_SMOKE_FAIL: "+android.util.Log.getStackTraceString(e)+"\n");}
         finally{if(activity!=null)runOnMainSync(()->activity.finish());}
         finish(resultCode,result);
     }

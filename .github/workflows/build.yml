@@ -308,7 +308,12 @@ jobs:
           adb shell input keyevent 82
           adb install dist/Lockvyn-Android.apk
           adb install dist/android/Lockvyn-UI-Test.apk
-          adb shell am instrument -w com.bosha.vault.uismoke/com.bosha.vault.tests.UiSmoke | tee build-deps/native-ui.log
+          adb logcat -c
+          UI_INSTRUMENT_EXIT=0
+          adb shell am instrument -w com.bosha.vault.uismoke/com.bosha.vault.tests.UiSmoke | tee build-deps/native-ui.log || UI_INSTRUMENT_EXIT=$?
+          adb logcat -b crash -d > build-deps/native-crash.log
+          cat build-deps/native-crash.log
+          test "$UI_INSTRUMENT_EXIT" = 0
           python -c "from pathlib import Path; text=Path('build-deps/native-ui.log').read_text(); assert 'UI_SMOKE_PASS:' in text, text"
       - name: Upload native UI test logs
         if: always()
@@ -317,6 +322,7 @@ jobs:
           name: Lockvyn-Android-UI-Logs
           path: |
             build-deps/native-ui.log
+            build-deps/native-crash.log
             build-deps/emulator.log
           if-no-files-found: ignore
           retention-days: 14
