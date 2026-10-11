@@ -18,10 +18,8 @@ if ($LASTEXITCODE) { throw 'Acceptance target packaging failed.' }
 $delta=Get-ChildItem "$feed/*9.0.1*-delta.nupkg"; $full=Get-ChildItem "$feed/*9.0.1*-full.nupkg"
 if ($delta.Count -ne 1 -or $full.Count -ne 1 -or $delta.Length -ge $full.Length) { throw 'Expected a smaller delta package.' }
 Write-Host "Delta fixture: $($delta.Length) bytes; full release: $($full.Length) bytes"
-dotnet restore tools/Lockvyn.UpdateChecks --locked-mode
-if ($LASTEXITCODE) { throw 'Update-check dependency restore failed.' }
-dotnet build tools/Lockvyn.UpdateChecks -c Release --no-restore
-if ($LASTEXITCODE) { throw 'Update-check build failed.' }
+# CI builds this with the canonical dependency locks before runtime-specific
+# publishing adds SDK runtime/ILLink entries to shared project restore files.
 $check=(Resolve-Path 'tools/Lockvyn.UpdateChecks/bin/Release/net10.0/Lockvyn.UpdateChecks.dll').Path
 dotnet $check $feed $packages
 if ($LASTEXITCODE) { throw 'Delta, fallback, integrity, cancellation or version checks failed.' }

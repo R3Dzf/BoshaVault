@@ -35,7 +35,7 @@ internal sealed class UpdateDialog : Window
         Action("View downloads on GitHub", () => { Process.Start(new ProcessStartInfo("https://github.com/R3Dzf/BoshaVault/releases") { UseShellExecute = true }); return Task.CompletedTask; });
         var close = new Button { Content = "Close / cancel download", Margin = new Thickness(0, 4, 0, 0) };
         close.Click += (_, _) => Close(); body.Children.Add(close);
-        status.Text = manager.IsInstalled ? $"Installed version: {manager.CurrentVersion}. Check when you are ready; downloads start only when you choose." : "This copy uses the original ZIP layout. Install Lockvyn-Setup.exe once to enable updates. You can keep your existing encrypted vault.";
+        status.Text = manager.IsInstalled ? $"Installed version: {manager.CurrentVersion}. Check when you are ready; downloads start only when you choose." : "This copy uses the original ZIP layout. Install Lockvyn-win-Setup.exe once to enable updates. You can keep your existing encrypted vault.";
         check.IsEnabled = manager.IsInstalled;
         Closed += (_, _) => { closed = true; cancellation.Cancel(); if (!working) cancellation.Dispose(); };
         PreviewKeyDown += (_, _) => owner.Touch(); PreviewMouseDown += (_, _) => owner.Touch();

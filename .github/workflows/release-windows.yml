@@ -70,6 +70,10 @@ jobs:
           if ($LASTEXITCODE) { throw 'GitHub release upload failed.' }
           gh release upload $tag dist/velopack/SHA256SUMS.txt --repo '${{ github.repository }}' --clobber
           if ($LASTEXITCODE) { throw 'Release checksum upload failed.' }
+          $notes="docs/releases/Lockvyn-$env:LOCKVYN_VERSION.md"
+          if (!(Test-Path $notes)) { throw 'Customer release instructions are missing.' }
+          gh release edit $tag --repo '${{ github.repository }}' --notes-file $notes
+          if ($LASTEXITCODE) { throw 'Release instruction upload failed.' }
         # gh uses the same short-lived workflow token; no updater token is shipped to clients.
       - name: Retain release files
         uses: actions/upload-artifact@v4

@@ -14,7 +14,7 @@ Open the successful **Build Lockvyn (Windows and Android)** run in [GitHub Actio
 
 | Artifact | Use |
 |---|---|
-| `Lockvyn-Windows-Setup-x64` | Extract the artifact, exit the previous app through its tray menu and run `Lockvyn-Setup.exe`. The installer includes .NET and the updater. |
+| `Lockvyn-Windows-Setup-x64` | Extract the artifact, exit the previous app through its tray menu and run `Lockvyn-win-Setup.exe`. The installer includes .NET and the updater. |
 | `Lockvyn-Windows-x64` | Extract the artifact ZIP, then the included `Lockvyn-Windows-x64.zip` into a permanent folder. Start `Lockvyn.exe` without administrator privileges. .NET is bundled. |
 | `Lockvyn-Android` | Extract and install `Lockvyn-Android.apk`. Package `com.lockvyn.app` installs alongside older BoshaVault apps with separate storage. Import an encrypted backup or receive the existing Windows vault. |
 | `Lockvyn-Android-LegacyPackage` | Advanced compatibility build using `com.bosha.vault`. An update requires the original signing certificate; ordinary CI uses a temporary certificate. |
