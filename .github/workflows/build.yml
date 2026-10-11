@@ -302,6 +302,8 @@ jobs:
           adb shell settings put global transition_animation_scale 0
           adb shell settings put global animator_duration_scale 0
           adb shell settings put secure show_ime_with_hard_keyboard 1
+          adb shell ime list -s
+          adb shell settings get secure default_input_method
           adb shell input keyevent 82
           adb install dist/Lockvyn-Android.apk
           adb install dist/android/Lockvyn-UI-Test.apk
