@@ -29,7 +29,7 @@ if ($LASTEXITCODE) { throw 'Windows package creation failed.' }
 $feed=Get-Content "$OutputDirectory/releases.win.json" -Raw | ConvertFrom-Json
 $target=@($feed.Assets | Where-Object { $_.PackageId -eq 'Lockvyn' -and $_.Version -eq $version -and $_.Type -eq 'Full' })
 if ($target.Count -ne 1 -or !(Get-ChildItem "$OutputDirectory/*Setup.exe")) { throw 'Windows installer or full release is missing.' }
-Get-ChildItem $OutputDirectory -File | Where-Object Extension -in '.exe','.zip','.nupkg','.json' | ForEach-Object {
+Get-ChildItem $OutputDirectory -File | Where-Object { $_.Extension -in '.exe','.zip','.nupkg','.json' -and $_.Name -ne 'assets.win.json' } | Sort-Object Name | ForEach-Object {
     $hash=(Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
     "$hash  $($_.Name)"
 } | Set-Content "$OutputDirectory/SHA256SUMS.txt" -Encoding utf8

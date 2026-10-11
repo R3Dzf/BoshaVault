@@ -68,8 +68,7 @@ jobs:
           if ($env:PUBLISH_RELEASE -eq 'true') { $arguments+='--publish' }
           dotnet @arguments
           if ($LASTEXITCODE) { throw 'GitHub release upload failed.' }
-          gh release upload $tag dist/velopack/SHA256SUMS.txt --repo '${{ github.repository }}' --clobber
-          if ($LASTEXITCODE) { throw 'Release checksum upload failed.' }
+          ./tools/Publish-WindowsChecksums.ps1 -Version $env:LOCKVYN_VERSION -Repository '${{ github.repository }}'
           $notes="docs/releases/Lockvyn-$env:LOCKVYN_VERSION.md"
           if (!(Test-Path $notes)) { throw 'Customer release instructions are missing.' }
           gh release edit $tag --repo '${{ github.repository }}' --notes-file $notes
