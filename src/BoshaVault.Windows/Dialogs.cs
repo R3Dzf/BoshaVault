@@ -1,6 +1,8 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Interop;
+using System.Runtime.InteropServices;
 using BoshaVault.Core;
 
 namespace BoshaVault.Windows;
@@ -8,6 +10,7 @@ namespace BoshaVault.Windows;
 /// <summary>Screen-sized dialog with a permanently visible action bar.</summary>
 public sealed class FormDialog : Window
 {
+    [DllImport("user32.dll")] private static extern bool SetWindowDisplayAffinity(nint hwnd, uint affinity);
     public readonly StackPanel Body = new() { Margin = new Thickness(20, 16, 20, 12) };
     private readonly StackPanel footer = new() { Orientation = Orientation.Vertical,
         Margin = new Thickness(20, 5, 20, 15) };
@@ -35,8 +38,12 @@ public sealed class FormDialog : Window
         Content = layout;
         Body.Children.Add(new TextBlock { Text = title, FontSize = 21, FontWeight = FontWeights.Bold,
             TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 12) });
-        PreviewKeyDown += (_, _) => (owner as MainWindow)?.Touch();
-        PreviewMouseDown += (_, _) => (owner as MainWindow)?.Touch();
+        Window interactionOwner = owner;
+        while (interactionOwner.Owner != null) interactionOwner = interactionOwner.Owner;
+        var main = interactionOwner as MainWindow;
+        PreviewKeyDown += (_, _) => main?.Touch();
+        PreviewMouseDown += (_, _) => main?.Touch();
+        SourceInitialized += (_, _) => SetWindowDisplayAffinity(new WindowInteropHelper(this).Handle, 0x11); // Best-effort Windows capture exclusion, including MFA QR/key dialogs.
     }
     public TextBox Field(string label, string initial = "", int max = 2000, bool multi = false)
     {

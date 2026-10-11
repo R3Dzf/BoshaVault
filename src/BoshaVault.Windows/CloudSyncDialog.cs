@@ -49,15 +49,26 @@ internal static class CloudSyncDialog
             foreach (var b in buttons) b.Visibility = Visibility.Collapsed;
             d.Body.Children.Clear();
         }
+        void SaveSession(SupabaseCloudAccount.Session signedIn)
+        {
+            EnsureCurrent();
+            if (signedIn.OwnerId != profile!.OwnerId) throw new VaultException("Cloud account changed. Reconnect this device.");
+            profile.RefreshToken = signedIn.RefreshToken; store.Save(profile);
+        }
+        async Task<SupabaseCloudAccount.Session> Assure(SupabaseCloudAccount.Session signedIn)
+        {
+            var factors = await auth.ListFactors(signedIn, cancellation.Token); EnsureCurrent();
+            if (factors.RequiresChallenge(signedIn))
+                return CloudMfaDialog.Verify(d, auth, signedIn, factors.Totp, next => { if (profile != null) SaveSession(next); }, EnsureCurrent, cancellation.Token);
+            return signedIn;
+        }
         async Task<SupabaseCloudAccount.Session> Refresh()
         {
             EnsureCurrent();
             var signedIn = await auth.Refresh(profile!.RefreshToken, cancellation.Token);
             EnsureCurrent();
-            if (signedIn.OwnerId != profile.OwnerId) throw new VaultException("Cloud account changed. Reconnect this device.");
-            profile.RefreshToken = signedIn.RefreshToken;
-            store.Save(profile); // Persist token rotation before any subsequent network request.
-            return signedIn;
+            SaveSession(signedIn); // Persist token rotation before any subsequent network request.
+            return await Assure(signedIn);
         }
         void Connected()
         {
@@ -98,6 +109,12 @@ internal static class CloudSyncDialog
                 }
             }, true);
             Action("Show & copy connection code", () => { code.Text = CloudPairing.Encode(profile); copy(code.Text); Status("Code copied. Paste it on your own device. Clipboard clears in 20 seconds."); return Task.CompletedTask; });
+            Action("Cloud account security · 2FA", async () =>
+            {
+                var signedIn = await Refresh();
+                CloudMfaDialog.Manage(d, auth, signedIn, profile, store, EnsureCurrent, cancellation.Token);
+                Status("Cloud security settings updated. Sync remains manual.");
+            });
             Action("Disconnect this device", async () =>
             {
                 if (MessageBox.Show(d, "Keep your local vault and encrypted cloud backups, and disconnect this device? Keep the connection code on another trusted device before disconnecting.", "Disconnect cloud", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return;
@@ -121,6 +138,7 @@ internal static class CloudSyncDialog
             var email = d.Field("Cloud account email", "", 320);
             var password = d.Secret("Cloud account password (separate from your master passphrase)");
             var join = d.Secret("Other device's cloud connection code (only when joining)"); join.MaxLength = 1024;
+            var confirmation = d.Secret("Email confirmation code (if shown in your email)"); confirmation.MaxLength = 10;
             d.Label("On your first device: create a cloud account, confirm its email, then choose Start a new cloud vault. On your second device: first transfer the same vault over Wi-Fi, then sign in with the same cloud account and paste its connection code.");
             d.Body.Children.Add(status);
             Action("Create cloud account", async () =>
@@ -134,12 +152,18 @@ internal static class CloudSyncDialog
                 await auth.ResendConfirmation(email.Text.Trim(), cancellation.Token); EnsureCurrent();
                 Status("If the account is awaiting confirmation, check your email including Spam. Wait at least 60 seconds before requesting another message.");
             }, inBody: true);
+            Action("Confirm email code", async () =>
+            {
+                string digits = confirmation.Password.Trim(); confirmation.Clear();
+                try { await auth.VerifyEmail(email.Text.Trim(), digits, cancellation.Token); EnsureCurrent(); Status("Email confirmed. Enter your cloud password and sign in below. 2FA is checked separately."); }
+                finally { digits = ""; }
+            }, inBody: true);
             async Task Connect(bool existing)
             {
                 string secret = password.Password, pairingCode = join.Password; password.Clear(); join.Clear();
                 try
                 {
-                    var signedIn = await auth.SignIn(email.Text.Trim(), secret, cancellation.Token); EnsureCurrent();
+                    var signedIn = await Assure(await auth.SignIn(email.Text.Trim(), secret, cancellation.Token)); EnsureCurrent();
                     var pairing = existing ? CloudPairing.Decode(pairingCode.Trim(), vaultId, signedIn.OwnerId) : null;
                     profile = new CloudProfile { OwnerId = signedIn.OwnerId, VaultId = vaultId,
                         VaultSlot = pairing?.VaultSlot ?? Guid.NewGuid(), DeviceSlot = Guid.NewGuid(),

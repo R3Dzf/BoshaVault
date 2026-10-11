@@ -1,6 +1,6 @@
 # Security model and limits
 
-The program is a preview implementation. It has not undergone independent code review, penetration testing, native device validation, or a security audit. Strong primitives are necessary, but do not make the surrounding application invulnerable. Decryption is computationally difficult without the right keys and a strong passphrase; it is never honestly described as impossible.
+The program has not undergone independent code review, penetration testing, native device validation, or a security audit. Strong primitives are necessary, but do not make the surrounding application invulnerable. Decryption is computationally difficult without the right keys and a strong passphrase; it is never honestly described as impossible.
 
 ## What is encrypted
 
@@ -14,7 +14,7 @@ File parsing rejects duplicate/unknown properties, unknown versions, unsafe KDF 
 
 ## Optional cloud boundary
 
-The opt-in cloud preview seals the complete encrypted file with an independent AES-256-GCM recovery key before upload. The key is transferred manually in an account/vault-bound connection code and stored with DPAPI CurrentUser on Windows or Android Keystore encryption. Supabase owner-scoped RLS prevents other Auth accounts from accessing these rows. Email, sizes, times and network metadata remain visible to the provider; a compromised device/OS can still use its own saved keys. Manual sync verifies every snapshot before one atomic merge; key-epoch mismatch requires local reconciliation and a fresh cloud space. Current-session disconnect revokes refresh access but does not erase existing ciphertext, already downloaded copies or immediately invalidate issued access tokens. See [cloud setup and limitations](CLOUD-SYNC.md).
+The opt-in cloud sync seals the complete encrypted file with an independent AES-256-GCM recovery key before upload. The key is transferred manually in an account/vault-bound connection code and stored with DPAPI CurrentUser on Windows or Android Keystore encryption. Supabase owner-scoped RLS prevents other Auth accounts from accessing these rows. Email, sizes, times and network metadata remain visible to the provider; a compromised device/OS can still use its own saved keys. Manual sync verifies every snapshot before one atomic merge; key-epoch mismatch requires local reconciliation and a fresh cloud space. Current-session disconnect revokes refresh access but does not erase existing ciphertext, already downloaded copies or immediately invalidate issued access tokens. See [cloud setup and limitations](CLOUD-SYNC.md).
 
 ## Device and filling boundaries
 
@@ -45,7 +45,7 @@ The LAN listener is temporary and binds the selected local private IPv4 address.
 
 Complete the documented native-device checks and obtain an independent security review. Use a trusted, updated OS. In the user's current context, there was a recent suspected malware infection: this app does not establish that the laptop is clean. It also cannot invalidate stolen browser cookies, revoke account sessions or replace account security controls.
 
-Export encrypted backups regularly and keep one off-device. Test restoration with fake data first. Do not delete the old copy until verified. Preserve your own private APK signing key if building future releases. The preview Windows EXE is unsigned; do not disable Defender or disregard an actual threat detection to run it.
+Export encrypted backups regularly and keep one off-device. Test restoration with fake data first. Do not delete the old copy until verified. Preserve your own private APK signing key if building future releases. The Windows EXE is unsigned; do not disable Defender or disregard an actual threat detection to run it.
 
 Design references: [RFC 9106](https://www.rfc-editor.org/rfc/rfc9106.html), [Microsoft AES-GCM requirements](https://learn.microsoft.com/dotnet/api/system.security.cryptography.aesgcm.encrypt), [Android Autofill security](https://developer.android.com/reference/android/service/autofill/AutofillService), [Android biometric CryptoObject](https://developer.android.com/identity/sign-in/biometric-auth).
 
@@ -61,3 +61,7 @@ A same-user named pipe carries a process ID and one fixed activation byte to bri
 Windows Schannel does not reliably support EphemeralKeySet certificates. The temporary TLS certificate is therefore imported with UserKeySet (without PersistKeySet) on Windows; .NET manages a temporary user key container and normal certificate disposal releases it. A crash may leave a container behind. This contains only the short-lived TLS signing key, never the vault key or master passphrase; the pairing token dies with the process and the certificate expires. The PFX import bytes are zeroed after loading. No certificate-store trust is added. See https://learn.microsoft.com/en-us/dotnet/core/extensions/sslstream-troubleshooting .
 
 Schema 2 keeps folder catalogs and review acknowledgements encrypted. A review confirmation is acceptance of existing hygiene warnings, not a security guarantee or breach check. Permanent deletion removes credential content from the current vault and its automatic previous local snapshot, with an identity-only marker to prevent sync resurrection. It cannot erase exported backups, unsynced copies, filesystem history or copies already downloaded elsewhere. Sync each device to propagate deletion; see FORMAT.md for conflict rules.
+
+## Optional cloud account 2FA
+
+Verified TOTP factors require AAL2 for encrypted snapshot CRUD through a restrictive RLS policy. The caller-scoped helper is in a non-exposed private schema and reads Auth factors with definer rights because clients cannot read that table. Existing ownership checks still apply. Pending enrollment is not active MFA. AAL2 is preserved by ordinary refresh; MFA removal requires a fresh code and is followed by refresh. Setup keys/QRs are transient, with protected Android windows and local QR generation. MFA recovery codes and self-service reset are not included; preserve an authenticator backup. This protects cloud account access, not the offline master passphrase. See [setup and limits](CLOUD-ACCOUNT-SETUP.md).

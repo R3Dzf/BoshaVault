@@ -20,11 +20,12 @@ public static class CloudAccountTests
             if (Oversized) return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(new string('x',65537)) };
             return new HttpResponseMessage(Rejected ? HttpStatusCode.BadRequest : HttpStatusCode.OK)
             { Content = new StringContent(Rejected ? (ErrorCode.Length == 0 ? "server-error-with-private-token-never-echo" : JsonSerializer.Serialize(new { code = ErrorCode, message = "server-private-token-never-echo" })) : JsonSerializer.Serialize(new
-                { user = new { id = owner }, access_token = InvalidSession ? "bad\r\ntoken" : "synthetic-access-token-0123456789", refresh_token = "synthetic-refresh-token-0123456789" })) };
+                { user = new { id = owner }, access_token = InvalidSession ? "bad\r\ntoken" : CloudMfaTests.Token(owner,"aal1"), refresh_token = "synthetic-refresh-token-0123456789" })) };
         }
     }
     public static async Task Run()
     {
+        await CloudMfaTests.Run();
         int passed=0;
         void Check(bool value,string name){if(!value)throw new Exception("FAIL "+name);Console.WriteLine("PASS "+name);passed++;}
         async Task Reject(Func<Task> action,string name){bool refused=false;try{await action();}catch(VaultException e){if(e.Message.Contains("private-token"))throw new Exception("Server credentials leaked into error.");refused=true;}Check(refused,name);}

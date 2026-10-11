@@ -52,7 +52,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          javac -cp build-deps/bcprov.jar:build-deps/json.jar -d build-deps/java-cloud android/app/src/main/java/com/bosha/vault/VaultEngine.java android/app/src/main/java/com/bosha/vault/StrictJson.java android/app/src/main/java/com/bosha/vault/CloudSnapshot.java android/app/src/main/java/com/bosha/vault/FolderCatalog.java android/app/src/main/java/com/bosha/vault/PasswordHealth.java android/app/src/main/java/com/bosha/vault/PasswordOptions.java tools/CloudInteropTest.java tools/VaultUxInteropTest.java
+          javac -cp build-deps/bcprov.jar:build-deps/json.jar -d build-deps/java-cloud android/app/src/main/java/com/bosha/vault/VaultEngine.java android/app/src/main/java/com/bosha/vault/StrictJson.java android/app/src/main/java/com/bosha/vault/CloudAuth.java android/app/src/main/java/com/bosha/vault/CloudSnapshot.java android/app/src/main/java/com/bosha/vault/FolderCatalog.java android/app/src/main/java/com/bosha/vault/PasswordHealth.java android/app/src/main/java/com/bosha/vault/PasswordOptions.java tools/CloudAuthTest.java tools/CloudInteropTest.java tools/VaultUxInteropTest.java
+          java -cp build-deps/java-cloud:build-deps/bcprov.jar:build-deps/json.jar com.bosha.vault.CloudAuthTest
           java -cp build-deps/java-cloud:build-deps/bcprov.jar:build-deps/json.jar com.bosha.vault.CloudInteropTest build-deps/cloud-fixtures
           dotnet run --project src/BoshaVault.Tests -c Release -- --verify-java-cloud build-deps/cloud-fixtures
           java -cp build-deps/java-cloud:build-deps/bcprov.jar:build-deps/json.jar com.bosha.vault.VaultUxInteropTest build-deps/ux-fixtures

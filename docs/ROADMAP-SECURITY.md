@@ -10,7 +10,8 @@
 | Supabase outer AES-256-GCM cloud encryption | Windows/.NET and Android/Java preview; bidirectional interoperability tested | Native key enrollment/lifecycle acceptance tests |
 | Supabase owner-scoped RLS schema | Deployed to dedicated Orchid Ledger project; SQL isolation and real two-user Auth/Data API checks passed | Ongoing configuration review and additional Auth/MFA scenarios |
 | Supabase authenticated REST transfer | Manual UI on both platforms; Auth, DPAPI/Keystore settings, atomic batch merge and local session disconnect implemented | Native email confirmation, token/store lifecycle, cancellation and offline tests |
-| TOTP | RFC 6238 engine with test vectors, **not wired to vault** | Secret field format, encrypted persistence, QR provisioning, clock drift and backup tests |
+| Cloud account 2FA | Optional TOTP enrollment, pending setup, factor selection, refresh, fresh-code removal and live-factor RLS enforcement on Windows/Android | MFA recovery codes/self-service reset and real hardware acceptance remain separate |
+| Saved login TOTP | RFC 6238 engine with test vectors, **not wired to vault** | Secret field format, encrypted persistence, QR provisioning, clock drift and backup tests |
 | Phishing-resistant Autofill | Exact HTTPS-host matching + generic near-match/IDN warnings, form action origin checks, and Chrome document ID checks implemented in preview | Threat model malicious page JavaScript, compromised browser, cross-origin AJAX, iframe/re-auth, and user spoofing; independent audit |
 | Smart Save & credential updates | User-driven Generate, Save and Update Existing with explicit Windows review implemented | Automated login/signup success detection and safe change-password form handling are not yet implemented |
 | Windows Hello | Not implemented | User verification, Windows protected-key design, recovery fallback, tested hardware |

@@ -22,6 +22,7 @@ try
     if (args.Length > 0 && args[0] == "--cloud-tests") { await CloudAccountTests.Run(); return; }
     if (args.Length > 0 && args[0] == "--cloud-store-tests") { CloudStoreTests.Run(); return; }
     if (args.Length > 0 && args[0] == "--cloud-live-tests") { await CloudLiveTests.Run(args[1]); return; }
+    if (args.Length > 0 && args[0] == "--cloud-mfa-live-tests") { await CloudMfaLiveTests.Run(args[1]); return; }
     if (args.Length > 0 && args[0] == "--verify-java-cloud")
     {
         var profile=JsonSerializer.Deserialize<CloudProfile>(File.ReadAllBytes(args[1]+"/cloud-profile.json"),CloudPairing.Json)!;

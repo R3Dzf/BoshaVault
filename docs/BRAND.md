@@ -1,6 +1,6 @@
 # Lockvyn brand and compatibility
 
-The product is **Lockvyn**, Arabic **لوكڤين**. Windows is version **1.9.0**, Android **1.5.0**, and the Chromium extension **0.6.0**. Application titles, executable names, launcher labels and download artifacts use Lockvyn without a Preview suffix. The existing GitHub repository name stays unchanged.
+The product is **Lockvyn**, Arabic **لوكڤين**. Windows is version **1.10.0**, Android **1.6.0**, and the Chromium extension **0.6.0**. Application titles, executable names, launcher labels and download artifacts use Lockvyn without a Preview suffix. The existing GitHub repository name stays unchanged.
 
 The original icon combines a white shield and purple keyhole on a rounded purple square (`#7762DF`). Its master vector is `design/lockvyn-mark.svg`. Windows uses the multi-resolution ICO for its executable/tray and PNG for WPF. Android uses matching vector geometry in `ic_vault.xml`; Chromium has 16/32/48/128px PNGs. `tools/render-brand-icon.py` reproduces the raster assets with Pillow from the original geometry.
 

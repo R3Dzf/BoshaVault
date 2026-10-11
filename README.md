@@ -1,4 +1,4 @@
-# Lockvyn — Windows 1.9 / Android 1.5
+# Lockvyn — Windows 1.10 / Android 1.6
 
 ![Lockvyn shield and keyhole](design/lockvyn-mark.svg)
 
@@ -36,11 +36,12 @@ The Windows bundle includes **START-HERE.html**, an Arabic setup guide. [Chrome/
 | Encrypted backups and conflict-preserving merge | Yes | Yes |
 | Private Wi-Fi transfer with pinned TLS and temporary QR | Host | Client + offline scanner |
 | Opt-in manual encrypted cloud sync | DPAPI-protected settings | Keystore-protected settings |
+| Cloud email confirmation code and optional TOTP 2FA | Yes; MFA enforced by RLS | Yes; MFA enforced by RLS |
 | Inactivity lock and clipboard clearing | Yes | Yes; also locks when leaving app |
 | Browser Autofill | Local Chrome/Edge extension; user confirmation | Native system Autofill; authenticated selection |
 | Biometric quick unlock | Not included | Android Keystore + biometric CryptoObject |
 
-Cloud signup happens **inside Lockvyn**. Friends need their own app account, not a Supabase dashboard account. Public confirmation email delivery still requires the owner to configure a verified SMTP sender; confirmation remains enabled. Offline vault use does not require an account. Read [cloud setup and limits](docs/CLOUD-SYNC.md).
+Cloud signup happens **inside Lockvyn**. Friends need their own app account, not a Supabase dashboard account. Public confirmation email delivery still requires the owner to configure a verified SMTP sender; confirmation remains enabled. Offline vault use does not require an account. Read [cloud setup and limits](docs/CLOUD-SYNC.md) and [email/2FA setup](docs/CLOUD-ACCOUNT-SETUP.md).
 
 Choose a unique master passphrase of at least 16 characters. A forgotten vault passphrase cannot be reset by email; biometric access is not a backup. No independent security audit is claimed. Windows binaries have no publisher Authenticode signature. Real phone/PC Wi-Fi, camera, biometric, browser and two-device cloud acceptance still require device testing. See [security boundaries](docs/SECURITY.md), [validation](docs/VALIDATION.md) and [roadmap](docs/ROADMAP-SECURITY.md).
 

@@ -180,6 +180,74 @@ public final class MainActivity extends Activity {
         if(view instanceof EditText)((EditText)view).setText("");
         if(view instanceof android.view.ViewGroup){android.view.ViewGroup group=(android.view.ViewGroup)view;for(int i=0;i<group.getChildCount();i++)clearCloudFields(group.getChildAt(i));}
     }
+    interface CloudSessionReady {void accept(CloudAuth.Session session);}
+    private void cloudAssure(CloudClient client,CloudAuth.Session session,JSONObject profile,CloudSettingsStore store,TextView status,boolean freshCode,CloudSessionReady ready){
+        CloudAuth.Factors[] factors={null};
+        cloudTask(status,()->factors[0]=client.auth.factors(session),()->{
+            if(!factors[0].requiresChallenge(session)&&!freshCode){ready.accept(session);return;}
+            if(factors[0].totp.isEmpty()){status.setText("This account requires an authenticator method this version cannot use.");return;}
+            cloudVerify(client,session,profile,store,factors[0].totp,ready);
+        });
+    }
+    private void cloudVerify(CloudClient client,CloudAuth.Session session,JSONObject profile,CloudSettingsStore store,List<CloudAuth.Factor> factors,CloudSessionReady ready){
+            LinearLayout b=Ui.column(this);b.addView(Ui.text(this,"Enter a current six-digit authenticator code. Cloud access waits for verification.",13,Ui.MUTED,false));
+            Spinner device=new Spinner(this);device.setAdapter(new ArrayAdapter<CloudAuth.Factor>(this,android.R.layout.simple_spinner_dropdown_item,factors));b.addView(device);
+            EditText code=Ui.field(b,"Authenticator code","",true,6);code.setInputType(InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+            TextView result=Ui.text(this,"Ready.",13,Ui.MUTED,false);AlertDialog d=dialog("Verify cloud 2FA",b);
+            b.addView(Ui.button(this,"Verify & continue",true,()->{
+                String digits=code.getText().toString().trim(),id=((CloudAuth.Factor)device.getSelectedItem()).id;code.setText("");CloudAuth.Session[] next={null};
+                cloudTask(result,()->{next[0]=client.auth.verify(session,id,digits);if(profile!=null)client.saveSession(next[0],profile,store);},()->{
+                    if(!d.isShowing())return;d.dismiss();ready.accept(next[0]);
+                });
+            }));
+            b.addView(Ui.button(this,"Cancel",false,d::dismiss));b.addView(result);
+            d.setOnDismissListener(x->{dialogs.remove(d);clearCloudFields(b);});
+    }
+    private void cloudRefresh(CloudClient client,JSONObject profile,CloudSettingsStore store,TextView status,CloudSessionReady ready){
+        CloudAuth.Session[] signedIn={null};cloudTask(status,()->signedIn[0]=client.refresh(profile,store),()->cloudAssure(client,signedIn[0],profile,store,status,false,ready));
+    }
+    private void cloudSecurity(CloudClient client,CloudAuth.Session session,JSONObject profile,CloudSettingsStore store){
+        LinearLayout b=Ui.column(this);TextView status=Ui.text(this,"Loading authenticators…",13,Ui.MUTED,false);b.addView(status);AlertDialog d=dialog("Cloud account security · 2FA",b);
+        d.setOnDismissListener(x->{dialogs.remove(d);clearCloudFields(b);});CloudAuth.Factors[] factors={null};
+        cloudTask(status,()->factors[0]=client.auth.factors(session),()->{
+            if(!d.isShowing())return;
+            b.addView(Ui.text(this,factors[0].hasVerified?"2FA is enabled for this cloud account.":"2FA is not enabled yet.",16,Ui.INK,true));
+            b.addView(Ui.text(this,"Use a TOTP app such as Google Authenticator or Aegis. Back up your authenticator or add another one. Losing all authenticators locks cloud access; your offline vault still works.",13,Ui.MUTED,false));
+            b.addView(Ui.text(this,"After switching to your authenticator, unlock Lockvyn and choose Finish setup to enter its current code.",12,Ui.MUTED,false));
+            for(CloudAuth.Factor pending:factors[0].all)if(!pending.verified&&pending.type.equals("totp"))b.addView(Ui.button(this,"Finish setup · "+pending.name,false,()->cloudVerify(client,session,profile,store,Collections.singletonList(pending),verified->{if(!d.isShowing())return;d.dismiss();cloudSecurity(client,verified,profile,store);})));
+            for(CloudAuth.Factor factor:factors[0].totp)b.addView(Ui.button(this,"Remove "+factor.name,false,()->{
+                LinearLayout confirm=Ui.column(this);confirm.addView(Ui.text(this,"Remove this authenticator? Removing the last one turns off 2FA. A current authenticator code is required.",14,Ui.INK,false));AlertDialog question=dialog("Remove authenticator",confirm);
+                confirm.addView(Ui.button(this,"Continue",true,()->{question.dismiss();cloudAssure(client,session,profile,store,status,true,verified->{
+                    CloudAuth.Session[] next={null};cloudTask(status,()->{client.auth.unenroll(verified,factor.id);next[0]=client.refresh(profile,store);},()->{if(!d.isShowing())return;d.dismiss();cloudSecurity(client,next[0],profile,store);});
+                });}));confirm.addView(Ui.button(this,"Cancel",false,question::dismiss));
+            }));
+            b.addView(Ui.button(this,factors[0].hasVerified?"Add another authenticator":"Enable 2FA",true,()->cloudAssure(client,session,profile,store,status,false,verified->{
+                CloudAuth.Enrollment[] enrollment={null};cloudTask(status,()->enrollment[0]=client.auth.enroll(verified,profile.getString("email")),()->{
+                    if(!d.isShowing()){enrollment[0].close();return;}cloudEnrollment(client,verified,enrollment[0],profile,store,()->{d.dismiss();cloudRefresh(client,profile,store,status,updated->cloudSecurity(client,updated,profile,store));});
+                });
+            })));
+            b.addView(Ui.button(this,"Close",false,d::dismiss));status.setText("Ready.");
+        });
+    }
+    private void cloudEnrollment(CloudClient client,CloudAuth.Session session,CloudAuth.Enrollment enrollment,JSONObject profile,CloudSettingsStore store,Runnable finished){
+        LinearLayout b=Ui.column(this);b.addView(Ui.text(this,"Scan this QR in your authenticator, or enter the setup key manually. Account: "+profile.optString("email")+". Time based, 6 digits, 30 seconds.",13,Ui.MUTED,false));
+        final android.graphics.Bitmap[] bitmap={null};android.widget.ImageView image=new android.widget.ImageView(this);
+        try{
+            com.google.zxing.common.BitMatrix bits=new com.google.zxing.MultiFormatWriter().encode(enrollment.uri,com.google.zxing.BarcodeFormat.QR_CODE,480,480);
+            int[] pixels=new int[480*480];for(int y=0;y<480;y++)for(int x=0;x<480;x++)pixels[y*480+x]=bits.get(x,y)?0xff000000:0xffffffff;
+            bitmap[0]=android.graphics.Bitmap.createBitmap(pixels,480,480,android.graphics.Bitmap.Config.ARGB_8888);Arrays.fill(pixels,0);image.setImageBitmap(bitmap[0]);
+            LinearLayout.LayoutParams qr=new LinearLayout.LayoutParams(Ui.dp(this,240),Ui.dp(this,240));qr.gravity=android.view.Gravity.CENTER_HORIZONTAL;b.addView(image,qr);
+        }catch(Exception e){b.addView(Ui.text(this,"QR could not be rendered. Use the setup key below.",12,Ui.MUTED,false));}
+        EditText key=Ui.field(b,"Setup key · keep private",enrollment.secret,false,128);key.setKeyListener(null);key.setTextIsSelectable(true);
+        EditText code=Ui.field(b,"Current authenticator code","",true,6);code.setInputType(InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+        b.addView(Ui.text(this,"2FA becomes active only after verification. Save an encrypted authenticator backup before finishing.",12,Ui.MUTED,false));TextView status=Ui.text(this,"Ready.",13,Ui.MUTED,false);AlertDialog d=dialog("Set up Lockvyn 2FA",b);
+        b.addView(Ui.button(this,"Verify code & enable",true,()->{
+            String digits=code.getText().toString().trim();code.setText("");
+            cloudTask(status,()->client.saveSession(client.auth.verify(session,enrollment.id,digits),profile,store),()->{if(!d.isShowing())return;d.dismiss();finished.run();});
+        }));
+        b.addView(Ui.button(this,"Cancel setup",false,()->cloudTask(status,()->client.auth.unenroll(session,enrollment.id),()->{if(d.isShowing())d.dismiss();})));
+        b.addView(status);d.setOnDismissListener(x->{dialogs.remove(d);clearCloudFields(b);image.setImageDrawable(null);if(bitmap[0]!=null){bitmap[0].eraseColor(0);bitmap[0].recycle();bitmap[0]=null;}enrollment.close();});
+    }
     private void cloud(){
         if(!engine.isOpen()||busy)return;
         final CloudSettingsStore store=new CloudSettingsStore(this);final int stamp=epoch;
@@ -195,26 +263,29 @@ public final class MainActivity extends Activity {
         if(profile!=null){
             b.addView(Ui.text(this,"Connected to "+profile.optString("email")+". Sync runs only when you press Sync now.",13,Ui.MUTED,false));
             b.addView(Ui.text(this,profile.optString("lastSyncUtc").isEmpty()?"No successful sync yet.":"Last successful sync: "+profile.optString("lastSyncUtc"),12,Ui.MUTED,false));
-            b.addView(Ui.button(this,"Sync now",true,()->{int[] conflicts={0};cloudTask(status,()->conflicts[0]=client.sync(engine,profile,store),()->{status.setText("Synced successfully. "+conflicts[0]+" conflict copies kept.");renderList();});}));
+            b.addView(Ui.button(this,"Sync now",true,()->cloudRefresh(client,profile,store,status,signedIn->{int[] conflicts={0};cloudTask(status,()->conflicts[0]=client.sync(engine,profile,store,signedIn),()->{status.setText("Synced successfully. "+conflicts[0]+" conflict copies kept.");renderList();});})));
+            b.addView(Ui.button(this,"Cloud account security · 2FA",false,()->cloudRefresh(client,profile,store,status,signedIn->cloudSecurity(client,signedIn,profile,store))));
             b.addView(Ui.button(this,"Copy connection code for your other device",false,()->{try{copy(CloudSnapshot.pairing(profile));status.setText("Connection code copied. Share it only with your own trusted device; clipboard clears in 20 seconds.");}catch(Exception e){Ui.error(this,e);}}));
             b.addView(Ui.text(this,"Both devices must use the same vault, cloud account and connection code. The code contains your recovery key. Keep an encrypted local backup.",12,Ui.MUTED,false));
-            b.addView(Ui.button(this,"Disconnect this device",false,()->new AlertDialog.Builder(this).setTitle("Disconnect cloud?").setMessage("Keep your local vault and encrypted cloud backups, and sign out this cloud session? Keep your connection code on another trusted device first.").setNegativeButton("Cancel",null).setPositiveButton("Disconnect",(x,y)->cloudTask(status,()->client.signOut(profile,store),()->{d.dismiss();toast("Cloud session signed out. Previously issued access tokens expire normally. Local vault unchanged.");})).show()));
+            b.addView(Ui.button(this,"Disconnect this device",false,()->new AlertDialog.Builder(this).setTitle("Disconnect cloud?").setMessage("Keep your local vault and encrypted cloud backups, and sign out this cloud session? Keep your connection code on another trusted device first.").setNegativeButton("Cancel",null).setPositiveButton("Disconnect",(x,y)->cloudRefresh(client,profile,store,status,signedIn->cloudTask(status,()->client.signOut(signedIn,store),()->{d.dismiss();toast("Cloud session signed out. Previously issued access tokens expire normally. Local vault unchanged.");}))).show()));
             b.addView(Ui.button(this,"Forget local cloud settings (offline)",false,()->new AlertDialog.Builder(this).setTitle("Forget cloud settings?").setMessage("This forgets your recovery key and saved sign-in on this phone. It does not revoke server sessions or remove cloud backups. Keep your code elsewhere first.").setNegativeButton("Cancel",null).setPositiveButton("Forget",(x,y)->cloudTask(status,store::forget,()->{d.dismiss();toast("Local settings forgotten; server session not revoked.");})).show()));
         }else{
             b.addView(Ui.text(this,"Create a Lockvyn cloud account here with your own email. Each person uses their own account; sign in with that same account on your own devices.",13,Ui.MUTED,false));
             b.addView(Ui.text(this,"Your offline vault needs no account. The cloud password is separate from your master passphrase.",12,Ui.MUTED,false));
             EditText email=Ui.field(b,"Cloud account email","",false,320),password=Ui.field(b,"Separate cloud password (16+ characters)","",true,1024),code=Ui.field(b,"Other device's cloud connection code (only when joining)","",true,1024);email.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
+            EditText confirmation=Ui.field(b,"Email confirmation code (if shown in your email)","",true,10);confirmation.setInputType(InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_VARIATION_PASSWORD);
             b.addView(Ui.text(this,"First device: create a cloud account, confirm its email, then start a new cloud vault. Second device: first transfer the same vault over Wi-Fi, then sign in with the same cloud account and paste its code.",12,Ui.MUTED,false));
             b.addView(Ui.button(this,"Create cloud account",false,()->{String secret=password.getText().toString(),address=email.getText().toString().trim();password.setText("");cloudTask(status,()->client.signUp(address,secret),()->status.setText("Confirm the account using your email, then sign in below. Local vault unchanged."));}));
             b.addView(Ui.button(this,"Resend confirmation email",false,()->{String address=email.getText().toString().trim();cloudTask(status,()->client.resendConfirmation(address),()->status.setText("If the account is awaiting confirmation, check your email including Spam. Wait at least 60 seconds before requesting another message."));}));
+            b.addView(Ui.button(this,"Confirm email code",false,()->{String digits=confirmation.getText().toString().trim(),address=email.getText().toString().trim();confirmation.setText("");cloudTask(status,()->client.auth.verifyEmail(address,digits),()->status.setText("Email confirmed. Enter your cloud password and sign in below. 2FA is checked separately."));}));
             for(boolean existing:new boolean[]{false,true})b.addView(Ui.button(this,existing?"Join this vault's existing cloud":"Start a new cloud vault",!existing,()->{
                 String address=email.getText().toString().trim(),secret=password.getText().toString(),pairingCode=code.getText().toString().trim();password.setText("");code.setText("");
-                cloudTask(status,()->{
-                    CloudClient.Session signedIn=client.signIn(address,secret);if(!active||stamp!=epoch)throw new IOException("Cloud operation cancelled.");
+                CloudAuth.Session[] session={null};cloudTask(status,()->session[0]=client.signIn(address,secret),()->cloudAssure(client,session[0],null,store,status,false,signedIn->cloudTask(status,()->{
+                    if(!active||stamp!=epoch)throw new IOException("Cloud operation cancelled.");
                     JSONObject pairing=existing?CloudSnapshot.pairing(pairingCode,localVaultId,signedIn.owner):null;
                     JSONObject next=new JSONObject().put("version",1).put("ownerId",signedIn.owner).put("vaultId",localVaultId).put("vaultSlot",pairing==null?UUID.randomUUID().toString():pairing.getString("vaultSlot")).put("deviceSlot",UUID.randomUUID().toString()).put("recoveryKey",pairing==null?CloudSnapshot.newKey():pairing.getString("recoveryKey")).put("refreshToken",signedIn.refresh).put("email",address).put("lastSyncUtc","");
                     try{store.save(next);}finally{CloudSettingsStore.clear(next);}
-                },()->{d.dismiss();cloud();});
+                },()->{d.dismiss();cloud();})));
             }));
         }
         Ui.gap(b,12);b.addView(status);

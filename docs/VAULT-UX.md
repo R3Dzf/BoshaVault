@@ -1,4 +1,4 @@
-# Lockvyn vault UX — Windows 1.9 / Android 1.5
+# Lockvyn vault UX — Windows 1.10 / Android 1.6
 
 ## Use the new controls
 
@@ -22,6 +22,6 @@ Friends use their own Lockvyn cloud account created inside the app. They need no
 | Before distributing cloud signup | Verified transactional sender + Auth configuration + real authorized signup/confirmation tests | Waiting for owned sender domain or existing SMTP details |
 | Next onboarding improvement | Recover cloud-account password inside app; initialize a new device from cloud using the recovery code | Planned; current second-device setup uses Wi-Fi/encrypted backup first |
 | Before stable Android distribution | Permanent signing certificate and upgrade acceptance tests | Requires the repository's release signing setup; CI Lockvyn package has separate storage |
-| Later | Opt-in automatic sync, device/session management and MFA | Needs lifecycle, key rotation and account recovery design |
+| Later | Opt-in automatic sync, device/session management and account recovery | Needs lifecycle, key rotation and account recovery design |
 
 Future cloud account recovery must remain separate from the vault master passphrase. A forgotten vault passphrase cannot be reset through email. An independent security review remains a separate release milestone.

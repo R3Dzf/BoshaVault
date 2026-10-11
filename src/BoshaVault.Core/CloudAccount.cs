@@ -92,9 +92,10 @@ public sealed class CloudPairing
     }
 }
 
-public sealed class SupabaseCloudAccount(HttpClient http)
+public sealed partial class SupabaseCloudAccount(HttpClient http)
 {
-    public sealed record Session(Guid OwnerId, string AccessToken, string RefreshToken);
+    public sealed record Session(Guid OwnerId, string AccessToken, string RefreshToken, string Assurance = "aal1")
+    { public bool HasSecondFactor => Assurance == "aal2"; }
 
     internal static async Task<byte[]> ReadBounded(HttpContent content, int limit, CancellationToken ct)
     {
@@ -119,16 +120,22 @@ public sealed class SupabaseCloudAccount(HttpClient http)
         }
     }
 
-    private async Task<byte[]> Post(string path, object body, string? accessToken, CancellationToken ct)
+    private Task<byte[]> Post(string path, object body, string? accessToken, CancellationToken ct, int limit = 65536)
+        => Request(HttpMethod.Post, path, body, accessToken, ct, limit);
+
+    private async Task<byte[]> Request(HttpMethod method, string path, object? body, string? accessToken, CancellationToken ct, int limit = 65536)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(new Uri(CloudProject.Url), path));
+        using var request = new HttpRequestMessage(method, new Uri(new Uri(CloudProject.Url), path));
         request.Headers.Add("apikey", CloudProject.PublishableKey);
         if (accessToken != null) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-        byte[] payload = JsonSerializer.SerializeToUtf8Bytes(body);
+        byte[] payload = body == null ? [] : JsonSerializer.SerializeToUtf8Bytes(body);
         try
         {
-            request.Content = new ByteArrayContent(payload);
-            request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+            if (body != null)
+            {
+                request.Content = new ByteArrayContent(payload);
+                request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+            }
             using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
@@ -136,7 +143,8 @@ public sealed class SupabaseCloudAccount(HttpClient http)
                 try
                 {
                     using var json = JsonDocument.Parse(error, new JsonDocumentOptions { MaxDepth = 16 });
-                    if (json.RootElement.ValueKind == JsonValueKind.Object && json.RootElement.TryGetProperty("code", out var value) && value.ValueKind == JsonValueKind.String) code = value.GetString() ?? "";
+                    if (json.RootElement.ValueKind == JsonValueKind.Object &&
+                        (json.RootElement.TryGetProperty("error_code", out var value) || json.RootElement.TryGetProperty("code", out value)) && value.ValueKind == JsonValueKind.String) code = value.GetString() ?? "";
                 }
                 catch (JsonException) { }
                 finally { CryptographicOperations.ZeroMemory(error); }
@@ -146,12 +154,18 @@ public sealed class SupabaseCloudAccount(HttpClient http)
                     ? "Email verification delivery is not enabled for this address yet. The app owner needs to configure the email sender. You can use your vault offline without an account."
                     : code == "email_not_confirmed"
                     ? "Confirm your account email first. Use Resend confirmation email if needed."
+                    : code is "mfa_verification_failed" or "mfa_challenge_expired"
+                    ? "The authenticator code is incorrect or expired. Use the current six-digit code and check your device clock."
+                    : code is "insufficient_aal" or "mfa_factor_not_found" or "mfa_totp_enroll_not_enabled" or "mfa_totp_verify_not_enabled"
+                    ? "Two-factor authentication could not be completed. Check your authenticator or reopen cloud security settings."
+                    : path == "auth/v1/verify"
+                    ? "The email confirmation code is incorrect or expired. Request a new confirmation email."
                     : path is "auth/v1/signup" or "auth/v1/resend"
                     ? "Cloud account verification could not be completed. Check the email and password requirements, or try again later. Your offline vault is unchanged."
                     : "Cloud sign-in was rejected. Check your email/password and confirm your email before signing in.";
                 throw new VaultException(message);
             }
-            return await ReadBounded(response.Content, 65536, ct).ConfigureAwait(false);
+            return await ReadBounded(response.Content, limit, ct).ConfigureAwait(false);
         }
         finally { CryptographicOperations.ZeroMemory(payload); }
     }
@@ -168,7 +182,7 @@ public sealed class SupabaseCloudAccount(HttpClient http)
             string refresh = root.GetProperty("refresh_token").GetString() ?? "";
             if (owner == Guid.Empty || access.Length is < 20 or > 8192 || refresh.Length is < 10 or > 8192 ||
                 access.Any(c => char.IsControl(c)) || refresh.Any(c => char.IsControl(c))) throw new FormatException();
-            return new(owner, access, refresh);
+            return new(owner, access, refresh, ReadAssurance(access, owner));
         }
         catch (Exception ex) when (ex is JsonException or KeyNotFoundException or FormatException or InvalidOperationException)
         { throw new VaultException("Cloud account returned an invalid session.", ex); }

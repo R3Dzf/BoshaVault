@@ -9,11 +9,11 @@ Open **Actions → Build Lockvyn (Windows and Android)**. Pushes to main, pull r
 | Artifact | Contents and installation |
 |---|---|
 | `Lockvyn-Windows-x64` | `Lockvyn-Windows-x64.zip`; extract its complete contents, then run `Lockvyn.exe`. Includes `Lockvyn.NativeHost.exe`, browser extension, registration script and Arabic `START-HERE.html`. |
-| `Lockvyn-Android` | `Lockvyn-Android.apk` and signing notice. New package `com.lockvyn.app`, label **Lockvyn**, version **1.5.0**, code **10**. Installs beside production and earlier Test/Preview packages. |
+| `Lockvyn-Android` | `Lockvyn-Android.apk` and signing notice. New package `com.lockvyn.app`, label **Lockvyn**, version **1.6.0**, code **11**. Installs beside production and earlier Test/Preview packages. |
 | `Lockvyn-Android-LegacyPackage` | Compatibility APK using the original `com.bosha.vault` package and signing notice. Only the matching original certificate permits an in-place update. |
 | `Lockvyn-Android-UI-Logs` | Emulator and instrumentation logs for native keyboard/list acceptance. |
 
-Windows is self-contained x64 with .NET 10, version **1.9.0**. It has no publisher Authenticode signature. The Android application supports Android 9+, targets SDK 35 and uses pinned build dependencies. Product labels and version strings have no Preview suffix.
+Windows is self-contained x64 with .NET 10, version **1.10.0**. It has no publisher Authenticode signature. The Android application supports Android 9+, targets SDK 35 and uses pinned build dependencies. Product labels and version strings have no Preview suffix.
 
 Export an encrypted backup before changing versions. Exit the old Windows app from its tray menu before replacing program files. Windows continues to find the vault under `%LOCALAPPDATA%\BoshaVault`; do not delete that directory. See [browser Autofill setup](WINDOWS-AUTOFILL.md).
 

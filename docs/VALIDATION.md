@@ -1,3 +1,20 @@
+# Lockvyn cloud account security validation — 2026-10-11
+
+Applies to Windows **1.10.0**, Android **1.6.0** (code 11). Synthetic credentials only; no real confirmation email sent.
+
+| Verification | Result |
+|---|---|
+| .NET MFA and email-code transport | 21 checks passed: AAL/owner binding, pending/verified/unsupported factors, duplicate rejection, challenge binding, token rotation, local QR generation, large enrollment response, controlled errors and signup code |
+| Android Auth transport on JVM | 22 checks passed with fake requests; no Android storage/network dependency |
+| Live Supabase MFA/Auth/Data API | 18 checks passed: optional access, pending setup, wrong TOTP rejection, activation, AAL1 read/write denial, AAL2 access, password-only removal denial, refresh, fresh login challenge, removal/downgrade and sign-out |
+| SQL restrictive MFA policy | Rollback suite passed: pending factor, AAL1 read/insert/update/delete denial, AAL2 owner access, cross-owner denial, missing claim denial |
+| Supabase security advisors | No findings after private helper/policy deployment |
+| Local Windows WPF / Android source compilation | Passed; native build and emulator acceptance results are recorded below when complete |
+
+The temporary live account, factors, sessions and cloud snapshots were removed; remaining synthetic-user count was verified as zero. General email delivery remains unconfigured because no sender domain/SMTP service is ready. The code-confirmation UI and Lockvyn email template are prepared, but no delivered-message acceptance is claimed. Hardware UI, camera, biometrics and physical two-device acceptance remain separate.
+
+---
+
 # Lockvyn vault UX validation — 2026-10-11
 
 Applies to Lockvyn Windows 1.9 / Android 1.5 source. The checks below use synthetic credentials and encrypted fixtures; no personal vault is modified.

@@ -16,7 +16,8 @@ final class CloudClient implements AutoCloseable {
     private final Guard guard;
     private volatile HttpsURLConnection connection;
     private volatile boolean cancelled;
-    CloudClient(Guard guard){this.guard=guard;}
+    final CloudAuth auth;
+    CloudClient(Guard guard){this.guard=guard;auth=new CloudAuth((method,path,body,access)->request(method,path,body,access,method.equals("POST")&&path.equals("auth/v1/factors")?524288:65536));}
     private void check()throws Exception{if(cancelled)throw new IOException("Cloud operation cancelled.");guard.check();}
     private byte[] request(String method,String path,JSONObject body,String access,int limit)throws Exception{
         check();HttpsURLConnection conn=(HttpsURLConnection)new URL(URL+path).openConnection();connection=conn;
@@ -25,7 +26,7 @@ final class CloudClient implements AutoCloseable {
         byte[] payload=null;
         try{
             if(body!=null){conn.setDoOutput(true);conn.setRequestProperty("Content-Type","application/json");conn.setRequestProperty("Prefer","resolution=merge-duplicates,return=minimal");payload=body.toString().getBytes(StandardCharsets.UTF_8);conn.setFixedLengthStreamingMode(payload.length);try(OutputStream out=conn.getOutputStream()){out.write(payload);}}
-            int status=conn.getResponseCode();check();if(status<200||status>=300){String code=errorCode(conn);throw new Exception(status==429?"Cloud rate limit reached. Wait before trying again.":code.equals("email_address_not_authorized")?"Email verification delivery is not enabled for this address yet. The app owner needs to configure the email sender. Your vault works offline without an account.":code.equals("email_not_confirmed")?"Confirm your account email first. Use Resend confirmation email if needed.":(path.equals("auth/v1/signup")||path.equals("auth/v1/resend"))?"Cloud verification could not be completed. Check the email and password requirements, or try again later. Your offline vault is unchanged.":"Cloud request was rejected. Check your sign-in and confirm your email.");}
+            int status=conn.getResponseCode();check();if(status<200||status>=300){String code=errorCode(conn);throw new Exception(CloudAuth.error(status,path,code));}
             if(conn.getContentLengthLong()>limit)throw new Exception("Cloud response exceeds its size limit.");
             try(InputStream in=conn.getInputStream();ByteArrayOutputStream out=new ByteArrayOutputStream()){
                 byte[] chunk=new byte[8192];int read;try{while((read=in.read(chunk))!=-1){check();if(out.size()+read>limit)throw new Exception("Cloud response exceeds its size limit.");out.write(chunk,0,read);}return out.toByteArray();}finally{Arrays.fill(chunk,(byte)0);}
@@ -34,42 +35,22 @@ final class CloudClient implements AutoCloseable {
     }
     private static String errorCode(HttpsURLConnection conn){
         byte[] bytes=null;try(InputStream in=conn.getErrorStream();ByteArrayOutputStream out=new ByteArrayOutputStream()){
-            if(in==null)return "";byte[] chunk=new byte[1024];int n;try{while((n=in.read(chunk))!=-1){if(out.size()+n>65536)return "";out.write(chunk,0,n);}bytes=out.toByteArray();return StrictJson.object(new String(bytes,StandardCharsets.UTF_8)).optString("code","");}finally{Arrays.fill(chunk,(byte)0);}
+            if(in==null)return "";byte[] chunk=new byte[1024];int n;try{while((n=in.read(chunk))!=-1){if(out.size()+n>65536)return "";out.write(chunk,0,n);}bytes=out.toByteArray();JSONObject error=StrictJson.object(new String(bytes,StandardCharsets.UTF_8));return error.optString("error_code",error.optString("code",""));}finally{Arrays.fill(chunk,(byte)0);}
         }catch(Exception ignored){return "";}finally{if(bytes!=null)Arrays.fill(bytes,(byte)0);}
     }
-    void resendConfirmation(String email)throws Exception{
-        if(email.length()<3||email.length()>320||!email.contains("@"))throw new Exception("Enter your cloud account email.");byte[] verifier=new byte[32];new java.security.SecureRandom().nextBytes(verifier);
-        try{String encoded=Base64.getUrlEncoder().withoutPadding().encodeToString(verifier);String challenge=Base64.getUrlEncoder().withoutPadding().encodeToString(MessageDigest.getInstance("SHA-256").digest(encoded.getBytes(StandardCharsets.US_ASCII)));byte[] result=request("POST","auth/v1/resend",new JSONObject().put("type","signup").put("email",email).put("code_challenge",challenge).put("code_challenge_method","s256"),null,65536);Arrays.fill(result,(byte)0);}finally{Arrays.fill(verifier,(byte)0);}
+    void resendConfirmation(String email)throws Exception{auth.resendConfirmation(email);}
+    CloudAuth.Session signIn(String email,String password)throws Exception{return auth.signIn(email,password);}
+    void signUp(String email,String password)throws Exception{auth.signUp(email,password);}
+    CloudAuth.Session refresh(JSONObject profile,CloudSettingsStore store)throws Exception{
+        CloudAuth.Session signedIn=auth.refresh(profile.getString("refreshToken"));
+        saveSession(signedIn,profile,store);return signedIn;
     }
-    static final class Session {
-        final String owner,access,refresh;
-        Session(byte[] bytes)throws Exception{
-            try{JSONObject j=StrictJson.object(new String(bytes,StandardCharsets.UTF_8));owner=j.getJSONObject("user").getString("id");access=j.getString("access_token");refresh=j.getString("refresh_token");
-                if(!VaultEngine.id(owner)||access.length()<20||access.length()>8192||refresh.length()<10||refresh.length()>8192||access.matches("(?s).*\\p{Cntrl}.*")||refresh.matches("(?s).*\\p{Cntrl}.*"))throw new Exception("Cloud returned an invalid session.");
-            }catch(Exception invalid){throw new Exception("Cloud account returned an invalid session.");}
-            finally{Arrays.fill(bytes,(byte)0);}
-        }
+    void saveSession(CloudAuth.Session session,JSONObject profile,CloudSettingsStore store)throws Exception{
+        check();if(!session.owner.equals(profile.getString("ownerId")))throw new Exception("Cloud account changed. Reconnect this device.");
+        profile.put("refreshToken",session.refresh);store.save(profile);
     }
-    Session signIn(String email,String password)throws Exception{
-        if(email.length()<3||email.length()>320||!email.contains("@")||password.length()<1||password.length()>1024)throw new Exception("Enter your cloud account email and password.");
-        return new Session(request("POST","auth/v1/token?grant_type=password",new JSONObject().put("email",email).put("password",password),null,65536));
-    }
-    void signUp(String email,String password)throws Exception{
-        if(email.length()<3||email.length()>320||!email.contains("@")||password.length()<16||password.length()>1024)throw new Exception("Use a valid email and a separate cloud password of at least 16 characters.");
-        byte[] verifier=new byte[32];new java.security.SecureRandom().nextBytes(verifier);
-        try{
-            String encoded=Base64.getUrlEncoder().withoutPadding().encodeToString(verifier);
-            String challenge=Base64.getUrlEncoder().withoutPadding().encodeToString(MessageDigest.getInstance("SHA-256").digest(encoded.getBytes(StandardCharsets.US_ASCII)));
-            byte[] result=request("POST","auth/v1/signup",new JSONObject().put("email",email).put("password",password).put("code_challenge",challenge).put("code_challenge_method","s256"),null,65536);Arrays.fill(result,(byte)0);
-        }finally{Arrays.fill(verifier,(byte)0);}
-    }
-    private Session refresh(JSONObject profile,CloudSettingsStore store)throws Exception{
-        Session signedIn=new Session(request("POST","auth/v1/token?grant_type=refresh_token",new JSONObject().put("refresh_token",profile.getString("refreshToken")),null,65536));
-        check();if(!signedIn.owner.equals(profile.getString("ownerId")))throw new Exception("Cloud account changed. Reconnect this device.");
-        profile.put("refreshToken",signedIn.refresh);store.save(profile);return signedIn;
-    }
-    int sync(VaultEngine engine,JSONObject profile,CloudSettingsStore store)throws Exception{
-        Session signedIn=refresh(profile,store);String slot=profile.getString("vaultSlot"),device=profile.getString("deviceSlot");
+    int sync(VaultEngine engine,JSONObject profile,CloudSettingsStore store,CloudAuth.Session signedIn)throws Exception{
+        check();if(!signedIn.owner.equals(profile.getString("ownerId")))throw new Exception("Cloud account changed.");String slot=profile.getString("vaultSlot"),device=profile.getString("deviceSlot");
         byte[] response=request("GET","rest/v1/opaque_device_snapshots?select=device_slot,ciphertext_base64,ciphertext_sha256&vault_slot=eq."+slot+"&order=updated_at.desc&limit=64",null,signedIn.access,16000000);
         byte[] key=CloudSnapshot.parseKey(profile.getString("recoveryKey")),local=null,outer=null;List<byte[]> snapshots=new ArrayList<>();
         try{
@@ -86,7 +67,7 @@ final class CloudClient implements AutoCloseable {
             check();profile.put("lastSyncUtc",Instant.now().toString());store.save(profile);return conflicts;
         }finally{Arrays.fill(response,(byte)0);Arrays.fill(key,(byte)0);if(local!=null)Arrays.fill(local,(byte)0);if(outer!=null)Arrays.fill(outer,(byte)0);for(byte[] inner:snapshots)Arrays.fill(inner,(byte)0);}
     }
-    void signOut(JSONObject profile,CloudSettingsStore store)throws Exception{Session signedIn=refresh(profile,store);byte[] response=request("POST","auth/v1/logout?scope=local",new JSONObject(),signedIn.access,65536);Arrays.fill(response,(byte)0);check();store.forget();}
+    void signOut(CloudAuth.Session signedIn,CloudSettingsStore store)throws Exception{auth.signOut(signedIn);check();store.forget();}
     private static String hex(byte[] bytes){StringBuilder result=new StringBuilder();for(byte b:bytes)result.append(String.format(Locale.ROOT,"%02x",b&255));return result.toString();}
     @Override public void close(){cancelled=true;HttpsURLConnection conn=connection;if(conn!=null)conn.disconnect();}
 }
