@@ -11,7 +11,7 @@ Applies to Windows **1.10.0**, Android **1.6.0** (code 11). Synthetic credential
 | Supabase security advisors | No findings after private helper/policy deployment |
 | Local Windows WPF / Android source compilation | Passed |
 | Native Windows / Android builds and .NET–Java interoperability | Passed in [build #173](https://github.com/R3Dzf/BoshaVault/actions/runs/38152125598) |
-| Expanded native Android email-code / MFA UI acceptance | Checks dismissal cleanup after Android dispatches its asynchronous OnDismiss callback; consult the latest PR build for the rerun result |
+| Expanded native Android email-code / MFA UI acceptance | Checks keyboard input, code masking, local QR rendering and dismissal cleanup after OnDismiss. QR allocation now uses a mutable bitmap so close can erase and recycle it; consult the latest PR build for the rerun result |
 
 The temporary live account, factors, sessions and cloud snapshots were removed; remaining synthetic-user count was verified as zero. The owner selected Brevo; SMTP setup and the hosted code template remain pending. The code-confirmation UI and Lockvyn email template are prepared, but no delivered-message acceptance is claimed. Hardware UI, camera, biometrics and physical two-device acceptance remain separate.
 

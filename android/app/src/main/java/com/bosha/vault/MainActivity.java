@@ -235,7 +235,8 @@ public final class MainActivity extends Activity {
         try{
             com.google.zxing.common.BitMatrix bits=new com.google.zxing.MultiFormatWriter().encode(enrollment.uri,com.google.zxing.BarcodeFormat.QR_CODE,480,480);
             int[] pixels=new int[480*480];for(int y=0;y<480;y++)for(int x=0;x<480;x++)pixels[y*480+x]=bits.get(x,y)?0xff000000:0xffffffff;
-            bitmap[0]=android.graphics.Bitmap.createBitmap(pixels,480,480,android.graphics.Bitmap.Config.ARGB_8888);Arrays.fill(pixels,0);image.setImageBitmap(bitmap[0]);
+            // The int[] overload creates an immutable bitmap, which cannot be erased on close.
+            bitmap[0]=android.graphics.Bitmap.createBitmap(480,480,android.graphics.Bitmap.Config.ARGB_8888);bitmap[0].setPixels(pixels,0,480,0,0,480,480);Arrays.fill(pixels,0);image.setImageBitmap(bitmap[0]);
             LinearLayout.LayoutParams qr=new LinearLayout.LayoutParams(Ui.dp(this,240),Ui.dp(this,240));qr.gravity=android.view.Gravity.CENTER_HORIZONTAL;b.addView(image,qr);
         }catch(Exception e){b.addView(Ui.text(this,"QR could not be rendered. Use the setup key below.",12,Ui.MUTED,false));}
         EditText key=Ui.field(b,"Setup key · keep private",enrollment.secret,false,128);key.setKeyListener(null);key.setTextIsSelectable(true);
