@@ -10,7 +10,7 @@ Alternatively, do it manually:
 
 1. On GitHub choose **New repository**, name it `BoshaVault`, mark it **Private** (recommended for a password manager under active security testing), and **do not** create a README or `.gitignore` online. Keep the default branch `main`.
 2. Push every file under the `BoshaVault/` source directory to the **root** of the new repository (not an extra nested BoshaVault directory). The `.github/workflows/build.yml` file must exist at repository root.
-3. Go to **Actions → Build BoshaVault (Windows and Android) → Run workflow** or push to `main`. When both jobs pass, get the ZIP and APK under **Run → Artifacts**. Workflow artifacts expire after 14 days.
+3. Go to **Actions → Build BoshaVault (Windows and Android) → Run workflow**, push to `main`, or open a pull request. When the Windows, Android and cloud interoperability jobs pass, get the ZIP and APK under **Run → Artifacts**. Workflow artifacts expire after 14 days. `BoshaVault-Android-Test` is a separate package/storage area suitable for a preview test alongside your existing app.
 4. This CI checks builds and selected tests; **it cannot validate real phone↔PC Wi-Fi connectivity**. See `docs/PAIRING-HOTFIX-2026-10-09.md` and `Diagnose-BoshaVault.ps1`.
 
 ## Important Android signing warning
@@ -43,7 +43,7 @@ The Windows executable is **not Authenticode-signed**. Don't disable antivirus f
 
 ## Android
 
-CI uses Java 17, Python 3.11, Android SDK platform 35 and build tools 35.0.0. The lightweight Python builder downloads Maven libraries with hard-coded SHA-256 checks. Version code is `3` (`1.2.0-pairing-hotfix`) for the updated Android code.
+CI uses Java 17, Python 3.11, Android SDK platform 35 and build tools 35.0.0. The lightweight Python builder downloads Maven libraries with hard-coded SHA-256 checks. Version code is `9` (`1.4.0-cloud-sync-preview`). The cloud interoperability job uses pinned JVM-only JSON and Bouncy Castle fixtures and makes no network requests to Supabase.
 
 ## What is *not* verified
 

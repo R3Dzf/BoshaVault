@@ -1,4 +1,26 @@
-> **Hotfix note (2026-10-09):** The result below describes the **previous** 1.2/1.1 builds. The new pairing-error handling and diagnostics in this source archive have not been built or tested on real Windows/Android devices. See `PAIRING-HOTFIX-2026-10-09.md` for new acceptance steps.
+# Cloud preview validation — 2026-10-11
+
+Applies to Windows 1.8 / Android 1.4 cloud-preview source and the dedicated Orchid Ledger project. Tests used synthetic entries only. No existing personal vault, unrelated Supabase project or original Android installation was modified.
+
+| Verification | Result |
+|---|---|
+| Owner-isolation SQL transaction | Passed owner CRUD, cross-owner read/insert/update/delete and missing-identity/anonymous rejection; fixtures rolled back |
+| Real Supabase Auth + Data API | 12 checks passed: encrypted roundtrip, two-owner isolation, anonymous/invalid JWT rejection, refresh rotation and local-session sign-out |
+| Live-test cleanup | Zero temporary users and zero snapshot rows remained after cleanup |
+| Supabase security advisors | No findings at validation time |
+| .NET account, pairing, atomic merge | 15 checks passed, including bounded Auth response and PKCE confirmation payload |
+| Java cloud encryption/pairing/atomic merge | 9 checks passed; .NET ciphertext opens in Java, tampering/identity mismatch refused, invalid later input preserves local file |
+| Java → .NET outer encryption | Passed |
+| Existing .NET core/transport suite | 74 core checks and cloud transport checks passed |
+| Windows WPF compile on Linux | .NET SDK 10.0.100; zero warnings/errors; this is compilation, not native UI execution |
+
+GitHub CI builds both platforms and runs native Windows DPAPI storage checks plus .NET/Java interoperability. Native Windows UI and Android Keystore/biometric behavior, real email confirmation, cancellation/backgrounding, offline reconnect and two-device edits still require acceptance testing. Export an encrypted backup first; use the isolated Android Test package alongside the existing app for preview testing.
+
+Cloud acceptance: enroll one synthetic vault on both devices using its cloud code; sync A→B→A; make concurrent edits and inspect conflict copies; block networking and confirm offline edits; lock/background during each request and reopen; restart both apps and verify protected sign-in settings; try wrong account/code; change the master passphrase and follow the local reconciliation/fresh-space instructions in [CLOUD-SYNC.md](CLOUD-SYNC.md). No independent security audit is claimed.
+
+---
+
+> **Historical hotfix note (2026-10-09):** The following record describes the previous 1.2/1.1 builds. See `PAIRING-HOTFIX-2026-10-09.md` for native pairing acceptance steps.
 
 # Validation record — 2026-10-09
 

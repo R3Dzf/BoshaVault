@@ -18,6 +18,42 @@ permissions:
   contents: read
 
 jobs:
+  cloud-interop:
+    name: Cloud encryption / .NET and Java compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Fetch pinned JVM test dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build-deps/java-cloud
+          curl --fail --location --retry 3 https://repo.maven.apache.org/maven2/org/bouncycastle/bcprov-jdk18on/1.86/bcprov-jdk18on-1.86.jar --output build-deps/bcprov.jar
+          curl --fail --location --retry 3 https://repo.maven.apache.org/maven2/org/json/json/20250517/json-20250517.jar --output build-deps/json.jar
+          sha256sum --check <<'PINS'
+          2af190b300cbb0b35e248ccf5f4a06b6072030aeb3da7a98ec73abe5b4cb371f  build-deps/bcprov.jar
+          3ea61b2a06e31edf1c91134fe9106b0ebb16628be169f3db75bc7a2b06b45796  build-deps/json.jar
+          PINS
+      - name: Test cloud account and atomic merge, then generate synthetic fixtures
+        run: |
+          dotnet run --project src/BoshaVault.Tests -c Release -- --cloud-tests
+          dotnet run --project src/BoshaVault.Tests -c Release -- --fixtures build-deps/cloud-fixtures
+      - name: Validate cloud encryption and pairing in both directions
+        shell: bash
+        run: |
+          set -euo pipefail
+          javac -cp build-deps/bcprov.jar:build-deps/json.jar -d build-deps/java-cloud android/app/src/main/java/com/bosha/vault/VaultEngine.java android/app/src/main/java/com/bosha/vault/StrictJson.java android/app/src/main/java/com/bosha/vault/CloudSnapshot.java tools/CloudInteropTest.java
+          java -cp build-deps/java-cloud:build-deps/bcprov.jar:build-deps/json.jar com.bosha.vault.CloudInteropTest build-deps/cloud-fixtures
+          dotnet run --project src/BoshaVault.Tests -c Release -- --verify-java-cloud build-deps/cloud-fixtures
+
   windows:
     name: Windows x64 / .NET 10
     runs-on: windows-latest
@@ -42,6 +78,10 @@ jobs:
         run: dotnet run --project src/BoshaVault.Tests -c Release
       - name: Desktop tests
         run: dotnet run --project src/BoshaVault.Tests -c Release -- --desktop-tests
+      - name: Cloud account, pairing, atomic merge and DPAPI storage tests
+        run: |
+          dotnet run --project src/BoshaVault.Tests -c Release -- --cloud-tests
+          dotnet run --project src/BoshaVault.Tests -c Release -- --cloud-store-tests
       - name: Certificate tests
         run: dotnet run --project src/BoshaVault.Tests -c Release -- --tls-certificate-tests
       - name: TLS / Schannel handshake test
@@ -178,11 +218,11 @@ jobs:
             "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose dist/BoshaVault-Android-Test.apk
           fi
           unset SIGNING_PASSWORD STABLE_KEYSTORE_PASSWORD STABLE_KEYSTORE_BASE64
-      - name: Upload isolated biometric test app (separate storage)
+      - name: Upload isolated preview test app (separate storage)
         if: ${{ !startsWith(github.ref, 'refs/tags/v') && !(github.event_name == 'workflow_dispatch' && inputs.signed_release) }}
         uses: actions/upload-artifact@v4
         with:
-          name: BoshaVault-Android-BIOMETRIC-TEST
+          name: BoshaVault-Android-Test
           path: dist/BoshaVault-Android-Test.apk
           if-no-files-found: error
           retention-days: 14

@@ -7,7 +7,7 @@
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <AssemblyName>BoshaVault</AssemblyName>
     <Product>BoshaVault</Product>
-    <Version>1.7.0-related-domains-preview</Version>
+    <Version>1.8.0-cloud-sync-preview</Version>
     <ApplicationIcon>Assets/boshavault.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup><ProjectReference Include="../BoshaVault.Core/BoshaVault.Core.csproj" /></ItemGroup>

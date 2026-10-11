@@ -12,6 +12,11 @@ final class StrictJson {
         if(v.p!=s.length()) throw new Exception("Trailing data in vault.");
         return new JSONObject(s);
     }
+    static JSONArray array(String s) throws Exception {
+        StrictJson v=new StrictJson(s);v.value(0);v.ws();
+        if(v.p!=s.length())throw new Exception("Trailing data in cloud response.");
+        return new JSONArray(s);
+    }
     private void ws(){while(p<s.length()&&" \r\n\t".indexOf(s.charAt(p))>=0)p++;}
     private char at(){return p<s.length()?s.charAt(p):'\0';}
     private void need(char c)throws Exception{ws();if(at()!=c)bad();p++;}

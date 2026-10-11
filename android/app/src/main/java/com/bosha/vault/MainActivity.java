@@ -106,7 +106,55 @@ public final class MainActivity extends Activity {
     }
     private void copy(String value){ClipboardManager c=(ClipboardManager)getSystemService(CLIPBOARD_SERVICE);ClipData data=ClipData.newPlainText("BoshaVault",value);if(Build.VERSION.SDK_INT>=33){PersistableBundle extras=new PersistableBundle();extras.putBoolean(ClipDescription.EXTRA_IS_SENSITIVE,true);data.getDescription().setExtras(extras);}c.setPrimaryClip(data);clipboard=value;clipboardUntil=SystemClock.elapsedRealtime()+20000;handler.postDelayed(()->{if(SystemClock.elapsedRealtime()>=clipboardUntil)clearClipboard();},20000);toast("Copied. Clipboard clears in 20 seconds. Paste into the intended app.");}
     private void clearClipboard(){try{ClipboardManager c=(ClipboardManager)getSystemService(CLIPBOARD_SERVICE);ClipData d=c.getPrimaryClip();if(clipboard!=null&&d!=null&&d.getItemCount()>0&&clipboard.contentEquals(d.getItemAt(0).coerceToText(this)))c.clearPrimaryClip();clipboard=null;}catch(Exception ignored){}}
-    private void devices(){LinearLayout b=Ui.column(this);b.addView(Ui.text(this,"Transfer encrypted data only. Both devices stay usable offline. Keep a backup away from this phone.",13,Ui.MUTED,false));b.addView(Ui.button(this,"Export encrypted backup",true,()->{try{exportBytes=engine.export();startActivityForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT).setType("application/octet-stream").addCategory(Intent.CATEGORY_OPENABLE).putExtra(Intent.EXTRA_TITLE,"BoshaVault.boshavault"),11);}catch(Exception e){Ui.error(this,e);}}));b.addView(Ui.button(this,"Import / merge encrypted backup",false,this::chooseImport));b.addView(Ui.button(this,"Connect to Windows over Wi-Fi",false,()->showPairing(true)));dialog("Devices & encrypted backup",b);}
+    private void devices(){LinearLayout b=Ui.column(this);b.addView(Ui.text(this,"Transfer encrypted data only. Both devices stay usable offline. Keep a backup away from this phone.",13,Ui.MUTED,false));b.addView(Ui.button(this,"Export encrypted backup",true,()->{try{exportBytes=engine.export();startActivityForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT).setType("application/octet-stream").addCategory(Intent.CATEGORY_OPENABLE).putExtra(Intent.EXTRA_TITLE,"BoshaVault.boshavault"),11);}catch(Exception e){Ui.error(this,e);}}));b.addView(Ui.button(this,"Import / merge encrypted backup",false,this::chooseImport));b.addView(Ui.button(this,"Connect to Windows over Wi-Fi",false,()->showPairing(true)));b.addView(Ui.button(this,"Optional encrypted cloud sync",false,this::cloud));dialog("Devices & encrypted backup",b);}
+
+    private void cloudTask(TextView status,Work action,Runnable done){
+        if(busy){toast("A vault operation is already running.");return;}
+        status.setText("Working… Keep this window open.");String[] failure={null};
+        task(()->{try{action.run();}catch(Exception e){failure[0]=e instanceof IOException?"Cloud could not be reached. Your local vault is preserved. Try again when connected.":e.getMessage();}},()->{if(failure[0]!=null)status.setText(failure[0]);else done.run();});
+    }
+    private static void clearCloudFields(android.view.View view){
+        if(view instanceof EditText)((EditText)view).setText("");
+        if(view instanceof android.view.ViewGroup){android.view.ViewGroup group=(android.view.ViewGroup)view;for(int i=0;i<group.getChildCount();i++)clearCloudFields(group.getChildAt(i));}
+    }
+    private void cloud(){
+        if(!engine.isOpen()||busy)return;
+        final CloudSettingsStore store=new CloudSettingsStore(this);final int stamp=epoch;
+        final CloudClient client=new CloudClient(()->{if(!active||stamp!=epoch||!engine.isOpen())throw new IOException("Cloud operation cancelled.");});
+        JSONObject saved=null;String vaultId;
+        try{vaultId=engine.snapshot().getString("vaultId");saved=store.load(vaultId);}catch(Exception e){
+            LinearLayout b=Ui.column(this);b.addView(Ui.text(this,"Saved cloud settings could not be opened. Your local vault is available.",13,Ui.MUTED,false));AlertDialog d=dialog("Encrypted cloud sync",b);
+            b.addView(Ui.button(this,"Forget local cloud settings",false,()->{try{store.forget();d.dismiss();cloud();}catch(Exception error){Ui.error(this,error);}}));client.close();return;
+        }
+        final JSONObject profile=saved;final String localVaultId=vaultId;LinearLayout b=Ui.column(this);TextView status=Ui.text(this,"Ready. Your vault stays usable without Internet.",13,Ui.MUTED,false);
+        AlertDialog d=dialog("Encrypted cloud sync",b);
+        d.setOnDismissListener(x->{dialogs.remove(d);client.close();clearCloudFields(b);worker.execute(()->CloudSettingsStore.clear(profile));});
+        if(profile!=null){
+            b.addView(Ui.text(this,"Connected to "+profile.optString("email")+". Sync runs only when you press Sync now.",13,Ui.MUTED,false));
+            b.addView(Ui.text(this,profile.optString("lastSyncUtc").isEmpty()?"No successful sync yet.":"Last successful sync: "+profile.optString("lastSyncUtc"),12,Ui.MUTED,false));
+            b.addView(Ui.button(this,"Sync now",true,()->{int[] conflicts={0};cloudTask(status,()->conflicts[0]=client.sync(engine,profile,store),()->{status.setText("Synced successfully. "+conflicts[0]+" conflict copies kept.");renderList();});}));
+            b.addView(Ui.button(this,"Copy connection code for your other device",false,()->{try{copy(CloudSnapshot.pairing(profile));status.setText("Connection code copied. Share it only with your own trusted device; clipboard clears in 20 seconds.");}catch(Exception e){Ui.error(this,e);}}));
+            b.addView(Ui.text(this,"Both devices must use the same vault, cloud account and connection code. The code contains your recovery key. Keep an encrypted local backup.",12,Ui.MUTED,false));
+            b.addView(Ui.button(this,"Disconnect this device",false,()->new AlertDialog.Builder(this).setTitle("Disconnect cloud?").setMessage("Keep your local vault and encrypted cloud backups, and sign out this cloud session? Keep your connection code on another trusted device first.").setNegativeButton("Cancel",null).setPositiveButton("Disconnect",(x,y)->cloudTask(status,()->client.signOut(profile,store),()->{d.dismiss();toast("Cloud session signed out. Previously issued access tokens expire normally. Local vault unchanged.");})).show()));
+            b.addView(Ui.button(this,"Forget local cloud settings (offline)",false,()->new AlertDialog.Builder(this).setTitle("Forget cloud settings?").setMessage("This forgets your recovery key and saved sign-in on this phone. It does not revoke server sessions or remove cloud backups. Keep your code elsewhere first.").setNegativeButton("Cancel",null).setPositiveButton("Forget",(x,y)->cloudTask(status,store::forget,()->{d.dismiss();toast("Local settings forgotten; server session not revoked.");})).show()));
+        }else{
+            b.addView(Ui.text(this,"Optional manual sync. Your data is encrypted on-device before upload. This cloud login is separate from your Supabase dashboard login.",13,Ui.MUTED,false));
+            b.addView(Ui.text(this,"For this private preview, use the email associated with your new Supabase account.",12,Ui.MUTED,false));
+            EditText email=Ui.field(b,"Cloud account email","",false,320),password=Ui.field(b,"Separate cloud password (16+ characters)","",true,1024),code=Ui.field(b,"Other device's cloud connection code (only when joining)","",true,1024);
+            b.addView(Ui.text(this,"First device: create a cloud account, confirm its email, then start a new cloud vault. Second device: first transfer the same vault over Wi-Fi, then sign in with the same cloud account and paste its code.",12,Ui.MUTED,false));
+            b.addView(Ui.button(this,"Create cloud account",false,()->{String secret=password.getText().toString(),address=email.getText().toString().trim();password.setText("");cloudTask(status,()->client.signUp(address,secret),()->status.setText("Confirm the account using your email, then sign in below. Local vault unchanged."));}));
+            for(boolean existing:new boolean[]{false,true})b.addView(Ui.button(this,existing?"Join this vault's existing cloud":"Start a new cloud vault",!existing,()->{
+                String address=email.getText().toString().trim(),secret=password.getText().toString(),pairingCode=code.getText().toString().trim();password.setText("");code.setText("");
+                cloudTask(status,()->{
+                    CloudClient.Session signedIn=client.signIn(address,secret);if(!active||stamp!=epoch)throw new IOException("Cloud operation cancelled.");
+                    JSONObject pairing=existing?CloudSnapshot.pairing(pairingCode,localVaultId,signedIn.owner):null;
+                    JSONObject next=new JSONObject().put("version",1).put("ownerId",signedIn.owner).put("vaultId",localVaultId).put("vaultSlot",pairing==null?UUID.randomUUID().toString():pairing.getString("vaultSlot")).put("deviceSlot",UUID.randomUUID().toString()).put("recoveryKey",pairing==null?CloudSnapshot.newKey():pairing.getString("recoveryKey")).put("refreshToken",signedIn.refresh).put("email",address).put("lastSyncUtc","");
+                    try{store.save(next);}finally{CloudSettingsStore.clear(next);}
+                },()->{d.dismiss();cloud();});
+            }));
+        }
+        Ui.gap(b,12);b.addView(status);
+    }
     private void chooseImport(){startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*").addCategory(Intent.CATEGORY_OPENABLE),12);}
     @Override protected void onActivityResult(int request,int result,Intent intent){super.onActivityResult(request,result,intent);if(request==13){scannedPairing="";if(result==RESULT_OK&&intent!=null){String code=intent.getStringExtra(ScanQrActivity.RESULT_PAIRING);try{new LocalTransfer(code);scannedPairing=code;}catch(Exception e){toast("The scanned code is not a valid BoshaVault pairing code.");}}return;}if(result!=RESULT_OK||intent==null||intent.getData()==null){exportBytes=null;return;}Uri uri=intent.getData();
         if(request==11&&exportBytes!=null){byte[] bytes=exportBytes;exportBytes=null;task(()->{try(OutputStream out=getContentResolver().openOutputStream(uri,"wt")){if(out==null)throw new Exception("Cannot write the backup.");out.write(bytes);}},()->toast("Encrypted backup saved."));}

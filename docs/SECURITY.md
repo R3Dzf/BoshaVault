@@ -12,6 +12,10 @@ Master passwords are not stored. Password changes generate a new salt and a fres
 
 File parsing rejects duplicate/unknown properties, unknown versions, unsafe KDF parameters, malformed Base64, wrong nonce/tag sizes, oversized files, invalid entry IDs/revisions and excessive nesting. Authentication failures never produce usable plaintext. Writes use a separate file lock, optimistic file-hash checks, a flushed temporary file and atomic replacement. An encrypted `.previous` snapshot retains the last ordinary update. Android writes use app-private internal storage and disable cloud/device-transfer backups. No plaintext export is implemented.
 
+## Optional cloud boundary
+
+The opt-in cloud preview seals the complete encrypted file with an independent AES-256-GCM recovery key before upload. The key is transferred manually in an account/vault-bound connection code and stored with DPAPI CurrentUser on Windows or Android Keystore encryption. Supabase owner-scoped RLS prevents other Auth accounts from accessing these rows. Email, sizes, times and network metadata remain visible to the provider; a compromised device/OS can still use its own saved keys. Manual sync verifies every snapshot before one atomic merge; key-epoch mismatch requires local reconciliation and a fresh cloud space. Current-session disconnect revokes refresh access but does not erase existing ciphertext, already downloaded copies or immediately invalidate issued access tokens. See [cloud setup and limitations](CLOUD-SYNC.md).
+
 ## Device and filling boundaries
 
 | Threat | Handling | Limit |

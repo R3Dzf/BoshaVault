@@ -1,48 +1,46 @@
-# Optional Supabase end-to-end encrypted synchronization — engineering status
+# Optional encrypted cloud sync preview
 
-**Not enabled in user-facing apps yet.** The database migration, independent outer-encryption codec, user-JWT REST transport and deterministic tests are implemented, but these are building blocks rather than an operational sync feature. No Supabase project was created or modified. We must select/create a dedicated project with the user's explicit organization and cost approval, implement Supabase Auth + secure token storage on Windows/Android, device enrollment, cross-device conflict-safe orchestration and live two-user RLS tests before turning it on.
+Windows **1.8.0-cloud-sync-preview** and Android **1.4.0-cloud-sync-preview** include manual Supabase synchronization under **Devices & encrypted backup → Optional encrypted cloud sync**. It is off until you connect a cloud account. Local Wi-Fi transfer, encrypted file backups and offline vault use remain independent.
 
-## Why the project name does not make data safe
+The dedicated project is **Orchid Ledger** in the **New Generation** organization, region `eu-central-1`, reference `ghmbcfqiomggoxgwghjs`. [Open its dashboard](https://supabase.com/dashboard/project/ghmbcfqiomggoxgwghjs). Source contains only the project URL and public publishable key; no administrative or service-role key belongs in either client.
 
-A fake project name, opaque REST table names and random slots may reduce casual identification, but do not stop an attacker. Supabase API endpoints and publishable keys are expected to be discoverable. Security depends on the authenticated user's JWT, RLS and encryption. Never include a `service_role`, a secret API key, the database password, the vault passphrase, or the cloud recovery key in the app or GitHub repository.
+## Connect your two devices
 
-The recommended architecture uses **two independent encryption layers**:
+1. Export an encrypted local backup. Use synthetic entries for the first native-device test.
+2. Both devices must already hold the **same vault**. Create it on one device, then transfer it over local Wi-Fi or import its encrypted backup on the other. Cloud enrollment cannot replace an unrelated vault or initialize a new device from cloud alone.
+3. On the first device open the cloud screen, enter your email and a **separate cloud password of at least 16 characters**, and choose **Create cloud account**. This application account inside Orchid Ledger is separate from your Supabase dashboard login. Confirm its email, return to the app, enter the cloud password and choose **Start a new cloud vault**.
+4. Choose **Show & copy connection code** on Windows, or **Copy connection code for your other device** on Android. This `BVCLOUD1:` code contains a random recovery key and binds your cloud account, local vault and cloud space. It contains no refresh/access token. Keep it private and transfer it only to your own trusted device. The app clears its owned clipboard after 20 seconds where the OS permits.
+5. On the second device sign in with the same application account, paste the code in **Other device's cloud connection code**, and choose **Join this vault's existing cloud**. Starting separate spaces on both devices does not connect them.
+6. Press **Sync now** on the first device, then the second, then the first again. Each sync downloads, authenticates and merges device snapshots locally before uploading this device's current encrypted snapshot. Concurrent edits keep conflict copies for review. Sync is manual, without a background scheduler.
 
-1. Local `vault.boshavault` keeps current Argon2id passphrase wrapping + AES-256-GCM body protection.
-2. The complete local encrypted file (including its visible header) is **sealed again** with a separate **random 256-bit cloud recovery key** using AES-256-GCM. Associated data binds random `vault_slot` and `device_slot` UUIDs.
-3. Supabase receives a base64 encoding of **the outer ciphertext only**, plus its hash, unrelated slot UUIDs, the Supabase Auth owner UUID, ciphertext length and timestamp. Its dashboard cannot inspect usernames/passwords/URLs, or even the raw local vault envelope, without the independent cloud key. File sizes, event times, account identity, IP/network metadata and access records still remain observable.
-4. Each device uploads a separate encrypted snapshot under its slot. This avoids directly overwriting another device's edits. Download and merge must run **on-device**, via existing authenticated vault `MergeEncrypted`/`MergeUsingPassword` rules and explicit conflict handling. Successful merge then uploads a new device snapshot.
-5. A cloud recovery key is generated locally and **never** uploaded. Both devices must receive it via a carefully verified local pairing/QR flow or manual entry. Losing it prevents decrypting cloud backups, but does not delete local backups. Rotating that key after losing a device requires resealing all cloud snapshots; revoking Supabase credentials alone cannot wipe previously downloaded data.
+Supabase's default email sender currently permits only organization-team addresses and has restrictive rate limits. For this private preview, use the email associated with the new Supabase account. Other recipients need a custom SMTP sender first; confirmation remains enabled. See [Supabase SMTP documentation](https://supabase.com/docs/guides/auth/auth-smtp). Signup requests use an S256 PKCE challenge, so the confirmation redirect does not carry access/refresh tokens; the app signs in separately with the password after confirmation. Real email delivery and confirmation UI still need native testing.
 
-## Data model and access
+## Encryption and settings
 
-`supabase/migrations/20261009182200_opaque_device_snapshots.sql` creates `public.opaque_device_snapshots` with owner-isolated RLS:
-- `owner_id` references `auth.users`, all CRUD policies require `auth.uid()=owner_id`.
-- `vault_slot`, `device_slot` are random UUIDs distinct from the actual encrypted vault ID and device ID.
-- `ciphertext_base64` is the **outer-encrypted** binary only, *not* a plain base64 of the existing `.boshavault` file.
-- `ciphertext_sha256` is for corruption/transport detection; **AES-GCM authentication** is required before accepting a snapshot.
-- `updated_at` server-generated; cannot be trusted as an ordering/security counter.
+The existing `.boshavault` file is already encrypted. A device additionally seals the **entire file** with AES-256-GCM under an independent random 256-bit cloud recovery key. Outer AAD binds format version, cloud space and device slot. Supabase receives only outer ciphertext, its checksum and random identifiers. Account email, network/access metadata, file sizes and upload times remain observable.
 
-No anon role can read or write the table. RLS should be independently tested using two accounts, including invalid JWT, expired sessions, cross-owner INSERT/UPDATE/SELECT/DELETE and Auth MFA (AAL) configurations. Supabase backup/replication copies remain ciphertext but can remain after user deletion according to provider retention.
+Each device writes its own row. Owner-scoped RLS checks `auth.uid() = owner_id` for SELECT, INSERT, UPDATE and DELETE, including UPDATE's `WITH CHECK`; anonymous table access is denied. SHA-256 detects transport corruption; AES-GCM authentication determines whether the file is accepted. Server timestamps are status metadata, not security counters.
 
-**Preview restriction:** up to 2 MB per inner encrypted vault snapshot. Larger files must be handled later via a private Supabase Storage bucket with audited Storage RLS and resumable uploads. Cloud sync MUST refuse larger files, never silently truncate them.
+Windows saves refresh tokens and the recovery key using **DPAPI CurrentUser** in `cloud-profile.dpapi`. Android uses app-private `cloud-settings.enc`, protected by an **Android Keystore AES-GCM key**; platform backups are disabled. Access tokens are transient. Rotated refresh tokens are saved before the next network request. These protections cannot prevent compromised apps/OS accounts from using their device's keys, and managed strings cannot be guaranteed erased from memory.
 
-## Identity, device trust and usability
+Every downloaded outer snapshot and inner vault is validated before one atomic local merge. A malformed, wrong-key, wrong-vault or mismatched-epoch batch changes no local file. If upload fails after a successful merge, the merged local file remains; retrying uploads its current state. Cloud outage, TLS failure, quota or expired sign-in never prevents offline vault access.
 
-- Use Supabase Auth, preferably passwordless email + optional mandatory MFA for syncing; the provider will know the Auth account identifier/email.
-- On Windows, persist refresh tokens only if encrypted with Windows DPAPI using user scope; on Android use platform Keystore-protected encryption. Never persist access tokens or recovery keys in plaintext `desktop.json` or app logs.
-- Require explicit device pairing/approval, provide **Devices → Revoke** plus login-session revocation and key rotation guidance.
-- Keep **Local Wi-Fi transfer** independent, usable without Internet, Supabase account, subscriptions or cloud setup.
-- Default **Cloud Sync OFF**. Once fully implemented, add Settings > Sync options: Local Wi-Fi / Encrypted cloud / Both. Clearly show last successful verified merge, device pending changes and errors without disclosing credentials.
-- Failure is fail-closed and non-destructive: preserve both local and cloud encrypted backups. Do not assume last writer wins; protect against whole-file replay/rollback and conflicts.
-- Quotas, TLS failure, sign-out, server outage or lost token must never prevent the offline vault from working.
-- Complete a separate security audit of external data flows and device key handling before storing production passwords.
+## Passphrase changes and disconnecting
 
-## Implemented source (not live connection)
+Changing the master passphrase rotates the inner vault key. The preview refuses cloud snapshots from another key epoch. Merge **all devices** over local Wi-Fi or encrypted backups using the incoming passphrase first. Then disconnect cloud on both devices, start a **new cloud vault** on one, and join it on the other with the new code. Old cloud rows remain in their old space and do not block the new one. Preserve an encrypted backup and old code if you still need those snapshots.
 
-- `src/BoshaVault.Core/CloudSnapshotCodec.cs`: random recovery key + AES-GCM outer envelope.
-- `src/BoshaVault.Core/SupabaseSnapshotTransport.cs`: authenticated REST upload/download of outer ciphertext only; access token injected by future Auth layer.
-- `src/BoshaVault.Tests/CloudTransportTests.cs`: fake HTTP transport tests (no network, no real keys or personal data).
-- `src/BoshaVault.Tests/Program.cs`: outer envelope tamper, wrong key, wrong vault/device slot, transport checksum verification.
+**Disconnect this device** revokes this Auth session's refresh token and deletes local cloud settings. Already issued access tokens follow their normal expiration. **Forget local cloud settings (offline)** deletes settings only and cannot revoke the server session. Both actions retain local vault files and cloud snapshots.
 
-**Next blocked step:** create or select a *dedicated* Supabase project and obtain the user's explicit organization and project-cost approval. Do not deploy this migration into the user's Portfolio, Learning Platform, Resume or any other unrelated Supabase project.
+Remote per-device management, mandatory Auth MFA, automatic key redistribution and cloud-only recovery/bootstrap are not implemented. Losing the recovery code can make existing cloud snapshots inaccessible without affecting local files. Starting a new space creates a fresh cloud key, but cannot erase copies already downloaded by a lost device. Project administrators can delete or roll back ciphertext; revision vectors preserve known local edits, but there is no independent server-history freshness checkpoint or availability guarantee.
+
+## Limits and verification
+
+- Up to **2,000,000 bytes** per inner snapshot; larger vaults are refused without truncation. Download is capped at 64 rows and 16 MB total response; Auth responses at 64 KiB.
+- `supabase/migrations/20261009182200_opaque_device_snapshots.sql` is deployed to Orchid Ledger. Security advisors returned no findings at validation time.
+- `supabase/tests/owner_isolation.sql` covers transactional owner CRUD, cross-owner read/mutation rejection, absent identity, anonymous privileges and server timestamps, then rolls back all fixtures.
+- Temporary synthetic users exercised real Auth and the Data API: encrypted upload/download, cross-owner SELECT/INSERT/UPDATE/DELETE, anonymous/invalid-JWT rejection, refresh rotation and sign-out. All test users and snapshots were deleted afterward.
+- .NET and Java tests verify shared envelope/connection-code formats, tampering, identity binding and non-destructive batch merge. CI also runs Windows DPAPI checks and builds both clients.
+
+Native Windows/Android UI, Android Keystore lifecycle, email confirmation, cancellation/backgrounding and actual two-device cloud edits still require acceptance testing. Successful automated checks are not an independent security audit. See [validation record](VALIDATION.md) and [security model](SECURITY.md).
+
+Run `dotnet run --project src/BoshaVault.Tests -c Release -- --cloud-tests`. Native DPAPI checks use `--cloud-store-tests` on Windows. The CI `cloud-interop` job creates fake fixtures, runs `tools/CloudInteropTest.java`, and verifies Java ciphertext in .NET. Opt-in `--cloud-live-tests` takes a private configuration file for two temporary confirmed Auth users; it is excluded from normal CI and must never use personal vaults.

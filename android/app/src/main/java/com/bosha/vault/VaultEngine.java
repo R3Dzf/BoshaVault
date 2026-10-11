@@ -53,7 +53,7 @@ public final class VaultEngine implements AutoCloseable {
         Cipher c=Cipher.getInstance("AES/GCM/NoPadding");c.init(Cipher.DECRYPT_MODE,new SecretKeySpec(k,"AES"),new GCMParameterSpec(128,nonce));c.updateAAD(aad.getBytes(StandardCharsets.UTF_8));
         try{return c.doFinal(combined);}catch(AEADBadTagException e){throw new Exception("Incorrect passphrase or damaged / modified vault.");}
     }
-    private static JSONObject parse(byte[] bytes)throws Exception{
+    static JSONObject parse(byte[] bytes)throws Exception{
         if(bytes.length<100||bytes.length>MAX_BYTES)throw new Exception("Invalid vault file size.");
         JSONObject e=StrictJson.object(utf8(bytes));StrictJson.keys(e,"format","version","vaultId","keyEpoch","kdf","wrap","payload");
         if(!e.getString("format").equals("BoshaVault")||StrictJson.number(e,"version")!=1||!id(e.getString("vaultId")))throw new Exception("Unsupported vault format.");
@@ -120,6 +120,16 @@ public final class VaultEngine implements AutoCloseable {
         JSONObject remote=openBody(remoteEnv,key),candidate=new JSONObject(data.toString());int conflicts=mergeData(candidate,remote,device);commit(candidate);return conflicts;
     }
     public synchronized boolean needsPassphrase(byte[] bytes)throws Exception{ensure();return parse(bytes).getLong("keyEpoch")!=envelope.getLong("keyEpoch");}
+    public synchronized int mergeCloud(List<byte[]> snapshots)throws Exception{
+        ensure();if(snapshots.size()>64)throw new Exception("Too many cloud devices.");if(snapshots.isEmpty())return 0;
+        JSONObject candidate=new JSONObject(data.toString());int conflicts=0;
+        for(byte[] bytes:snapshots){JSONObject remoteEnv=parse(bytes);
+            if(!remoteEnv.getString("vaultId").equals(envelope.getString("vaultId")))throw new Exception("Cloud backup belongs to a different vault.");
+            if(remoteEnv.getLong("keyEpoch")!=envelope.getLong("keyEpoch"))throw new Exception("A device changed the master passphrase. Merge all devices over Wi-Fi or encrypted backups first. Then disconnect cloud on both, start a new cloud vault on one, and rejoin with its new code. No cloud changes were applied.");
+            conflicts+=mergeData(candidate,openBody(remoteEnv,key),device);
+        }
+        commit(candidate);return conflicts;
+    }
     public synchronized int mergeUsingPassword(byte[] bytes,String incomingPassword)throws Exception{
         ensure();JSONObject remoteEnv=parse(bytes);if(!remoteEnv.getString("vaultId").equals(envelope.getString("vaultId")))throw new Exception("Different vault identity.");byte[] kek=derive(incomingPassword,remoteEnv.getJSONObject("kdf")),remoteKey=null;
         try{remoteKey=decrypt(kek,remoteEnv.getJSONObject("wrap"),wrapAad(remoteEnv));JSONObject remote=openBody(remoteEnv,remoteKey),candidate=new JSONObject(data.toString());if(remoteEnv.getLong("keyEpoch")==envelope.getLong("keyEpoch")&&!MessageDigest.isEqual(key,remoteKey))throw new Exception("Both devices rotated independently. Recover their backups separately.");int conflicts=mergeData(candidate,remote,device);

@@ -104,6 +104,32 @@ public sealed class VaultSession : IDisposable
     }
 
     public bool NeedsPassphrase(byte[] bytes) { EnsureOpen(); return VaultCodec.Parse(bytes).KeyEpoch != envelope.KeyEpoch; }
+
+    /// <summary>Authenticate every cloud input before one atomic local commit.</summary>
+    public int MergeCloudSnapshots(IReadOnlyCollection<byte[]> snapshots)
+    {
+        EnsureOpen();
+        if (snapshots.Count > 64) throw new VaultException("Too many cloud devices.");
+        if (snapshots.Count == 0) return 0;
+        var candidate = CloneData();
+        int conflicts = 0;
+        try
+        {
+            foreach (byte[] bytes in snapshots)
+            {
+                var remoteEnv = VaultCodec.Parse(bytes);
+                if (remoteEnv.VaultId != envelope.VaultId) throw new VaultException("Cloud backup belongs to a different vault.");
+                if (remoteEnv.KeyEpoch != envelope.KeyEpoch)
+                    throw new VaultException("A device changed the master passphrase. Merge all devices over Wi-Fi or encrypted backups first. Then disconnect cloud on both devices, start a new cloud vault on one, and rejoin with its new code. No cloud changes were applied.");
+                var remote = VaultCodec.OpenBody(remoteEnv, key!);
+                try { conflicts += MergeEngine.Merge(candidate, remote, DeviceId); }
+                finally { ClearData(remote); }
+            }
+            if (snapshots.Count > 0) Commit(candidate);
+            return conflicts;
+        }
+        catch { ClearData(candidate); throw; }
+    }
     public async Task<int> MergeUsingPassword(byte[] bytes, string incomingPassword)
     {
         EnsureOpen();

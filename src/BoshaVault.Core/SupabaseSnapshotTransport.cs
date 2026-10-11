@@ -9,7 +9,7 @@ namespace BoshaVault.Core;
 /// <summary>
 /// Optional transport for already E2EE-encrypted snapshots. Never accepts
 /// plaintext vault records or recovery keys. Authentication is supplied by
-/// a separate Supabase Auth session that has not yet been wired into the UI.
+/// a separate Supabase Auth session supplied by the opt-in cloud dialog.
 /// </summary>
 public sealed class SupabaseSnapshotTransport(HttpClient http, Uri projectUrl,
     string publishableKey, Func<CancellationToken,Task<string>> userAccessToken)
@@ -83,7 +83,7 @@ public sealed class SupabaseSnapshotTransport(HttpClient http, Uri projectUrl,
         using var req=await MakeRequest(HttpMethod.Get,uri,ct);
         using var res=await http.SendAsync(req,HttpCompletionOption.ResponseHeadersRead,ct);
         if(!res.IsSuccessStatusCode)throw new VaultException("Encrypted cloud download rejected by Supabase.");
-        byte[] content=await res.Content.ReadAsByteArrayAsync(ct);
+        byte[] content=await SupabaseCloudAccount.ReadBounded(res.Content,16_000_000,ct);
         try
         {
             if(content.Length>16_000_000)throw new VaultException("Too many cloud snapshots; refusing unbounded response.");
@@ -108,7 +108,7 @@ public sealed class SupabaseSnapshotTransport(HttpClient http, Uri projectUrl,
             }
             return results;
         }
-        catch (Exception ex) when (ex is JsonException or FormatException or KeyNotFoundException)
+        catch (Exception ex) when (ex is JsonException or FormatException or KeyNotFoundException or InvalidOperationException)
         {
             throw new VaultException("Invalid cloud transport response.",ex);
         }

@@ -316,6 +316,14 @@ public partial class MainWindow : Window
         d.Body.Children.Add(new Expander { Header = "Or paste the pairing code manually", Content = pairing, Margin = new(0, 14, 0, 20) });
         d.Label("If Windows asks for firewall access, allow this app on your private network. Guest Wi-Fi may block connections. Error types are saved to %LOCALAPPDATA%\\BoshaVault\\transfer.log without secret data.");
         d.Label("Encrypted backup files"); d.Action("Export encrypted backup", Export); d.Action("Merge an encrypted backup", ImportMerge);
+        d.Action("Optional encrypted cloud sync", () =>
+        {
+            if (session == null) return;
+            transfer?.Dispose(); transfer = null; ClearPairing();
+            var opened = session; int stamp = generation;
+            CloudSyncDialog.Show(this, root, opened, () => session == opened && generation == stamp,
+                () => { Refresh(); Touch(); }, Copy);
+        });
         try { d.ShowDialog(); } finally { ClearPairing(); transfer?.Dispose(); transfer = null; }
     }
     private void Export()
