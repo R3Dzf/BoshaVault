@@ -36,6 +36,7 @@ public partial class MainWindow : Window
     private readonly string preferencesPath;
     private bool exiting, resourcesReleased;
     private WindowState previousWindowState = WindowState.Normal;
+    private UpdateDialog? updates;
 
     public MainWindow()
     {
@@ -250,6 +251,7 @@ public partial class MainWindow : Window
     {
         if (session == null) return;
         var d = new FormDialog(this, "Your vault settings");
+        d.Action("Check for updates", () => { d.Close(); UpdatesClick(sender, e); }, inBody: true);
         var startup = new CheckBox { Content = "Start with Windows · locked in the tray", IsChecked = StartupEnabled() }; d.Body.Children.Add(startup);
         startup.Click += (_, _) => { SetStartup(startup.IsChecked == true); startup.IsChecked = StartupEnabled(); };
         d.Label("Closing the main window locks the vault and keeps Lockvyn in the tray. Click the tray icon or use Ctrl + Alt + P to reopen. Right-click the icon for Exit.");
@@ -489,6 +491,13 @@ public partial class MainWindow : Window
         { BringToFront(); MessageBox.Show(this, "Cannot update your Windows startup setting. Check your user-account permissions.", "Lockvyn"); }
     }
     private void ExitApplication() { PrepareToExit(); Application.Current.Shutdown(); }
+    private void UpdatesClick(object sender, RoutedEventArgs e)
+    {
+        if (updates != null) { updates.Activate(); return; }
+        updates = new UpdateDialog(this);
+        updates.Closed += (_, _) => updates = null;
+        updates.Show();
+    }
     internal void PrepareToExit() { if (exiting) return; exiting = true; LockVault(); }
     internal void ReleaseDesktopResources()
     {

@@ -1,0 +1,80 @@
+[
+  {
+    "route": "confirm-sign-up",
+    "file": "confirmation.html",
+    "subject": "تأكيد بريدك في Lockvyn",
+    "notification_enabled": null
+  },
+  {
+    "route": "reset-password",
+    "file": "recovery.html",
+    "subject": "استعادة باسورد حسابك السحابي في Lockvyn",
+    "notification_enabled": null
+  },
+  {
+    "route": "change-email-address",
+    "file": "email-change.html",
+    "subject": "تأكيد تغيير بريد حساب Lockvyn",
+    "notification_enabled": null
+  },
+  {
+    "route": "reauthentication",
+    "file": "reauthentication.html",
+    "subject": "تأكيد إجراء حساس في Lockvyn",
+    "notification_enabled": null
+  },
+  {
+    "route": "magic-link-or-otp",
+    "file": "magic-link.html",
+    "subject": "رمز الدخول إلى حساب Lockvyn",
+    "notification_enabled": null
+  },
+  {
+    "route": "invite-user",
+    "file": "invite.html",
+    "subject": "دعوة لإنشاء حساب Lockvyn",
+    "notification_enabled": null
+  },
+  {
+    "route": "password-changed",
+    "file": "password-changed.html",
+    "subject": "تنبيه Lockvyn: تغيّر باسورد حساب السحابة",
+    "notification_enabled": true
+  },
+  {
+    "route": "email-address-changed",
+    "file": "email-changed.html",
+    "subject": "تنبيه Lockvyn: تغيّر بريد حسابك",
+    "notification_enabled": true
+  },
+  {
+    "route": "mfa-method-added",
+    "file": "mfa-added.html",
+    "subject": "تنبيه Lockvyn: أُضيفت وسيلة 2FA",
+    "notification_enabled": true
+  },
+  {
+    "route": "mfa-method-removed",
+    "file": "mfa-removed.html",
+    "subject": "تنبيه Lockvyn: أُزيلت وسيلة 2FA",
+    "notification_enabled": true
+  },
+  {
+    "route": "sign-in-method-linked",
+    "file": "identity-linked.html",
+    "subject": "تنبيه Lockvyn: رُبطت طريقة دخول",
+    "notification_enabled": false
+  },
+  {
+    "route": "sign-in-method-removed",
+    "file": "identity-unlinked.html",
+    "subject": "تنبيه Lockvyn: أُزيلت طريقة دخول",
+    "notification_enabled": false
+  },
+  {
+    "route": "phone-number-changed",
+    "file": "phone-changed.html",
+    "subject": "تنبيه Lockvyn: تغيّر رقم الحساب",
+    "notification_enabled": false
+  }
+]

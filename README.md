@@ -1,4 +1,4 @@
-# Lockvyn — Windows 1.10 / Android 1.6
+# Lockvyn — Windows 1.11 / Android 1.6
 
 ![Lockvyn shield and keyhole](design/lockvyn-mark.svg)
 
@@ -6,7 +6,7 @@ A native password manager for Windows x64 and Android 9+. Keep an encrypted vaul
 
 Lockvyn is the new product name for BoshaVault. Existing encrypted `.boshavault` files, pairing codes and cloud spaces remain compatible. Windows continues using the existing data directory. Source project names and authenticated encryption identifiers retain their original names to preserve compatibility.
 
-**This update:** Android cloud fields accept the keyboard; **Options** stays accessible with large vaults; preset/custom encrypted folders filter independently from All/Favorites/Review/Trash; Trash supports confirmed permanent deletion; Review supports explicit acknowledgement; the password generator has configurable saved rules (initial length **24**, range **8–128**). The shield/keyhole icon appears on Windows, Android and the browser extension. Product versions and download names have no prerelease suffix. See [the vault guide](docs/VAULT-UX.md).
+**This update:** Android cloud fields accept the keyboard; **Options** stays accessible with large vaults; preset/custom encrypted folders filter independently from All/Favorites/Review/Trash; Trash supports confirmed permanent deletion; Review supports explicit acknowledgement; the password generator has configurable saved rules (initial length **24**, range **8–128**). The shield/keyhole icon appears on Windows, Android and the browser extension. Product versions and download names have no prerelease suffix. Windows now supports a bundled installer and manual updates through GitHub Releases. Account emails use [13 distinct Arabic templates](supabase/templates/README.md). See [the vault guide](docs/VAULT-UX.md).
 
 ## Download and install
 
@@ -14,12 +14,15 @@ Open the successful **Build Lockvyn (Windows and Android)** run in [GitHub Actio
 
 | Artifact | Use |
 |---|---|
+| `Lockvyn-Windows-Setup-x64` | Extract the artifact, exit the previous app through its tray menu and run `Lockvyn-Setup.exe`. The installer includes .NET and the updater. |
 | `Lockvyn-Windows-x64` | Extract the artifact ZIP, then the included `Lockvyn-Windows-x64.zip` into a permanent folder. Start `Lockvyn.exe` without administrator privileges. .NET is bundled. |
 | `Lockvyn-Android` | Extract and install `Lockvyn-Android.apk`. Package `com.lockvyn.app` installs alongside older BoshaVault apps with separate storage. Import an encrypted backup or receive the existing Windows vault. |
 | `Lockvyn-Android-LegacyPackage` | Advanced compatibility build using `com.bosha.vault`. An update requires the original signing certificate; ordinary CI uses a temporary certificate. |
 | `Lockvyn-Android-UI-Logs` | Native emulator acceptance evidence, not an application download. |
 
 Before updating, export an encrypted backup and verify that you know its master passphrase. **Keep the old Android app installed** while importing and checking Lockvyn. Update both devices before exchanging schema 2: these versions open old schema 1 vaults, but old versions cannot read schema 2. CI Android signing is temporary unless permanent release secrets are configured; it does not provide seamless upgrades across CI runs. See [build and signing instructions](docs/GITHUB-BUILD.md).
+
+Windows installer copies support **Check for updates**, explicit downloads and **Restart and update**, with smaller deltas when available. See [Windows updates and GitHub releases](docs/WINDOWS-UPDATES.md).
 
 For Windows, exit the old app completely through its tray menu before replacing program files. Keep the entire extracted bundle together, including `Lockvyn.NativeHost.exe`, `browser-extension/` and `Install-BrowserAutofill.ps1`. Windows keeps your vault under `%LOCALAPPDATA%\BoshaVault`. Closing × locks the vault and hides it in the shield tray icon. Click the icon, use **Ctrl + Alt + P**, or relaunch to reopen it; **Exit Lockvyn** fully exits. **Start with Windows** is optional and starts locked in the tray. If it was enabled for BoshaVault, enable it again from Lockvyn to update the executable path.
 
@@ -45,7 +48,7 @@ Cloud signup happens **inside Lockvyn**. Friends need their own app account, not
 
 Choose a unique master passphrase of at least 16 characters. A forgotten vault passphrase cannot be reset by email; biometric access is not a backup. No independent security audit is claimed. Windows binaries have no publisher Authenticode signature. Real phone/PC Wi-Fi, camera, biometric, browser and two-device cloud acceptance still require device testing. See [security boundaries](docs/SECURITY.md), [validation](docs/VALIDATION.md) and [roadmap](docs/ROADMAP-SECURITY.md).
 
-Passkeys, saved TOTP, Windows Hello, automatic signed updates, continuous sync and cloud-only recovery are not enabled in the UI.
+Passkeys, saved TOTP, Windows Hello, automatic unattended updates, continuous sync and cloud-only recovery are not enabled in the UI.
 
 ## Share the same vault
 

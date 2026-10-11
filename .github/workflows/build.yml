@@ -31,6 +31,12 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+          cache: false
+      - name: Validate every Arabic email with Go template rendering
+        run: go run tools/validate-email-templates.go
       - name: Fetch pinned JVM test dependencies
         shell: bash
         run: |
@@ -62,7 +68,7 @@ jobs:
   windows:
     name: Windows x64 / .NET 10
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - name: Validate local signing setup script syntax
@@ -70,15 +76,16 @@ jobs:
         run: |
           $tokens = $null
           $parseErrors = $null
-          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'tools/Configure-AndroidSigning.ps1'), [ref]$tokens, [ref]$parseErrors) | Out-Null
-          if ($parseErrors.Count -gt 0) {
-            $parseErrors | ForEach-Object { Write-Error $_ }
-            exit 1
+          foreach ($file in 'tools/Configure-AndroidSigning.ps1','tools/Prepare-WindowsPackage.ps1','tools/Package-Windows.ps1','tools/Test-WindowsUpdates.ps1') {
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file), [ref]$tokens, [ref]$parseErrors) | Out-Null
+            if ($parseErrors.Count) { throw "Script syntax invalid: $file - $parseErrors" }
           }
       - name: Install .NET 10
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+      - name: Restore pinned Windows update dependencies
+        run: dotnet restore src/BoshaVault.Windows --locked-mode
       - name: Core, storage, and crypto tests
         run: dotnet run --project src/BoshaVault.Tests -c Release
       - name: Folder, review, deletion, migration and generator tests
@@ -159,6 +166,31 @@ jobs:
           $chromeReg=(Get-Item 'HKCU:/Software/Google/Chrome/NativeMessagingHosts/com.boshavault.desktop').GetValue('')
           $edgeReg=(Get-Item 'HKCU:/Software/Microsoft/Edge/NativeMessagingHosts/com.boshavault.desktop').GetValue('')
           if ($chromeReg -ne $hostManifest -or $edgeReg -ne $hostManifest) { throw 'Native host registry registration mismatch' }
+      - name: Prepare Windows update package
+        shell: pwsh
+        run: ./tools/Prepare-WindowsPackage.ps1
+      - name: Build Windows installer and feed
+        shell: pwsh
+        run: ./tools/Package-Windows.ps1 -SkipPrevious
+      - name: Accept delta download, corruption fallback and real installed update
+        shell: pwsh
+        run: ./tools/Test-WindowsUpdates.ps1
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: Lockvyn-Windows-Setup-x64
+          path: |
+            dist/velopack/*Setup.exe
+            dist/velopack/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload Windows release packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: Lockvyn-Windows-update-feed
+          path: dist/velopack/*
+          if-no-files-found: error
+          retention-days: 14
       - name: Archive Windows build
         shell: pwsh
         run: Compress-Archive -Path 'dist/windows/*' -DestinationPath 'dist/Lockvyn-Windows-x64.zip' -Force

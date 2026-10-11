@@ -27,4 +27,11 @@ internal static class WindowsStartup
         if (enabled) key.SetValue(ValueName, Command, RegistryValueKind.String);
         else key.DeleteValue(ValueName, false);
     }
+    internal static void RepairExisting()
+    {
+        using var key = Registry.CurrentUser.OpenSubKey(RunKey, true);
+        if (key?.GetValue(ValueName) is string value && System.Text.RegularExpressions.Regex.IsMatch(value,
+            "^\"[^\"\\r\\n]+\\\\(?:BoshaVault|Lockvyn)\\.exe\" --background$", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+            key.SetValue(ValueName, Command, RegistryValueKind.String);
+    }
 }
