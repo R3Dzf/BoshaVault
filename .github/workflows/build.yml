@@ -351,8 +351,8 @@ jobs:
           adb shell ime list -s
           adb shell settings get secure default_input_method
           adb shell input keyevent 82
-          adb install dist/Lockvyn-Android.apk
-          adb install dist/android/Lockvyn-UI-Test.apk
+          adb install --no-incremental dist/Lockvyn-Android.apk
+          adb install --no-incremental dist/android/Lockvyn-UI-Test.apk
           adb logcat -c
           UI_INSTRUMENT_EXIT=0
           adb shell am instrument -w com.bosha.vault.uismoke/com.bosha.vault.tests.UiSmoke | tee build-deps/native-ui.log || UI_INSTRUMENT_EXIT=$?
@@ -364,9 +364,9 @@ jobs:
           adb shell am instrument -w -e mode seed com.bosha.vault.uismoke/com.bosha.vault.tests.UpdateSmoke | tee build-deps/android-update-seed.log
           python -c "from pathlib import Path; text=Path('build-deps/android-update-seed.log').read_text(); assert 'UPDATE_SMOKE_PASS:' in text, text"
           # A different certificate must fail without uninstalling or clearing data.
-          if adb install -r dist/android/updates/wrong-signer.apk > build-deps/wrong-signer-install.log 2>&1; then echo 'Wrong signing certificate was accepted'; exit 1; fi
+          if adb install --no-incremental -r dist/android/updates/wrong-signer.apk > build-deps/wrong-signer-install.log 2>&1; then echo 'Wrong signing certificate was accepted'; exit 1; fi
           grep -q 'INSTALL_FAILED_UPDATE_INCOMPATIBLE' build-deps/wrong-signer-install.log
-          adb install -r dist/android/updates/update.apk
+          adb install --no-incremental -r dist/android/updates/update.apk
           adb shell am instrument -w -e mode verify com.bosha.vault.uismoke/com.bosha.vault.tests.UpdateSmoke | tee build-deps/android-update-verify.log
           python -c "from pathlib import Path; text=Path('build-deps/android-update-verify.log').read_text(); assert 'UPDATE_SMOKE_PASS:' in text, text"
       - name: Upload native UI test logs

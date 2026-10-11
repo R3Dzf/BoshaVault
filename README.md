@@ -1,4 +1,4 @@
-# Lockvyn — Windows 1.11 / Android 1.6
+# Lockvyn — Windows 1.11 / Android 1.7
 
 ![Lockvyn shield and keyhole](design/lockvyn-mark.svg)
 
@@ -6,7 +6,7 @@ A native password manager for Windows x64 and Android 9+. Keep an encrypted vaul
 
 Lockvyn is the new product name for BoshaVault. Existing encrypted `.boshavault` files, pairing codes and cloud spaces remain compatible. Windows continues using the existing data directory. Source project names and authenticated encryption identifiers retain their original names to preserve compatibility.
 
-**This update:** Android cloud fields accept the keyboard; **Options** stays accessible with large vaults; preset/custom encrypted folders filter independently from All/Favorites/Review/Trash; Trash supports confirmed permanent deletion; Review supports explicit acknowledgement; the password generator has configurable saved rules (initial length **24**, range **8–128**). The shield/keyhole icon appears on Windows, Android and the browser extension. Product versions and download names have no prerelease suffix. Windows now supports a bundled installer and manual updates through GitHub Releases. Account emails use [13 distinct Arabic templates](supabase/templates/README.md). See [the vault guide](docs/VAULT-UX.md).
+**This update:** Android cloud fields accept the keyboard; **Options** stays accessible with large vaults; preset/custom encrypted folders filter independently from All/Favorites/Review/Trash; Trash supports confirmed permanent deletion; Review supports explicit acknowledgement; the password generator has configurable saved rules (initial length **24**, range **8–128**). The shield/keyhole icon appears on Windows, Android and the browser extension. Product versions and download names have no prerelease suffix. Windows supports a bundled installer and manual Velopack updates through GitHub Releases. Android 1.7 adds explicit APK updates with package/version/certificate checks and a permanent-signing release pipeline. Account emails use [13 distinct Arabic templates](supabase/templates/README.md). See [the vault guide](docs/VAULT-UX.md).
 
 ## Download and install
 
@@ -21,6 +21,8 @@ Open the successful **Build Lockvyn (Windows and Android)** run in [GitHub Actio
 | `Lockvyn-Android-UI-Logs` | Native emulator acceptance evidence, not an application download. |
 
 Before updating, export an encrypted backup and verify that you know its master passphrase. **Keep the old Android app installed** while importing and checking Lockvyn. Update both devices before exchanging schema 2: these versions open old schema 1 vaults, but old versions cannot read schema 2. CI Android signing is temporary unless permanent release secrets are configured; it does not provide seamless upgrades across CI runs. See [build and signing instructions](docs/GITHUB-BUILD.md).
+
+For stable Android releases, see [Android updates and signing continuity](docs/ANDROID-UPDATES.md). CI artifacts remain temporarily signed test builds; the stable Android release workflow requires the permanent project key.
 
 Windows installer copies support **Check for updates**, explicit downloads and **Restart and update**, with smaller deltas when available. See [Windows updates and GitHub releases](docs/WINDOWS-UPDATES.md).
 
@@ -84,7 +86,7 @@ Android requires Java 17+, Python 3, Android platform 35 and build tools 35. Gen
 
 ```powershell
 $env:BOSHAVAULT_KEYSTORE_PASSWORD = 'your signing password'
-python tools/build-android.py --sdk 'C:\Android\Sdk\platforms\android-35' --tools 'C:\Android\Sdk\build-tools\35.0.0' --keystore 'C:\private\release.p12' --alias boshavault
+python tools/build-android.py --sdk 'C:\Android\Sdk\platforms\android-35' --tools 'C:\Android\Sdk\build-tools\35.0.0' --keystore 'C:\private\release.p12' --alias lockvyn-release --lockvyn-package
 ```
 
 The Android source uses native Java controls and platform integrations. Sharing the encrypted file format instead of a MAUI dependency lets both the platform UI and its security APIs stay native. Cross-language tests verify that the two implementations agree. The C# core is not used as a dependency in the Android APK.

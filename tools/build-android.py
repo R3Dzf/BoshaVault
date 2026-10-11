@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build without Gradle. Requires Java 17+, Android platform 35 and Build Tools 35."""
 from pathlib import Path
-import argparse, hashlib, json, os, shutil, subprocess, tempfile, urllib.request, zipfile
+import argparse, hashlib, json, os, re, shutil, subprocess, tempfile, urllib.request, zipfile
 
 ROOT=Path(__file__).resolve().parents[1]
 DEPS=ROOT/'build-deps'
@@ -13,7 +13,8 @@ PINS={
 def run(*args):subprocess.run([str(x) for x in args],check=True)
 def main():
  p=argparse.ArgumentParser();p.add_argument('--sdk',required=True);p.add_argument('--tools',required=True);p.add_argument('--keystore',required=True);p.add_argument('--alias',default='boshavault');p.add_argument('--isolated-test-app','--lockvyn-package',dest='lockvyn_package',action='store_true',help='Build the permanent com.lockvyn.app identity with separate storage from legacy BoshaVault');p.add_argument('--version-code',type=int);p.add_argument('--version-name');a=p.parse_args();sdk=Path(a.sdk);tools=Path(a.tools)
- version=json.loads((ROOT/'android/version.json').read_text());code=a.version_code or version['versionCode'];name=a.version_name or version['versionName']
+ version=json.loads((ROOT/'android/version.json').read_text());code=a.version_code if a.version_code is not None else version['versionCode'];version_name=a.version_name if a.version_name is not None else version['versionName']
+ if not isinstance(code,int) or not 1<=code<=2147483647 or not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+',version_name):raise SystemExit('Invalid Android version.')
  if (a.version_code or a.version_name) and os.environ.get('GITHUB_ACTIONS')!='true':raise SystemExit('Version overrides are for isolated CI acceptance only.')
  if not os.environ.get('BOSHAVAULT_KEYSTORE_PASSWORD'):raise SystemExit('Set BOSHAVAULT_KEYSTORE_PASSWORD to your signing password. Do not check keys into source control.')
  DEPS.mkdir(exist_ok=True)
@@ -31,7 +32,7 @@ def main():
   manifest=work/'AndroidManifest.xml'
   manifest.write_text(xml,encoding='utf-8')
  run(tools/'aapt2','compile','--dir',app/'res','-o',res)
- run(tools/'aapt2','link','-o',compiled,'--manifest',manifest,'-I',android,'--min-sdk-version','28','--target-sdk-version','35','--version-code',str(code),'--version-name',name,res)
+ run(tools/'aapt2','link','-o',compiled,'--manifest',manifest,'-I',android,'--min-sdk-version','28','--target-sdk-version','35','--version-code',str(code),'--version-name',version_name,res)
  classpath=os.pathsep.join(str(DEPS/name) for name in ('bcprov.jar','zxing-core.jar'))
  run('java','-jar',DEPS/'ecj.jar','-1.8','-warn:none','-bootclasspath',str(android)+os.pathsep+str(tools/'core-lambda-stubs.jar'),'-cp',classpath,'-d',classes,*sorted((app/'java').rglob('*.java')))
  jar=work/'app.jar'
@@ -44,5 +45,10 @@ def main():
  aligned=work/'aligned.apk';run(tools/'zipalign','-f','4',compiled,aligned);out=ROOT/('dist/Lockvyn-Android.apk' if a.lockvyn_package else 'dist/Lockvyn-Android-LegacyPackage.apk');out.parent.mkdir(exist_ok=True)
  signer=tools/('apksigner.bat' if os.name=='nt' else 'apksigner')
  run(signer,'sign','--ks',a.keystore,'--ks-key-alias',a.alias,'--ks-pass','env:BOSHAVAULT_KEYSTORE_PASSWORD','--key-pass','env:BOSHAVAULT_KEYSTORE_PASSWORD','--out',out,aligned)
- run(signer,'verify','--verbose',out);shutil.rmtree(work);print(out)
+ run(signer,'verify','--verbose',out)
+ badging=subprocess.check_output([str(tools/'aapt'),'dump','badging',str(out)],text=True).splitlines()[0]
+ expected_package='com.lockvyn.app' if a.lockvyn_package else 'com.bosha.vault'
+ for field,expected in [('name',expected_package),('versionCode',str(code)),('versionName',version_name)]:
+  if not re.search(r"\b"+field+"='"+re.escape(expected)+"'",badging):raise SystemExit('Built APK identity/version verification failed: '+field)
+ shutil.rmtree(work);print(out)
 if __name__=='__main__':main()
