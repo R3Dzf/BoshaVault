@@ -3,6 +3,7 @@ name: Release Lockvyn Windows
 on:
   push:
     tags: ['windows-v*']
+    branches: ['release/windows-v*']
   workflow_dispatch:
     inputs:
       publish:
@@ -43,7 +44,7 @@ jobs:
         shell: pwsh
         run: |
           $version=([xml](Get-Content src/BoshaVault.Windows/BoshaVault.Windows.csproj -Raw)).Project.PropertyGroup.Version
-          if ('${{ github.event_name }}' -eq 'push' -and '${{ github.ref_name }}' -ne "windows-v$version") { throw 'Tag must match Windows Version.' }
+          if ('${{ github.event_name }}' -eq 'push' -and '${{ github.ref_name }}' -notin "windows-v$version","release/windows-v$version") { throw 'Release ref must match Windows Version.' }
           "LOCKVYN_VERSION=$version" | Add-Content $env:GITHUB_ENV
           dotnet restore src/BoshaVault.Windows --locked-mode
           if ($LASTEXITCODE) { throw 'Pinned dependency restore failed.' }
@@ -62,7 +63,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PUBLISH_RELEASE: ${{ github.event_name == 'push' || inputs.publish }}
         run: |
-          $tag=if ('${{ github.event_name }}' -eq 'push') { '${{ github.ref_name }}' } else { "windows-v$env:LOCKVYN_VERSION" }
+          $tag="windows-v$env:LOCKVYN_VERSION"
           $arguments=@('vpk','upload','github','--repoUrl','https://github.com/${{ github.repository }}','--channel','win','--outputDir','dist/velopack','--tag',$tag,'--targetCommitish','${{ github.sha }}','--releaseName',"Lockvyn $env:LOCKVYN_VERSION")
           if ($env:PUBLISH_RELEASE -eq 'true') { $arguments+='--publish' }
           dotnet @arguments

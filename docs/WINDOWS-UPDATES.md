@@ -13,7 +13,7 @@ If setting up browser autofill after installation, load `%LOCALAPPDATA%\Lockvyn\
 ## GitHub release pipeline
 
 1. Increase the three-part Windows `Version`, upload the source and let **Build Lockvyn** finish successfully.
-2. Create `windows-v<Version>` at that exact tested commit. **Release Lockvyn Windows** refuses a different version tag or a source commit without successful acceptance.
+2. Create the branch `release/windows-v<Version>` (or tag `windows-v<Version>`) at that exact tested commit. **Release Lockvyn Windows** refuses a different version ref or a source commit without successful acceptance. A release branch lets the workflow create the final tag together with the release.
 3. The workflow downloads the latest published Windows baseline, packs the release and publishes Setup, full/delta packages, `releases.win.json`, portable ZIP and SHA-256 sums to the same GitHub release. First publication has no delta baseline.
 
 The release workflow also supports manual dispatch once present on the default branch. Its default creates a draft; selecting `publish` publishes it. A public updater cannot see drafts. Windows tags are separate from `v*` Android release tags, so Windows packaging does not require an Android signing key. The short-lived GitHub Actions token is scoped to the release job; no GitHub token is distributed in the app.
