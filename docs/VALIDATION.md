@@ -11,7 +11,11 @@ Applies to Lockvyn Windows 1.9 / Android 1.5 source. The checks below use synthe
 | Cloud account/pairing/atomic merge | 17 checks passed, including confirmation resend and actionable restricted-sender errors |
 | Windows WPF compile | Zero warnings/errors using .NET SDK 10.0.100 on Linux |
 | Lockvyn identity and icon assets | Windows and native host compile; browser generator/origin/fill suites passed; XML/YAML, extension icon paths and all seven ICO sizes verified |
-| Native Android keyboard and 1,000-row navigation | Emulator-only instrumentation is included in GitHub CI; outcome pending the new build |
+| Native Android keyboard and 1,000-row navigation | 12 checks passed on Android 35: recycled list, fixed Options, real visible keyboard, typed email/password, password masking and screenshot protection |
+
+All four jobs passed in [build #171](https://github.com/R3Dzf/BoshaVault/actions/runs/38146133378) at `b14e2a6d25a455c6a23f666cf692081e826afad0`. The emulator used only synthetic entries and submitted no email/cloud request. Windows native DPAPI, TLS/Schannel, browser/native-host checks, both APK signatures and cross-language compatibility passed.
+
+Downloaded ZIP/APK checks confirmed GitHub SHA-256 digests and archive integrity, actual Lockvyn product labels/versions, Android package `com.lockvyn.app`, compiled shield geometry, all seven Windows executable icon images, both x64 executable versions, extension assets and the bundled Arabic guide.
 
 The isolated APK is **Lockvyn** (`com.lockvyn.app`) and has separate storage from production and the earlier Test app. Export an encrypted backup and update both devices before exchanging schema 2; older builds cannot open that schema. See [VAULT-UX.md](VAULT-UX.md) for the new controls and setup.
 
