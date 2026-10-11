@@ -58,6 +58,7 @@ public final class MainActivity extends Activity {
         }));
         if(exists&&Biometrics.available(this))root.addView(Ui.button(this,"Unlock with fingerprint",false,()->Biometrics.unlock(this,(key,error)->{if(error!=null){Ui.error(this,error);return;}task(()->{try{engine.openWithKey(key);}finally{Arrays.fill(key,(byte)0);}},this::showVault);} )));
         root.addView(Ui.button(this,"Import encrypted vault",false,this::chooseImport));
+        root.addView(Ui.button(this,"Check for app updates",false,this::appUpdates));
         if(!exists)root.addView(Ui.button(this,"Receive from your Windows app",false,()->showPairing(false)));
         Ui.gap(root,25);root.addView(Ui.text(this,"Works offline without an account.\nA lost passphrase cannot be reset. Keep an encrypted backup.",11,Ui.MUTED,false));
         if(pendingImport!=null)handler.post(()->importPrompt(pendingImport));
@@ -110,6 +111,10 @@ public final class MainActivity extends Activity {
         b.addView(Ui.button(this,"Folders",false,()->{d.dismiss();folders();}));
         b.addView(Ui.button(this,"Devices & encrypted backup",false,()->{d.dismiss();devices();}));
         b.addView(Ui.button(this,"Settings & Autofill",false,()->{d.dismiss();settings();}));
+    }
+    private void appUpdates(){
+        if(busy){toast("Finish the current vault action before updating.");return;}
+        task(engine::close,()->{for(AlertDialog d:new ArrayList<>(dialogs))clearCloudFields(d.getWindow().getDecorView());lock();startActivity(new Intent(this,UpdateActivity.class));});
     }
     private void folders(){
         try{
@@ -336,7 +341,7 @@ public final class MainActivity extends Activity {
         b.addView(Ui.button(this,"Enable Android Autofill",true,()->{try{startActivity(new Intent(Settings.ACTION_REQUEST_SET_AUTOFILL_SERVICE,Uri.parse("package:"+getPackageName())));}catch(Exception e){startActivity(new Intent(Settings.ACTION_SETTINGS));}}));
         b.addView(Ui.button(this,Biometrics.available(this)?"Disable fingerprint unlock":"Enable fingerprint unlock",false,()->{
             try{if(Biometrics.available(this)){Biometrics.disable(this);toast("Fingerprint unlock disabled.");}else Biometrics.enable(this,engine.biometricKey(),(key,error)->{if(error!=null)Ui.error(this,error);else toast("Fingerprint unlock enabled for this phone.");});}catch(Exception e){Ui.error(this,e);}
-        }));b.addView(Ui.button(this,"Clear Autofill diagnostics",false,()->{AutofillStatus.clear(this);lastRequest.setText(AutofillStatus.diagnostic(this));}));
+        }));b.addView(Ui.button(this,"Check for app updates",false,this::appUpdates));b.addView(Ui.button(this,"Clear Autofill diagnostics",false,()->{AutofillStatus.clear(this);lastRequest.setText(AutofillStatus.diagnostic(this));}));
         b.addView(Ui.button(this,"Revoke all Autofill app approvals",false,()->task(engine::revokeTrust,()->toast("Approvals revoked. Apps must be approved again."))));
         Ui.gap(b,20);EditText current=Ui.field(b,"Current master passphrase","",true,1024),next=Ui.field(b,"New master passphrase (16+ characters)","",true,1024),confirm=Ui.field(b,"Confirm new passphrase","",true,1024);b.addView(Ui.button(this,"Change master passphrase",false,()->{String c=current.getText().toString(),n=next.getText().toString();if(!n.equals(confirm.getText().toString())){toast("Passphrases do not match.");return;}current.setText("");next.setText("");confirm.setText("");task(()->{engine.changePassword(c,n);Biometrics.disable(this);},()->toast("Passphrase changed. Old backups still use their original passphrase."));}));Ui.gap(b,16);b.addView(Ui.text(this,"Screenshots are blocked where Android supports it. Copying a password exposes it to the clipboard. Malware on an unlocked device can still steal data. Optional cloud sync is available in Devices & encrypted backup. Passkeys and online breach lookup are not included.",11,Ui.MUTED,false));dialog("Your vault settings",b);
     }

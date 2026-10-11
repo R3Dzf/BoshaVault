@@ -61,6 +61,7 @@ public final class UiSmoke extends Instrumentation {
             Context target=getTargetContext();if(!target.getPackageName().equals("com.lockvyn.app"))throw new Exception("UI smoke requires the isolated Lockvyn package.");
             AccessibilityServiceInfo service=getUiAutomation().getServiceInfo();service.flags|=AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS;getUiAutomation().setServiceInfo(service);
             activity=startActivitySync(new Intent().setComponent(new ComponentName(target.getPackageName(),"com.bosha.vault.MainActivity")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));waitForIdleSync();
+            main(()->check(find(activity.findViewById(android.R.id.content),Button.class,"Check for app updates")!=null,"updates are available from the locked screen"));
             Object engine=field("engine");Class<?> type=engine.getClass();Method create=type.getDeclaredMethod("create",String.class);create.setAccessible(true);
             main(()->{Field touch=activity.getClass().getDeclaredField("lastTouch");touch.setAccessible(true);touch.setLong(activity,SystemClock.elapsedRealtime());});
             // create() refuses to overwrite an existing vault; this test never deletes one.

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build without Gradle. Requires Java 17+, Android platform 35 and Build Tools 35."""
 from pathlib import Path
-import argparse, hashlib, os, shutil, subprocess, tempfile, urllib.request, zipfile
+import argparse, hashlib, json, os, shutil, subprocess, tempfile, urllib.request, zipfile
 
 ROOT=Path(__file__).resolve().parents[1]
 DEPS=ROOT/'build-deps'
@@ -12,7 +12,9 @@ PINS={
 }
 def run(*args):subprocess.run([str(x) for x in args],check=True)
 def main():
- p=argparse.ArgumentParser();p.add_argument('--sdk',required=True);p.add_argument('--tools',required=True);p.add_argument('--keystore',required=True);p.add_argument('--alias',default='boshavault');p.add_argument('--isolated-test-app',action='store_true',help='Build a separate demo app with isolated local storage');a=p.parse_args();sdk=Path(a.sdk);tools=Path(a.tools)
+ p=argparse.ArgumentParser();p.add_argument('--sdk',required=True);p.add_argument('--tools',required=True);p.add_argument('--keystore',required=True);p.add_argument('--alias',default='boshavault');p.add_argument('--isolated-test-app','--lockvyn-package',dest='lockvyn_package',action='store_true',help='Build the permanent com.lockvyn.app identity with separate storage from legacy BoshaVault');p.add_argument('--version-code',type=int);p.add_argument('--version-name');a=p.parse_args();sdk=Path(a.sdk);tools=Path(a.tools)
+ version=json.loads((ROOT/'android/version.json').read_text());code=a.version_code or version['versionCode'];name=a.version_name or version['versionName']
+ if (a.version_code or a.version_name) and os.environ.get('GITHUB_ACTIONS')!='true':raise SystemExit('Version overrides are for isolated CI acceptance only.')
  if not os.environ.get('BOSHAVAULT_KEYSTORE_PASSWORD'):raise SystemExit('Set BOSHAVAULT_KEYSTORE_PASSWORD to your signing password. Do not check keys into source control.')
  DEPS.mkdir(exist_ok=True)
  for name,(url,pin) in PINS.items():
@@ -22,14 +24,14 @@ def main():
  work=Path(tempfile.mkdtemp(prefix='apk-build-',dir=DEPS))
  classes=work/'classes';classes.mkdir(parents=True);res=work/'res.zip';compiled=work/'unsigned.apk';app=ROOT/'android/app/src/main';android=sdk/'android.jar'
  manifest=app/'AndroidManifest.xml'
- if a.isolated_test_app:
+ if a.lockvyn_package:
   # Android package must differ so the trial APK can never overwrite the user's vault.
   # Java class names stay unchanged, so explicitly qualify manifest component names.
-  xml=manifest.read_text(encoding='utf-8').replace('package="com.bosha.vault"','package="com.lockvyn.app"').replace('android:name=".','android:name="com.bosha.vault.')
+  xml=manifest.read_text(encoding='utf-8').replace('package="com.bosha.vault"','package="com.lockvyn.app"').replace('com.bosha.vault.updates','com.lockvyn.app.updates').replace('android:name=".','android:name="com.bosha.vault.')
   manifest=work/'AndroidManifest.xml'
   manifest.write_text(xml,encoding='utf-8')
  run(tools/'aapt2','compile','--dir',app/'res','-o',res)
- run(tools/'aapt2','link','-o',compiled,'--manifest',manifest,'-I',android,'--min-sdk-version','28','--target-sdk-version','35','--version-code','11','--version-name','1.6.0',res)
+ run(tools/'aapt2','link','-o',compiled,'--manifest',manifest,'-I',android,'--min-sdk-version','28','--target-sdk-version','35','--version-code',str(code),'--version-name',name,res)
  classpath=os.pathsep.join(str(DEPS/name) for name in ('bcprov.jar','zxing-core.jar'))
  run('java','-jar',DEPS/'ecj.jar','-1.8','-warn:none','-bootclasspath',str(android)+os.pathsep+str(tools/'core-lambda-stubs.jar'),'-cp',classpath,'-d',classes,*sorted((app/'java').rglob('*.java')))
  jar=work/'app.jar'
@@ -39,7 +41,7 @@ def main():
  run(d8,'--release','--min-api','28','--lib',android,'--output',dex,jar,DEPS/'bcprov.jar',DEPS/'zxing-core.jar')
  with zipfile.ZipFile(compiled,'a')as z:
   for f in dex.glob('*.dex'):z.write(f,f.name)
- aligned=work/'aligned.apk';run(tools/'zipalign','-f','4',compiled,aligned);out=ROOT/('dist/Lockvyn-Android.apk' if a.isolated_test_app else 'dist/Lockvyn-Android-LegacyPackage.apk');out.parent.mkdir(exist_ok=True)
+ aligned=work/'aligned.apk';run(tools/'zipalign','-f','4',compiled,aligned);out=ROOT/('dist/Lockvyn-Android.apk' if a.lockvyn_package else 'dist/Lockvyn-Android-LegacyPackage.apk');out.parent.mkdir(exist_ok=True)
  signer=tools/('apksigner.bat' if os.name=='nt' else 'apksigner')
  run(signer,'sign','--ks',a.keystore,'--ks-key-alias',a.alias,'--ks-pass','env:BOSHAVAULT_KEYSTORE_PASSWORD','--key-pass','env:BOSHAVAULT_KEYSTORE_PASSWORD','--out',out,aligned)
  run(signer,'verify','--verbose',out);shutil.rmtree(work);print(out)

@@ -58,7 +58,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          javac -cp build-deps/bcprov.jar:build-deps/json.jar -d build-deps/java-cloud android/app/src/main/java/com/bosha/vault/VaultEngine.java android/app/src/main/java/com/bosha/vault/StrictJson.java android/app/src/main/java/com/bosha/vault/CloudAuth.java android/app/src/main/java/com/bosha/vault/CloudSnapshot.java android/app/src/main/java/com/bosha/vault/FolderCatalog.java android/app/src/main/java/com/bosha/vault/PasswordHealth.java android/app/src/main/java/com/bosha/vault/PasswordOptions.java tools/CloudAuthTest.java tools/CloudInteropTest.java tools/VaultUxInteropTest.java
+          javac -cp build-deps/bcprov.jar:build-deps/json.jar -d build-deps/java-cloud android/app/src/main/java/com/bosha/vault/VaultEngine.java android/app/src/main/java/com/bosha/vault/StrictJson.java android/app/src/main/java/com/bosha/vault/CloudAuth.java android/app/src/main/java/com/bosha/vault/CloudSnapshot.java android/app/src/main/java/com/bosha/vault/FolderCatalog.java android/app/src/main/java/com/bosha/vault/PasswordHealth.java android/app/src/main/java/com/bosha/vault/PasswordOptions.java android/app/src/main/java/com/bosha/vault/AndroidUpdateFeed.java tools/CloudAuthTest.java tools/CloudInteropTest.java tools/VaultUxInteropTest.java tools/AndroidUpdateFeedTest.java
+          java -cp build-deps/java-cloud:build-deps/json.jar com.bosha.vault.AndroidUpdateFeedTest
           java -cp build-deps/java-cloud:build-deps/bcprov.jar:build-deps/json.jar com.bosha.vault.CloudAuthTest
           java -cp build-deps/java-cloud:build-deps/bcprov.jar:build-deps/json.jar com.bosha.vault.CloudInteropTest build-deps/cloud-fixtures
           dotnet run --project src/BoshaVault.Tests -c Release -- --verify-java-cloud build-deps/cloud-fixtures
@@ -308,8 +309,16 @@ jobs:
           set -euo pipefail
           mkdir -p build-deps
           keytool -genkeypair -keystore build-deps/ui-demo.p12 -storepass "$BOSHAVAULT_KEYSTORE_PASSWORD" -keypass "$BOSHAVAULT_KEYSTORE_PASSWORD" -alias boshavault -keyalg RSA -keysize 2048 -validity 7 -dname 'CN=Lockvyn Disposable UI Test'
-          python tools/build-android.py --sdk "$ANDROID_HOME/platforms/android-35" --tools "$ANDROID_HOME/build-tools/35.0.0" --keystore build-deps/ui-demo.p12 --isolated-test-app
-          python tools/build-android-ui-test.py --sdk "$ANDROID_HOME/platforms/android-35" --tools "$ANDROID_HOME/build-tools/35.0.0" --keystore build-deps/ui-demo.p12
+          mkdir -p dist/android/updates
+          python tools/build-android.py --sdk "$ANDROID_HOME/platforms/android-35" --tools "$ANDROID_HOME/build-tools/35.0.0" --keystore build-deps/ui-demo.p12 --lockvyn-package --version-code 9000 --version-name 9.0.0
+          cp dist/Lockvyn-Android.apk dist/android/updates/baseline.apk
+          python tools/build-android.py --sdk "$ANDROID_HOME/platforms/android-35" --tools "$ANDROID_HOME/build-tools/35.0.0" --keystore build-deps/ui-demo.p12 --lockvyn-package --version-code 9001 --version-name 9.0.1
+          cp dist/Lockvyn-Android.apk dist/android/updates/update.apk
+          keytool -genkeypair -keystore build-deps/ui-wrong.p12 -storepass "$BOSHAVAULT_KEYSTORE_PASSWORD" -keypass "$BOSHAVAULT_KEYSTORE_PASSWORD" -alias boshavault -keyalg RSA -keysize 2048 -validity 7 -dname 'CN=Wrong disposable signing identity'
+          python tools/build-android.py --sdk "$ANDROID_HOME/platforms/android-35" --tools "$ANDROID_HOME/build-tools/35.0.0" --keystore build-deps/ui-wrong.p12 --lockvyn-package --version-code 9002 --version-name 9.0.2
+          cp dist/Lockvyn-Android.apk dist/android/updates/wrong-signer.apk
+          cp dist/android/updates/baseline.apk dist/Lockvyn-Android.apk
+          python tools/build-android-ui-test.py --sdk "$ANDROID_HOME/platforms/android-35" --tools "$ANDROID_HOME/build-tools/35.0.0" --keystore build-deps/ui-demo.p12 --update-apk dist/android/updates/update.apk --wrong-signer-apk dist/android/updates/wrong-signer.apk
       - name: Run native keyboard, email-code, MFA and scrolling acceptance tests
         shell: bash
         run: |
@@ -351,6 +360,15 @@ jobs:
           cat build-deps/native-crash.log
           test "$UI_INSTRUMENT_EXIT" = 0
           python -c "from pathlib import Path; text=Path('build-deps/native-ui.log').read_text(); assert 'UI_SMOKE_PASS:' in text, text"
+          adb shell appops set com.lockvyn.app REQUEST_INSTALL_PACKAGES deny
+          adb shell am instrument -w -e mode seed com.bosha.vault.uismoke/com.bosha.vault.tests.UpdateSmoke | tee build-deps/android-update-seed.log
+          python -c "from pathlib import Path; text=Path('build-deps/android-update-seed.log').read_text(); assert 'UPDATE_SMOKE_PASS:' in text, text"
+          # A different certificate must fail without uninstalling or clearing data.
+          if adb install -r dist/android/updates/wrong-signer.apk > build-deps/wrong-signer-install.log 2>&1; then echo 'Wrong signing certificate was accepted'; exit 1; fi
+          grep -q 'INSTALL_FAILED_UPDATE_INCOMPATIBLE' build-deps/wrong-signer-install.log
+          adb install -r dist/android/updates/update.apk
+          adb shell am instrument -w -e mode verify com.bosha.vault.uismoke/com.bosha.vault.tests.UpdateSmoke | tee build-deps/android-update-verify.log
+          python -c "from pathlib import Path; text=Path('build-deps/android-update-verify.log').read_text(); assert 'UPDATE_SMOKE_PASS:' in text, text"
       - name: Upload native UI test logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -360,5 +378,8 @@ jobs:
             build-deps/native-ui.log
             build-deps/native-crash.log
             build-deps/emulator.log
+            build-deps/android-update-seed.log
+            build-deps/android-update-verify.log
+            build-deps/wrong-signer-install.log
           if-no-files-found: ignore
           retention-days: 14
