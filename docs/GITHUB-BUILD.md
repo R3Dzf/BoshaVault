@@ -4,6 +4,8 @@ The existing [R3Dzf/BoshaVault repository](https://github.com/R3Dzf/BoshaVault) 
 
 ## Build and download
 
+For normal installations and in-place updates, use the stable **Releases** described in [Windows updates](WINDOWS-UPDATES.md) and [Android updates](ANDROID-UPDATES.md). Pull-request artifacts below use temporary Android signing and are acceptance copies, so they cannot replace a permanent-signed installation.
+
 Open **Actions → Build Lockvyn (Windows and Android)**. Pushes to main, pull requests targeting main and manual workflow runs trigger the build. The Windows, Android, cloud interoperability and Android native UI jobs must pass. Artifacts expire after 14 days.
 
 | Artifact | Contents and installation |
@@ -11,7 +13,7 @@ Open **Actions → Build Lockvyn (Windows and Android)**. Pushes to main, pull r
 | `Lockvyn-Windows-x64` | `Lockvyn-Windows-x64.zip`; extract its complete contents, then run `Lockvyn.exe`. Includes `Lockvyn.NativeHost.exe`, browser extension, registration script and Arabic `START-HERE.html`. |
 | `Lockvyn-Android` | `Lockvyn-Android.apk` and signing notice. New package `com.lockvyn.app`, label **Lockvyn**, version **1.8.0**, code **13**. Installs beside production and earlier Test/Preview packages. |
 | `Lockvyn-Android-LegacyPackage` | Compatibility APK using the original `com.bosha.vault` package and signing notice. Only the matching original certificate permits an in-place update. |
-| `Lockvyn-Android-UI-Logs` | Emulator and instrumentation logs for native keyboard/list acceptance. |
+| `Lockvyn-Android-UI-Logs` | Emulator and instrumentation logs for native Wi-Fi/.NET TLS transfer, keyboard/list and in-place upgrade acceptance. |
 
 Windows is self-contained x64 with .NET 10, version **1.12.0**. It has no publisher Authenticode signature. The Android application supports Android 9+, targets SDK 35 and uses pinned build dependencies. Product labels and version strings have no Preview suffix.
 
