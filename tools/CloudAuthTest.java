@@ -38,6 +38,7 @@ public final class CloudAuthTest {
         int before=f.calls;reject(()->auth.verify(session,f.factor,"١٢٣٤٥٦"),"Java non-ASCII OTP refused");check(f.calls==before,"Java invalid OTP makes no request");
         CloudAuth.Session upgraded=auth.verify(session,f.factor,"123456");
         check(upgraded.hasSecondFactor()&&!upgraded.refresh.equals(session.refresh),"Java MFA rotates tokens and upgrades assurance");
+        check(upgraded.usableForSeconds(45),"AAL2 synthetic session is eligible for short-lived in-memory reuse");
         check(new JSONObject(f.lastBody).getString("challenge_id").equals(f.challenge),"Java verification binds server challenge");
         check(!auth.factors(upgraded).requiresChallenge(upgraded),"Java AAL2 session accepted without repeated challenge");
         f.noUpgrade=true;reject(()->auth.verify(session,f.factor,"123456"),"Java missing assurance upgrade refused");f.noUpgrade=false;
