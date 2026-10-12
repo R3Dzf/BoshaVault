@@ -409,6 +409,45 @@ public partial class MainWindow : Window
     {
         if (selected?.Url.Length > 0) Guard(() => { OriginPolicy.ExactHost(selected.Url); Process.Start(new ProcessStartInfo(selected.Url) { UseShellExecute = true }); });
     }
+    private void ConnectBrowserExtension()
+    {
+        var dialog = new FormDialog(this, "Connect browser extension", 505);
+        dialog.Label("Step 1 · Install Lockvyn Autofill once in every browser profile you want to use. Browsers require your approval for the extension itself.");
+        dialog.Action("Open extension folder", () => Guard(() =>
+        {
+            string folder = Path.Combine(AppContext.BaseDirectory, "browser-extension");
+            if (!Directory.Exists(folder))
+                throw new VaultException("Browser extension folder is missing from the complete Lockvyn installation.");
+            Process.Start(new ProcessStartInfo("explorer.exe", '"' + folder + '"')
+                { UseShellExecute = true });
+        }), inBody: true);
+        dialog.Label("Step 2 · Copy the extension ID shown under chrome://extensions or edge://extensions. If two browsers have different IDs, register both.");
+        var extensionId = dialog.Field("Extension ID (32 letters, a-p)", "", 32);
+        var status = new TextBlock {
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = System.Windows.Media.Brushes.DimGray,
+            Margin = new Thickness(0, 8, 0, 8)
+        };
+        dialog.Body.Children.Add(status);
+        dialog.Action("Connect this extension to Lockvyn", () =>
+        {
+            try
+            {
+                BrowserNativeHostRepair.RegisterApproved(extensionId.Text.Trim(), AppContext.BaseDirectory);
+                extensionId.Clear();
+                status.Text = "Connected for the current Windows account. It works in every Chrome/Edge profile where you installed this extension. Register another ID if necessary; restart that browser once.";
+            }
+            catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException
+                                     or InvalidDataException or System.Text.Json.JsonException)
+            {
+                status.Text = "Could not connect: " + ex.Message;
+            }
+        }, true, inBody: true);
+        dialog.Label("Lockvyn never installs an extension behind your back, edits browser preferences, forces enterprise policies, or copies your saved passwords into the browser.");
+        dialog.Action("Done", dialog.Close);
+        dialog.ShowDialog();
+    }
+
     private void GeneratorClick(object sender, RoutedEventArgs e)
     {
         if (session == null) return;
@@ -443,7 +482,9 @@ public partial class MainWindow : Window
             SetStatus(preferences.BrowserAutofillEnabled ? "Browser Autofill enabled." : "Browser Autofill disabled.");
         });
         int browserGuideStart = d.Body.Children.Count;
-        d.Label("Browser Autofill setup: 1. Open the extension folder below. 2. Load it as an unpacked extension in Chrome or Edge. 3. Run Install-BrowserAutofill.ps1 with the extension ID shown by your browser. Matching HTTPS logins appear near password fields and every fill asks for your approval.");
+        d.Label("Install the Lockvyn browser extension once in each Chrome / Edge profile you choose. Connect its ID here one time. After every Windows update, the local connection repairs itself; no script or administrator permissions.");
+        d.Action("Connect browser extension · one-time setup", ConnectBrowserExtension, true, inBody: true);
+        d.Label("For each profile, open chrome://extensions or edge://extensions → Developer mode → Load unpacked. Choose the Lockvyn browser-extension folder. Copy its extension ID from the browser and register it once. You can unpin the toolbar icon. Existing Autofill continues to require deliberate approval.");
         d.Action("Open browser extension folder", () => Guard(() => {
             string folder = System.IO.Path.Combine(AppContext.BaseDirectory, "browser-extension");
             if (!Directory.Exists(folder)) throw new VaultException("The extension folder is missing from this installation. Reinstall the complete Windows package.");
