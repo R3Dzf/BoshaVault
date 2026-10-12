@@ -45,7 +45,8 @@ internal static class DevicePairingWindow
         d.Body.Children.Add(status);
         string? joined = null;
         bool closed = false, approved = false, polling = false;
-        var approve = d.Action("Approve this device", async () =>
+        Button? approve = null;
+        approve = d.Action("Approve this device", async () =>
         {
             if (approved || joined == null) return;
             if (confirm.IsChecked != true)
@@ -53,7 +54,7 @@ internal static class DevicePairingWindow
                 status.Text = "Compare both displayed numbers before approving. Never approve a mismatched code.";
                 return;
             }
-            approve.IsEnabled = false;
+            approve!.IsEnabled = false;
             try
             {
                 var fresh = await relay.Read(ecdh.SessionId, cancel.Token);
