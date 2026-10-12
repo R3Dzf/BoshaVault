@@ -148,7 +148,7 @@ public partial class MainWindow
                 .OrderBy(x => x.Relation == OriginPolicy.DomainRelation.Exact ? 0 :
                     x.Relation == OriginPolicy.DomainRelation.TrustedGroup ? 1 : 2)
                 .ThenBy(x => x.Entry.Title,StringComparer.OrdinalIgnoreCase)
-                .Take(20).ToArray();
+                .Take(50).ToArray();
             if (request.Op == "list")
             {
                 var hosts=activeSession.Data.Entries.Where(e=>!e.Deleted && e.Url.Length>0)
