@@ -2,6 +2,8 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Interop;
+using System.Windows.Shell;
+using System.Windows.Input;
 using System.Runtime.InteropServices;
 using BoshaVault.Core;
 
@@ -20,24 +22,59 @@ public sealed class FormDialog : Window
         Title = title;
         Width = Math.Min(width, Math.Max(350, SystemParameters.WorkArea.Width - 40));
         Height = Math.Max(320, Math.Min(685, SystemParameters.WorkArea.Height - 70));
-        WindowStartupLocation = WindowStartupLocation.CenterScreen;
-        ResizeMode = ResizeMode.CanResizeWithGrip;
-        MinWidth = 350;
-        MinHeight = 300;
-        Background = new SolidColorBrush(Color.FromRgb(248, 247, 253));
+        WindowStartupLocation = WindowStartupLocation.CenterOwner;
+        ResizeMode = ResizeMode.CanResize;
+        WindowStyle = WindowStyle.None;
+        ShowInTaskbar = false;
+        MinWidth = 350; MinHeight = 300;
+        Background = Brushes.White;
+        WindowChrome.SetWindowChrome(this, new WindowChrome {
+            CaptionHeight = 0,
+            ResizeBorderThickness = new Thickness(7),
+            GlassFrameThickness = new Thickness(0),
+            CornerRadius = new CornerRadius(16),
+            UseAeroCaptionButtons = false
+        });
+        var frame = new Border {
+            Background = new SolidColorBrush(Color.FromRgb(247, 248, 252)),
+            BorderBrush = new SolidColorBrush(Color.FromRgb(225, 229, 239)),
+            BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(16)
+        };
+        var shell = new DockPanel();
+        frame.Child = shell;
+        var header = new Grid { Height = 62, Background = Brushes.Transparent,
+            Margin = new Thickness(19, 6, 18, 0) };
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.Children.Add(new TextBlock { Text = title, FontSize = 19, FontWeight = FontWeights.SemiBold,
+            VerticalAlignment = VerticalAlignment.Center, Foreground = new SolidColorBrush(Color.FromRgb(23, 27, 46)),
+            TextTrimming = TextTrimming.CharacterEllipsis });
+        var close = new Button { Content = "✕", FontSize = 13, Width = 36, Height = 36,
+            Padding = new Thickness(0), ToolTip = "Close this window" };
+        close.Click += (_, _) => Close();
+        Grid.SetColumn(close, 1); header.Children.Add(close);
+        header.MouseLeftButtonDown += (_, e) =>
+        {
+            if (e.ChangedButton == MouseButton.Left) DragMove();
+        };
+        DockPanel.SetDock(header, Dock.Top);
+        shell.Children.Add(header);
         var layout = new DockPanel();
-        var footerHost = new Border { Child = footer, Background = Brushes.White,
-            BorderBrush = new SolidColorBrush(Color.FromRgb(231, 228, 239)),
-            BorderThickness = new Thickness(0, 1, 0, 0) };
+        shell.Children.Add(layout);
+        var footerHost = new Border {
+            Child = footer, Background = Brushes.White,
+            BorderBrush = new SolidColorBrush(Color.FromRgb(225, 229, 239)),
+            BorderThickness = new Thickness(0, 1, 0, 0),
+            CornerRadius = new CornerRadius(0, 0, 15, 15)
+        };
         DockPanel.SetDock(footerHost, Dock.Bottom);
         layout.Children.Add(footerHost);
-        var scroller = new ScrollViewer { Content = Body,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+        var scroller = new ScrollViewer {
+            Content = Body, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
+        };
         layout.Children.Add(scroller);
-        Content = layout;
-        Body.Children.Add(new TextBlock { Text = title, FontSize = 21, FontWeight = FontWeights.Bold,
-            TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 12) });
+        Content = frame;
         Window interactionOwner = owner;
         while (interactionOwner.Owner != null) interactionOwner = interactionOwner.Owner;
         var main = interactionOwner as MainWindow;
