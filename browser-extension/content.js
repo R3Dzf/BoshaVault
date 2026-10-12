@@ -7,6 +7,18 @@
   const pwSelector = 'input[type="password"],input[autocomplete="current-password"],input[autocomplete="new-password"]';
   let frame=null, shadow=null, panel=null, focus=null, sequence=0, draft=null, origin=location.origin;
   let savedMatches=[];
+  // Only a local UI preference is stored by the extension. Never persist
+  // usernames, passwords, unlock state, recovery material or native replies.
+  let quietMode=false;
+  chrome.storage?.local?.get?.({quietMode:false},prefs=>{
+    quietMode=prefs?.quietMode===true;
+    if(quietMode)hide();
+  });
+  chrome.storage?.onChanged?.addListener?.((changes,area)=>{
+    if(area!=="local" || !changes.quietMode)return;
+    quietMode=changes.quietMode.newValue===true;
+    if(quietMode)hide();
+  });
 
   function visible(input) {
     if (!(input instanceof HTMLInputElement) || !input.isConnected ||
@@ -62,7 +74,7 @@
     frame.style.cssText="position:fixed;z-index:2147483646;width:310px;max-width:calc(100vw - 16px);pointer-events:auto;";
     shadow=frame.attachShadow({mode:"closed"});
     const style=document.createElement("style");
-    style.textContent=".panel{box-sizing:border-box;width:100%;background:#fff;color:#242335;border:1px solid #dcd5f9;border-radius:12px;box-shadow:0 9px 26px #18122a3b;padding:10px;max-height:min(420px,76vh);overflow-y:auto;overscroll-behavior:contain;font:13px system-ui,sans-serif}.top{font-weight:700;padding:5px;color:#7762df}.sub{font-size:11px;color:#777;overflow-wrap:anywhere;padding:0 6px 7px}button{display:block;text-align:left;width:100%;background:#f5f3ff;color:#32276c;border:0;border-radius:8px;padding:10px;margin:5px 0;cursor:pointer;font:13px system-ui,sans-serif}button:hover{background:#e8e0ff}button.primary{color:#fff;background:#7762df}button.primary:hover{background:#6250c1}.msg{padding:9px;line-height:1.4;white-space:pre-wrap}";
+    style.textContent=".panel{box-sizing:border-box;width:100%;background:#fff;color:#242335;border:1px solid #e1e5ef;border-radius:14px;box-shadow:0 6px 18px #171b2e1f;padding:10px;max-height:min(420px,76vh);overflow-y:auto;overscroll-behavior:contain;font:13px system-ui,sans-serif}.top{font-weight:700;padding:5px;color:#6558d9}.sub{font-size:11px;color:#777;overflow-wrap:anywhere;padding:0 6px 7px}button{display:block;text-align:left;width:100%;background:#efedff;color:#32276c;border:0;border-radius:8px;padding:10px;margin:5px 0;cursor:pointer;font:13px system-ui,sans-serif}button:hover{background:#e8e0ff}button.primary{color:#fff;background:#6558d9}button.primary:hover{background:#6250c1}.msg{padding:9px;line-height:1.4;white-space:pre-wrap}";
     panel=document.createElement("div");
     panel.className="panel";
     shadow.append(style,panel);
@@ -280,7 +292,7 @@
   }
   document.addEventListener("focusin",event=>{
     if(frame && (event.target===frame || frame.contains(event.target)))return;
-    showForInput(event.target);
+    if(!quietMode)showForInput(event.target);
   },true);
   chrome.runtime.onMessage.addListener((message,_sender,reply)=>{
     if(message?.op==="showSuggestions"){
