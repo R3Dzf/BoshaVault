@@ -442,15 +442,28 @@ public partial class MainWindow : Window
             preferences.Save(preferencesPath);
             SetStatus(preferences.BrowserAutofillEnabled ? "Browser Autofill enabled." : "Browser Autofill disabled.");
         });
+        int browserGuideStart = d.Body.Children.Count;
         d.Label("Browser Autofill setup: 1. Open the extension folder below. 2. Load it as an unpacked extension in Chrome or Edge. 3. Run Install-BrowserAutofill.ps1 with the extension ID shown by your browser. Matching HTTPS logins appear near password fields and every fill asks for your approval.");
         d.Action("Open browser extension folder", () => Guard(() => {
             string folder = System.IO.Path.Combine(AppContext.BaseDirectory, "browser-extension");
             if (!Directory.Exists(folder)) throw new VaultException("The extension folder is missing from this installation. Reinstall the complete Windows package.");
             Process.Start(new ProcessStartInfo("explorer.exe", '"' + folder + '"') { UseShellExecute = true });
         }), inBody: true);
+        var browserGuide = new StackPanel();
+        while (d.Body.Children.Count > browserGuideStart)
+        {
+            var element = d.Body.Children[browserGuideStart];
+            d.Body.Children.RemoveAt(browserGuideStart);
+            browserGuide.Children.Add(element);
+        }
+        d.Body.Children.Add(new Expander {
+            Header = "Browser extension setup · optional",
+            Content = browserGuide, Margin = new Thickness(0, 10, 0, 10)
+        });
         d.Label("Auto-lock after inactivity");
         var options = new ComboBox { ItemsSource = new[] { 1, 2, 5, 10 }, SelectedItem = timeoutMinutes, Padding = new(10), Margin = new(0, 0, 0, 18) }; d.Body.Children.Add(options);
-        d.Action("Apply auto-lock time", () => Guard(() => { int minutes = (int)options.SelectedItem; preferences.AutoLockMinutes = minutes; preferences.Save(preferencesPath); timeoutMinutes = minutes; SetStatus($"Auto-lock set to {timeoutMinutes} minutes and saved."); }));
+        d.Action("Apply auto-lock time", () => Guard(() => { int minutes = (int)options.SelectedItem; preferences.AutoLockMinutes = minutes; preferences.Save(preferencesPath); timeoutMinutes = minutes; SetStatus($"Auto-lock set to {timeoutMinutes} minutes and saved."); }), inBody: true);
+        int advancedStart = d.Body.Children.Count;
         var current = d.Secret("Current master passphrase"); var next = d.Secret("New master passphrase (16+ characters)"); var confirm = d.Secret("Confirm new passphrase");
         var note = new TextBlock { FontSize = 12, TextWrapping = TextWrapping.Wrap, Foreground = System.Windows.Media.Brushes.Gray }; d.Body.Children.Add(note);
         Button? change = null;
@@ -465,7 +478,7 @@ public partial class MainWindow : Window
             try { await activeSession.ChangePassword(oldPassword, newPassword); if (stamp != generation || session != activeSession || !d.IsVisible) return; Refresh(); note.Text = "Passphrase and vault key changed. Old backups still use their original passphrase. Other devices must verify the updated passphrase when merging."; }
             catch (Exception ex) when (ex is VaultException or IOException) { if (stamp == generation && d.IsVisible) note.Text = ex.Message; }
             finally { oldPassword = ""; newPassword = ""; change.IsEnabled = true; }
-        }, true);
+        }, true, inBody: true);
         d.Action("View local password health report", () => {
             if (session == null) return;
             var review = PasswordHealth.Audit(session.Data.Entries);
@@ -478,12 +491,25 @@ public partial class MainWindow : Window
             if(review.Findings.Count>35) popup.Label($"Plus {review.Findings.Count-35} more entries. Review the vault list for the rest.");
             popup.Action("Close",popup.Close,true);
             popup.ShowDialog();
-        });
-        d.Action("Import Chrome / Bitwarden passwords from CSV", () => ImportBrowserPasswords(d));
+        }, inBody: true);
+        d.Action("Import Chrome / Bitwarden passwords from CSV", () => ImportBrowserPasswords(d), inBody: true);
         d.Label("Importing requires reviewing a local plaintext CSV. No source file is automatically deleted or uploaded.");
         d.Label("No reset service exists. Old backups are not revoked by changing the passphrase. Windows quick unlock is intentionally unavailable in this release.");
-        d.Action("Lock & move to tray", HideToTray);
-        d.Action("Exit Lockvyn", ExitApplication);
+        d.Action("Lock & move to tray", HideToTray, inBody: true);
+        d.Action("Exit Lockvyn", ExitApplication, inBody: true);
+        var advanced = new StackPanel();
+        while (d.Body.Children.Count > advancedStart)
+        {
+            var element = d.Body.Children[advancedStart];
+            d.Body.Children.RemoveAt(advancedStart);
+            advanced.Children.Add(element);
+        }
+        d.Body.Children.Add(new Expander {
+            Header = "Advanced security, import & troubleshooting",
+            Content = advanced, IsExpanded = false,
+            Margin = new Thickness(0, 16, 0, 10)
+        });
+        d.Action("Close Settings", d.Close, true);
         d.ShowDialog(); current.Clear(); next.Clear(); confirm.Clear();
     }
     // Diagnostic records contain stages + exception type only. Never write pairing
