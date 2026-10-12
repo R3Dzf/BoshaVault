@@ -74,7 +74,7 @@ public final class UiSmoke extends Instrumentation {
                 check(addControl!=null&&addControl.getElevation()==0f&&addControl.getTranslationZ()==0f&&addControl.getStateListAnimator()==null,
                       "Calm Pro Android primary button has no native shadow or elevation animator");
                 ListView list=(ListView)field("list");check(list.getSelector() instanceof android.graphics.drawable.ColorDrawable
-                      && list.getScrollBarSize()<=dp(4),
+                      && list.getScrollBarSize()<=Ui.dp(activity,4),
                       "no rectangular pressed overlay; vault scrollbar remains slim");
                 check(list.getChildCount()>0
                       && list.getChildAt(0).getBackground() instanceof android.graphics.drawable.RippleDrawable,
