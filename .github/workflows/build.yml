@@ -48,6 +48,8 @@ jobs:
           2af190b300cbb0b35e248ccf5f4a06b6072030aeb3da7a98ec73abe5b4cb371f  build-deps/bcprov.jar
           3ea61b2a06e31edf1c91134fe9106b0ebb16628be169f3db75bc7a2b06b45796  build-deps/json.jar
           PINS
+      - name: Test Android binary delta creation and Java reconstruction
+        run: python tools/test_android_delta.py
       - name: Test cloud account and atomic merge, then generate synthetic fixtures
         run: |
           dotnet run --project src/BoshaVault.Tests -c Release -- --cloud-tests
