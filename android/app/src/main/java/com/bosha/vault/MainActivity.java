@@ -22,6 +22,8 @@ public final class MainActivity extends Activity {
     private ListView list;
     private BaseAdapter entryAdapter;
     private TextView vaultStats;
+    private TextView autofillSettingsStatus;
+    private Button autofillSettingsButton;
     private final List<JSONObject> displayedEntries=new ArrayList<>();
     private String folderFilter;
 
@@ -57,7 +59,7 @@ public final class MainActivity extends Activity {
         dialogs.clear();authenticatorDialogs=0;
         worker.execute(()->engine.close());showLock();
     }
-    @Override protected void onResume(){super.onResume();if(scannedPairing!=null){String code=scannedPairing;scannedPairing=null;showPairing(Store.vault(this).exists(),code);}if(scannedCloud!=null){String code=scannedCloud;scannedCloud=null;joinCloud(code);}if(scannedSecure!=null&&(!Store.vault(this).exists()||engine.isOpen())){String code=scannedSecure;scannedSecure=null;connectToPc(code);}}
+    @Override protected void onResume(){super.onResume();refreshAutofillSettingsState();if(scannedPairing!=null){String code=scannedPairing;scannedPairing=null;showPairing(Store.vault(this).exists(),code);}if(scannedCloud!=null){String code=scannedCloud;scannedCloud=null;joinCloud(code);}if(scannedSecure!=null&&(!Store.vault(this).exists()||engine.isOpen())){String code=scannedSecure;scannedSecure=null;connectToPc(code);}}
     @Override protected void onStop(){
         super.onStop();active=false;
         if(authenticatorDialogs>0&&engine!=null&&engine.isOpen()&&!screenLocked()&&!busy){
@@ -648,6 +650,12 @@ public final class MainActivity extends Activity {
         b.addView(Ui.button(this,"Unlock & complete transfer",true,()->{String p=master.getText().toString(),r=incoming==null?"":incoming.getText().toString();master.setText("");if(incoming!=null)incoming.setText("");int stamp=epoch;task(()->{if(!active||epoch!=stamp||pendingTransfer!=connection)throw new IOException("Transfer cancelled.");if(exists){if(!engine.isOpen())engine.open(p);if(engine.needsPassphrase(bytes)){engine.mergeUsingPassword(bytes,r.isEmpty()?p:r);Biometrics.disable(this);}else engine.merge(bytes);}else{VaultEngine.importNew(Store.vault(this),bytes,p,Store.device(this));engine.open(p);engine.revokeTrust();}connection.upload(engine.export());pendingTransfer=null;},()->{finished[0]=true;d.dismiss();toast("Transfer complete.");showVault();});}));
         b.addView(Ui.button(this,"Cancel transfer",false,d::dismiss));
     }
+    private void refreshAutofillSettingsState(){
+        if(autofillSettingsStatus!=null)
+            autofillSettingsStatus.setText(AutofillStatus.summary(this));
+        if(autofillSettingsButton!=null)
+            autofillSettingsButton.setText(AutofillStatus.isEnabled(this)?"Disable Android Autofill":"Enable Android Autofill");
+    }
     private void settings(){
         if(!engine.isOpen()||busy)return;
         LinearLayout b=Ui.column(this);
@@ -657,10 +665,19 @@ public final class MainActivity extends Activity {
         provider.addView(Ui.text(this,"Android Autofill",18,Ui.INK,true));
         TextView providerStatus=Ui.text(this,AutofillStatus.summary(this),13,Ui.MUTED,false);
         provider.addView(providerStatus);b.addView(provider);
-        b.addView(Ui.button(this,"Enable Android Autofill",true,()->{
-            try{startActivity(new Intent(Settings.ACTION_REQUEST_SET_AUTOFILL_SERVICE,Uri.parse("package:"+getPackageName())));}
-            catch(Exception e){startActivity(new Intent(Settings.ACTION_SETTINGS));}
-        }));
+        autofillSettingsStatus=providerStatus;
+        autofillSettingsButton=Ui.button(this,AutofillStatus.isEnabled(this)?"Disable Android Autofill":"Enable Android Autofill",true,()->{
+            try{
+                // Android owns provider selection. This system prompt allows enabling
+                // or changing the active provider; never claim success prematurely.
+                startActivity(new Intent(Settings.ACTION_REQUEST_SET_AUTOFILL_SERVICE,
+                    Uri.parse("package:"+getPackageName())));
+            } catch(Exception e) {
+                toast("Change the Autofill provider to None in Android settings to disable it.");
+                startActivity(new Intent(Settings.ACTION_SETTINGS));
+            }
+        });
+        b.addView(autofillSettingsButton);
         b.addView(Ui.button(this,Biometrics.available(this)?"Disable fingerprint unlock":"Enable fingerprint unlock",false,()->{
             try{
                 if(Biometrics.available(this)){Biometrics.disable(this);toast("Fingerprint unlock disabled.");}
@@ -677,7 +694,7 @@ public final class MainActivity extends Activity {
         TextView lastRequest=Ui.text(this,AutofillStatus.diagnostic(this),12,Ui.MUTED,false);
         advanced.addView(lastRequest);
         advanced.addView(Ui.button(this,"Refresh Autofill status",false,()->{
-            providerStatus.setText(AutofillStatus.summary(this));
+            refreshAutofillSettingsState();
             lastRequest.setText(AutofillStatus.diagnostic(this));
         }));
         advanced.addView(Ui.button(this,"Clear Autofill diagnostics",false,()->{
