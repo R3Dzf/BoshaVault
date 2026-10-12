@@ -15,7 +15,7 @@ internal sealed class UpdateDialog : Window
     private readonly CancellationTokenSource cancellation = new();
     private readonly TextBlock status, versions, sizes, progressLabel, fallbackNote;
     private readonly ProgressBar progress;
-    private readonly Button check, download, restart;
+    private readonly Button check, download, restart, whatsNew;
     private readonly MainWindow owner;
     private UpdateInfo? update;
     private long plannedBytes, fullBytes;
@@ -35,7 +35,7 @@ internal sealed class UpdateDialog : Window
            ?? typeof(UpdateDialog).Assembly.GetName().Version?.ToString(3) ?? "unknown")
         .Split('+')[0];
 
-    public UpdateDialog(MainWindow owner)
+    public UpdateDialog(MainWindow owner, bool checkImmediately = false)
     {
         this.owner = owner;
         Owner = owner;
@@ -68,6 +68,8 @@ internal sealed class UpdateDialog : Window
             Margin = new Thickness(0, 8, 0, 12) };
         body.Children.Add(progress);
         check = Action(body, "Check for updates", CheckAsync);
+        whatsNew = Action(body, "What's New · additions, improvements & fixes", WhatsNewAsync);
+        whatsNew.IsEnabled = false;
         download = Action(body, "Download update", DownloadAsync); download.IsEnabled = false;
         restart = Action(body, "Restart and install", RestartAsync); restart.IsEnabled = false;
         Action(body, "View release notes on GitHub", () =>
@@ -85,6 +87,18 @@ internal sealed class UpdateDialog : Window
         Closed += (_, _) => { closed = true; cancellation.Cancel(); if (!working) cancellation.Dispose(); };
         PreviewKeyDown += (_, _) => owner.Touch();
         PreviewMouseDown += (_, _) => owner.Touch();
+        if (checkImmediately)
+            Loaded += async (_, _) =>
+            {
+                if (working || closed) return;
+                try { await CheckAsync(); }
+                catch (OperationCanceledException) { if (!closed) status.Text = "Update check cancelled."; }
+                catch (Exception) { if (!closed) status.Text = "Cannot check for updates. Retry from this screen."; }
+                finally
+                {
+                    if (!closed) { working = false; check.IsEnabled = manager.IsInstalled; download.IsEnabled = update != null; }
+                }
+            };
     }
 
     private Button Action(StackPanel body, string label, Func<Task> work)
@@ -108,6 +122,7 @@ internal sealed class UpdateDialog : Window
                 {
                     check.IsEnabled = manager.IsInstalled;
                     download.IsEnabled = update != null && !restart.IsEnabled;
+                    whatsNew.IsEnabled = update != null;
                 }
             }
         };
@@ -117,14 +132,14 @@ internal sealed class UpdateDialog : Window
     private void Begin(string text)
     {
         working = true;
-        check.IsEnabled = download.IsEnabled = restart.IsEnabled = false;
+        check.IsEnabled = download.IsEnabled = restart.IsEnabled = whatsNew.IsEnabled = false;
         status.Text = text;
     }
 
     private async Task CheckAsync()
     {
         Begin("Checking official Windows release feed…");
-        update = null; plannedBytes = fullBytes = 0;
+        update = null; whatsNew.IsEnabled = false; plannedBytes = fullBytes = 0;
         sizes.Text = ""; fallbackNote.Text = "";
         progress.Visibility = progressLabel.Visibility = Visibility.Collapsed;
         update = await manager.CheckForUpdatesAsync().WaitAsync(TimeSpan.FromSeconds(30), cancellation.Token);
@@ -146,7 +161,45 @@ internal sealed class UpdateDialog : Window
         fallbackNote.Text = eligible
             ? $"Saves about {(1d - (double)plannedBytes / fullBytes) * 100:0.#}% of download data. If the delta cannot be applied, Velopack may fetch the full {FormatBytes(fullBytes)} package instead."
             : "No compatible smaller delta is available for this installed version.";
-        status.Text = "Ready to download. Nothing is downloaded until you choose Download update.";
+        status.Text = "Ready to download. Read What's New first if you want a quick release summary.";
+        whatsNew.IsEnabled = true;
+        download.IsEnabled = true;
+    }
+
+    private async Task WhatsNewAsync()
+    {
+        if (update == null) return;
+        string version = update.TargetFullRelease.Version.ToString();
+        ReleaseNotesSummary.Summary release = await ReleaseNotesSummary.LoadAsync(version, cancellation.Token);
+        if (closed) return;
+        var details = new FormDialog(this, "What's New · v" + version, 535);
+        void Section(string name, string[] items)
+        {
+            details.Body.Children.Add(new TextBlock {
+                Text = name, FontWeight = FontWeights.SemiBold, FontSize = 16,
+                Margin = new Thickness(0, 16, 0, 8), Foreground = new SolidColorBrush(Color.FromRgb(23,27,46))
+            });
+            if (items.Length == 0)
+            {
+                details.Label("No separately listed items.");
+                return;
+            }
+            foreach (string item in items.Take(4))
+                details.Label("• " + item);
+        }
+        if (release.Verified)
+        {
+            Section("New features", release.Added);
+            Section("Improvements", release.Improved);
+            Section("Fixes", release.Fixed);
+        }
+        else details.Label("Cannot load the official release notes right now. You can read them on GitHub.");
+        details.Action("View complete release notes", () =>
+            Process.Start(new ProcessStartInfo(
+                "https://github.com/R3Dzf/BoshaVault/releases/tag/windows-v" + version
+            ) { UseShellExecute = true }), inBody: true);
+        details.Action("Close", details.Close, true);
+        details.ShowDialog();
     }
 
     private async Task DownloadAsync()
