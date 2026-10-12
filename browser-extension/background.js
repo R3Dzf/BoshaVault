@@ -107,9 +107,9 @@ function queuePasskeyScriptSync(applyToFocusedTab=false){
   });
   return passkeyScriptQueue;
 }
-chrome.runtime.onInstalled.addListener(()=>void queuePasskeyScriptSync());
-chrome.runtime.onStartup.addListener(()=>void queuePasskeyScriptSync());
-chrome.storage.onChanged.addListener((changes,area)=>{
+chrome.runtime.onInstalled?.addListener?.(()=>void queuePasskeyScriptSync());
+chrome.runtime.onStartup?.addListener?.(()=>void queuePasskeyScriptSync());
+chrome.storage?.onChanged?.addListener?.((changes,area)=>{
   if(area==="local" && changes.blockConditionalPasskeys)
     void queuePasskeyScriptSync(true);
 });
