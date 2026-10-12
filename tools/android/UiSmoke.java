@@ -73,7 +73,13 @@ public final class UiSmoke extends Instrumentation {
                 Button addControl=find(screen,Button.class,"+ Add login");
                 check(addControl!=null&&addControl.getElevation()==0f&&addControl.getTranslationZ()==0f&&addControl.getStateListAnimator()==null,
                       "Calm Pro Android primary button has no native shadow or elevation animator");
-                ListView list=(ListView)field("list");check(list.getAdapter().getCount()==1000,"all 1000 logins are listed");check(list.getChildCount()>0&&list.getChildCount()<40,"rows are recycled instead of creating 1000 views");before[0]=visible(find(activity.findViewById(android.R.id.content),Button.class,"Tools"));list.setSelection(999);});waitForIdleSync();
+                ListView list=(ListView)field("list");check(list.getSelector() instanceof android.graphics.drawable.ColorDrawable
+                      && list.getScrollBarSize()<=dp(4),
+                      "no rectangular pressed overlay; vault scrollbar remains slim");
+                check(list.getChildCount()>0
+                      && list.getChildAt(0).getBackground() instanceof android.graphics.drawable.RippleDrawable,
+                      "login long-press has clipped rounded ripple instead of a square shadow");
+                check(list.getAdapter().getCount()==1000,"all 1000 logins are listed");check(list.getChildCount()>0&&list.getChildCount()<40,"rows are recycled instead of creating 1000 views");before[0]=visible(find(activity.findViewById(android.R.id.content),Button.class,"Tools"));list.setSelection(999);});waitForIdleSync();
             main(()->{
                 TextView syncTab=find(activity.findViewById(android.R.id.content),TextView.class,"Sync");
                 check(syncTab!=null&&syncTab.getParent() instanceof View,
