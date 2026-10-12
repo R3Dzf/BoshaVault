@@ -17,10 +17,19 @@ if (!$SkipPrevious) {
     # call in @() nests it, so two releases can look like one object with an
     # array-valued .draft and incorrectly hide a real Windows baseline.
     $releases=Invoke-RestMethod -Uri "https://api.github.com/repos/$Repository/releases?per_page=100" -Headers $headers
-    $previous=@($releases | Where-Object { !$_.draft -and !$_.prerelease -and @($_.assets | Where-Object name -eq 'releases.win.json').Count -gt 0 })
+    $previous=@($releases | Where-Object { !$_.draft -and !$_.prerelease -and $_.tag_name -match '^windows-v\d+\.\d+\.\d+$' -and @($_.assets | Where-Object name -eq 'releases.win.json').Count -gt 0 } | Sort-Object { [version]$_.tag_name.Substring(9) } -Descending)
     if ($previous.Count) {
         dotnet vpk download github --repoUrl "https://github.com/$Repository" --channel win --outputDir $OutputDirectory --timeout 5
         if ($LASTEXITCODE) { throw 'Previous Windows release download failed.' }
+        # vpk download fetches the full package but does not always materialize
+        # the release index. Fetch that published asset explicitly and verify it
+        # before using its version or passing it to the packer.
+        $feedAsset=@($previous[0].assets | Where-Object name -eq 'releases.win.json')
+        if ($feedAsset.Count -ne 1 -or $feedAsset[0].digest -notmatch '^sha256:([a-fA-F0-9]{64})$') { throw 'Published Windows index/digest is missing.' }
+        $expected=$feedAsset[0].digest.Substring(7)
+        Invoke-WebRequest -Uri $feedAsset[0].browser_download_url -Headers $headers -OutFile "$OutputDirectory/releases.win.json"
+        if ((Get-FileHash "$OutputDirectory/releases.win.json" -Algorithm SHA256).Hash -ne $expected -or
+            (Get-Item "$OutputDirectory/releases.win.json").Length -ne $feedAsset[0].size) { throw 'Published Windows index integrity failed.' }
         $feed=Get-Content "$OutputDirectory/releases.win.json" -Raw | ConvertFrom-Json
         $base=@($feed.Assets | Where-Object { $_.Type -eq 'Full' -and $_.PackageId -eq 'Lockvyn' } | Sort-Object { [version]$_.Version } -Descending)[0]
         if (!$base -or [version]$base.Version -ge [version]$version) { throw 'Increase Windows Version above the latest published version before releasing.' }
