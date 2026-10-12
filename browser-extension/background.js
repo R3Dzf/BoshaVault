@@ -66,3 +66,50 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   }));
   return true;
 });
+
+
+/* Chrome/Edge WebAuthn conditional UI control is opt-in and separate from
+ * Lockvyn's Native Messaging channel. The page-world script has no access
+ * to Chrome's extension API, local vault or encrypted credentials. */
+const PASSKEY_SCRIPT_ID = "lockvyn-conditional-passkeys-v1";
+let passkeyScriptQueue=Promise.resolve();
+function queuePasskeyScriptSync(applyToFocusedTab=false){
+  passkeyScriptQueue=passkeyScriptQueue.catch(()=>{}).then(async()=>{
+    if(!chrome.scripting?.getRegisteredContentScripts)return;
+    const prefs=await chrome.storage.local.get({blockConditionalPasskeys:false});
+    const enabled=prefs.blockConditionalPasskeys===true;
+    const existing=await chrome.scripting.getRegisteredContentScripts({ids:[PASSKEY_SCRIPT_ID]});
+    if(enabled && !existing.length){
+      await chrome.scripting.registerContentScripts([{
+        id:PASSKEY_SCRIPT_ID,
+        js:["passkey-conditional.js"],
+        matches:["https://*/*"],
+        runAt:"document_start",
+        allFrames:false,
+        world:"MAIN",
+        persistAcrossSessions:true
+      }]);
+    } else if(!enabled && existing.length){
+      await chrome.scripting.unregisterContentScripts({ids:[PASSKEY_SCRIPT_ID]});
+    }
+    if(!applyToFocusedTab || !chrome.tabs?.query || !chrome.scripting.executeScript)return;
+    // Don't reload forms with unsaved data: apply immediately to just the
+    // current active HTTPS page. Other open pages may need a manual refresh.
+    const tabs=await chrome.tabs.query({active:true,currentWindow:true});
+    const tab=tabs?.[0];
+    if(!tab?.id || !tab.url?.startsWith("https://"))return;
+    await chrome.scripting.executeScript({
+      target:{tabId:tab.id,frameIds:[0]},
+      files:[enabled?"passkey-conditional.js":"passkey-restore.js"],
+      world:"MAIN",
+      injectImmediately:true
+    });
+  });
+  return passkeyScriptQueue;
+}
+chrome.runtime.onInstalled.addListener(()=>void queuePasskeyScriptSync());
+chrome.runtime.onStartup.addListener(()=>void queuePasskeyScriptSync());
+chrome.storage.onChanged.addListener((changes,area)=>{
+  if(area==="local" && changes.blockConditionalPasskeys)
+    void queuePasskeyScriptSync(true);
+});
