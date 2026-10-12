@@ -60,7 +60,7 @@ public partial class MainWindow : Window
         {
             if (DateTime.UtcNow >= PrivateClipboard.Expires) PrivateClipboard.Clear();
             if (revealed && DateTime.UtcNow >= revealUntil) Mask();
-            if (session != null && transfer?.IsActive != true && DateTime.UtcNow - lastActivity > TimeSpan.FromMinutes(timeoutMinutes)) LockVault();
+            if (session != null && (transfer?.IsActive != true || transfer.IsCompleted) && DateTime.UtcNow - lastActivity > TimeSpan.FromMinutes(timeoutMinutes)) LockVault();
         };
         timer.Start(); ConfigureUnlock();
     }
@@ -327,6 +327,20 @@ public partial class MainWindow : Window
         d.Label("Connect your phone on the same private Wi-Fi. Keep this window open until the encrypted transfer finishes.");
         string defaultIp = ""; try { defaultIp = LocalTransferServer.FindPrivateHost(); } catch (Exception ex) when (ex is VaultException or System.Net.Sockets.SocketException) { }
         var address = d.Field("Your private Wi-Fi IPv4 address", defaultIp, 15);
+        var networks = new ComboBox { Margin = new(0, 6, 0, 8), MinWidth = 300 };
+        void RefreshNetworks()
+        {
+            try
+            {
+                var choices = LocalTransferServer.PrivateInterfaces();
+                networks.ItemsSource = choices; networks.DisplayMemberPath = "Label";
+                networks.SelectedItem = choices.FirstOrDefault(n => n.Host == address.Text) ?? choices.FirstOrDefault();
+            }
+            catch (System.Net.NetworkInformation.NetworkInformationException) { networks.ItemsSource = null; }
+        }
+        networks.SelectionChanged += (_, _) => { if (networks.SelectedItem is LocalTransferServer.PrivateInterface choice) address.Text = choice.Host; };
+        d.Body.Children.Add(networks); RefreshNetworks();
+        d.Action("Refresh Wi-Fi addresses", RefreshNetworks);
         var pairing = new TextBox { IsReadOnly = true, MaxLength = 4096, TextWrapping = TextWrapping.Wrap, MinHeight = 80, Margin = new(0, 10, 0, 0) };
         var qr = new Image { Width = 310, Height = 310, Stretch = Stretch.Uniform, SnapsToDevicePixels = true };
         RenderOptions.SetBitmapScalingMode(qr, BitmapScalingMode.NearestNeighbor);
@@ -346,6 +360,7 @@ public partial class MainWindow : Window
         {
             int remaining = (int)Math.Ceiling(((transfer?.ExpiresUtc ?? DateTime.UtcNow) - DateTime.UtcNow).TotalSeconds);
             if (remaining <= 0) { ClearPairing(); transfer?.Dispose(); transfer = null; status.Text = "Pairing expired. Start a new private transfer to try again."; }
+            else if (transfer is { IsCompleted: true }) { ClearPairing(); status.Text = "Transfer complete. Both devices have the merged vault."; }
             else if (transfer is { IsActive: false }) { ClearPairing(); status.Text = "Transfer stopped. Start a new private transfer and scan its new QR."; }
             else { countdown.Text = $"Expires in {remaining / 60}:{remaining % 60:00}"; if (transfer?.LastIssue != null) status.Text = transfer.LastIssue; }
         };
@@ -355,7 +370,7 @@ public partial class MainWindow : Window
             LocalTransferServer? currentTransfer = null;
             currentTransfer = new LocalTransferServer(
                 () => Dispatcher.Invoke(() => { if (transfer != currentTransfer || session == null) throw new VaultException("Transfer stopped."); return session.ExportEncrypted(); }),
-                bytes => Dispatcher.Invoke(() => { if (transfer != currentTransfer || session == null) throw new VaultException("Transfer stopped."); int c = MergeBackup(bytes); ClearPairing(); Refresh(); Touch(); status.Text = c == 0 ? "Transfer complete. Both devices have the merged vault." : $"Transfer complete. {c} conflict copies kept."; }),
+                bytes => Dispatcher.Invoke(() => { if (transfer != currentTransfer || session == null || currentTransfer?.IsActive != true) throw new VaultException("Transfer stopped."); int c = MergeBackup(bytes); ClearPairing(); Refresh(); Touch(); status.Text = c == 0 ? "Transfer complete. Both devices have the merged vault." : $"Transfer complete. {c} conflict copies kept."; }),
                 WriteTransferDiagnostic);
             transfer = currentTransfer;
             try
@@ -377,6 +392,27 @@ public partial class MainWindow : Window
         d.Action("Copy pairing code", () => { if (pairing.Text.Length > 0) Copy(pairing.Text); });
         d.Body.Children.Add(new Expander { Header = "Or paste the pairing code manually", Content = pairing, Margin = new(0, 14, 0, 20) });
         d.Label("If Windows asks for firewall access, allow this app on your private network. Guest Wi-Fi may block connections.");
+        d.Action("Allow Lockvyn on private Wi-Fi (administrator approval)", async () =>
+        {
+            try
+            {
+                string script = System.IO.Path.Combine(AppContext.BaseDirectory, "Configure-PrivateTransfer.ps1");
+                string app = Environment.ProcessPath ?? throw new IOException();
+                if (!File.Exists(script)) throw new IOException();
+                string command = "& '" + script.Replace("'", "''") + "' -ProgramPath '" + app.Replace("'", "''") + "'";
+                string encoded = Convert.ToBase64String(System.Text.Encoding.Unicode.GetBytes(command));
+                string powershell = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe");
+                using var process = Process.Start(new ProcessStartInfo(powershell, "-NoProfile -ExecutionPolicy Bypass -EncodedCommand " + encoded) { UseShellExecute = true, Verb = "runas", WindowStyle = ProcessWindowStyle.Hidden });
+                if (process == null) throw new IOException();
+                await process.WaitForExitAsync();
+                status.Text = process.ExitCode == 0
+                    ? "Private-network access is configured for this installed app. Set your trusted home Wi-Fi to Private in Windows, then retry the current QR."
+                    : "Windows could not configure private-network access. Your firewall remains enabled. Check administrator permissions.";
+            }
+            catch (Win32Exception) { status.Text = "Administrator approval was cancelled. Private-network access was not changed."; }
+            catch (IOException) { status.Text = "Cannot locate the installed app's private-transfer helper. Update Lockvyn and retry."; }
+        });
+        d.Label("This optional action allows only this installed app on Private networks and local-subnet TCP. It needs Windows administrator approval; Public networks stay blocked.");
         d.Label("Encrypted backup files"); d.Action("Export encrypted backup", Export); d.Action("Merge an encrypted backup", ImportMerge);
         d.Action("Optional encrypted cloud sync", () =>
         {

@@ -106,3 +106,5 @@ Use semicolons instead of colons for Java classpath separators on Windows. The Q
 ## License
 
 Your project source is provided under MIT (`LICENSE`). Dependencies retain their own licenses; see `docs/THIRD-PARTY.md`.
+
+Local Wi-Fi transfer: see [LOCAL-WIFI.md](docs/LOCAL-WIFI.md) for Windows 1.12 / Android 1.8 routing, reconnect and private-network setup.

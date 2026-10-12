@@ -77,7 +77,7 @@ jobs:
         run: |
           $tokens = $null
           $parseErrors = $null
-          foreach ($file in 'tools/Configure-AndroidSigning.ps1','tools/Prepare-WindowsPackage.ps1','tools/Package-Windows.ps1','tools/Test-WindowsUpdates.ps1') {
+          foreach ($file in 'tools/Configure-AndroidSigning.ps1','tools/Configure-PrivateTransfer.ps1','tools/Prepare-WindowsPackage.ps1','tools/Package-Windows.ps1','tools/Test-WindowsUpdates.ps1') {
             [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file), [ref]$tokens, [ref]$parseErrors) | Out-Null
             if ($parseErrors.Count) { throw "Script syntax invalid: $file - $parseErrors" }
           }
@@ -105,6 +105,8 @@ jobs:
         run: dotnet run --project src/BoshaVault.Tests -c Release -- --tls-certificate-tests
       - name: TLS / Schannel handshake test
         run: dotnet run --project src/BoshaVault.Tests -c Release -- --tls-handshake-tests
+      - name: Real private-address TLS transfer and retry lifecycle
+        run: dotnet run --project src/BoshaVault.Tests -c Release -- --local-transfer-tests
       - name: Publish Windows x64 executable
         run: >-
           dotnet publish src/BoshaVault.Windows
@@ -155,6 +157,7 @@ jobs:
           $suffix = Get-Content 'dist/windows/public_suffix_list.dat' -Raw
           if (-not $suffix.Contains('BEGIN PRIVATE DOMAINS') -or -not $suffix.Contains('github.io')) { throw 'Offline private PSL data missing or invalid' }
           Copy-Item 'tools/Install-BrowserAutofill.ps1' 'dist/windows/Install-BrowserAutofill.ps1' -Force
+          Copy-Item 'tools/Configure-PrivateTransfer.ps1' 'dist/windows/Configure-PrivateTransfer.ps1' -Force
           Copy-Item 'START-HERE.html' 'dist/windows/START-HERE.html' -Force
           if (!(Test-Path 'dist/windows/browser-extension/manifest.json')) { throw 'Extension missing from bundle' }
       - name: Test Chrome and Edge native host registration
@@ -171,6 +174,22 @@ jobs:
           $chromeReg=(Get-Item 'HKCU:/Software/Google/Chrome/NativeMessagingHosts/com.boshavault.desktop').GetValue('')
           $edgeReg=(Get-Item 'HKCU:/Software/Microsoft/Edge/NativeMessagingHosts/com.boshavault.desktop').GetValue('')
           if ($chromeReg -ne $hostManifest -or $edgeReg -ne $hostManifest) { throw 'Native host registry registration mismatch' }
+      - name: Verify optional private Wi-Fi firewall scope and repeated setup
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows') { throw 'Disposable Windows CI only.' }
+          if (Get-NetFirewallRule -Name 'Lockvyn-Private-Transfer' -ErrorAction SilentlyContinue) { throw 'Refusing to replace an existing rule in this test.' }
+          try {
+            ./tools/Configure-PrivateTransfer.ps1 -ProgramPath dist/windows/Lockvyn.exe
+            ./tools/Configure-PrivateTransfer.ps1 -ProgramPath dist/windows/Lockvyn.exe
+            $rule=@(Get-NetFirewallRule -Name 'Lockvyn-Private-Transfer')
+            if ($rule.Count -ne 1 -or "$($rule[0].Profile)" -ne 'Private' -or "$($rule[0].Direction)" -ne 'Inbound' -or "$($rule[0].Action)" -ne 'Allow' -or "$($rule[0].EdgeTraversalPolicy)" -ne 'Block') { throw 'Unexpected rule scope.' }
+            $app=$rule | Get-NetFirewallApplicationFilter
+            $port=$rule | Get-NetFirewallPortFilter
+            $address=$rule | Get-NetFirewallAddressFilter
+            if ($app.Program -ne (Resolve-Path dist/windows/Lockvyn.exe).Path -or "$($port.Protocol)" -notin 'TCP','6' -or @($address.RemoteAddress).Count -ne 1 -or @($address.RemoteAddress)[0] -ne 'LocalSubnet') { throw 'Unexpected app/protocol/address scope.' }
+            Write-Host 'PASS: repeated private-transfer setup retains one app-scoped, Private/local-subnet TCP rule.'
+          } finally { Remove-NetFirewallRule -Name 'Lockvyn-Private-Transfer' -ErrorAction SilentlyContinue }
       - name: Prepare Windows update package
         shell: pwsh
         run: ./tools/Prepare-WindowsPackage.ps1
@@ -284,7 +303,7 @@ jobs:
           retention-days: 14
 
   android-ui:
-    name: Android native email, MFA and 1000-login navigation
+    name: Android native Wi-Fi, update, email, MFA and navigation
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -293,6 +312,11 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build the synthetic .NET private-transfer host
+        run: dotnet build src/BoshaVault.Tests -c Release
       - name: Enable emulator acceleration and install SDK packages
         shell: bash
         run: |
@@ -318,9 +342,10 @@ jobs:
           python tools/build-android.py --sdk "$ANDROID_HOME/platforms/android-35" --tools "$ANDROID_HOME/build-tools/35.0.0" --keystore build-deps/ui-wrong.p12 --lockvyn-package --version-code 9002 --version-name 9.0.2
           cp dist/Lockvyn-Android.apk dist/android/updates/wrong-signer.apk
           cp dist/android/updates/baseline.apk dist/Lockvyn-Android.apk
-          python tools/build-android-ui-test.py --sdk "$ANDROID_HOME/platforms/android-35" --tools "$ANDROID_HOME/build-tools/35.0.0" --keystore build-deps/ui-demo.p12 --update-apk dist/android/updates/update.apk --wrong-signer-apk dist/android/updates/wrong-signer.apk
       - name: Run native keyboard, email-code, MFA and scrolling acceptance tests
         shell: bash
+        env:
+          BOSHAVAULT_KEYSTORE_PASSWORD: boshavault-disposable-ui-test
         run: |
           set -euo pipefail
           export PATH="$ANDROID_HOME/platform-tools:$PATH"
@@ -352,8 +377,23 @@ jobs:
           adb shell settings get secure default_input_method
           adb shell input keyevent 82
           adb install --no-incremental dist/Lockvyn-Android.apk
+          mkdir -p build-deps/native-lan
+          dotnet src/BoshaVault.Tests/bin/Release/net10.0/BoshaVault.Tests.dll --native-lan-host build-deps/native-lan > build-deps/native-lan-host.log 2>&1 &
+          BV_LAN_PID=$!
+          trap 'kill "$BV_LAN_PID" "$BV_EMULATOR_PID" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 100); do
+            if [ -s build-deps/native-lan/pairing.txt ]; then break; fi
+            kill -0 "$BV_LAN_PID" || { cat build-deps/native-lan-host.log; exit 1; }
+            sleep 0.2
+          done
+          test -s build-deps/native-lan/pairing.txt
+          python tools/build-android-ui-test.py --sdk "$ANDROID_HOME/platforms/android-35" --tools "$ANDROID_HOME/build-tools/35.0.0" --keystore build-deps/ui-demo.p12 --update-apk dist/android/updates/update.apk --wrong-signer-apk dist/android/updates/wrong-signer.apk --lan-pairing build-deps/native-lan/pairing.txt
           adb install --no-incremental dist/android/Lockvyn-UI-Test.apk
           adb logcat -c
+          adb shell am instrument -w com.bosha.vault.uismoke/com.bosha.vault.tests.LanSmoke | tee build-deps/native-lan.log
+          python -c "from pathlib import Path; text=Path('build-deps/native-lan.log').read_text(); assert 'NATIVE_LAN_PASS:' in text, text"
+          wait "$BV_LAN_PID"
+          grep -q 'NATIVE_LAN_HOST_PASS:' build-deps/native-lan-host.log
           UI_INSTRUMENT_EXIT=0
           adb shell am instrument -w com.bosha.vault.uismoke/com.bosha.vault.tests.UiSmoke | tee build-deps/native-ui.log || UI_INSTRUMENT_EXIT=$?
           adb logcat -b crash -d > build-deps/native-crash.log
@@ -381,5 +421,7 @@ jobs:
             build-deps/android-update-seed.log
             build-deps/android-update-verify.log
             build-deps/wrong-signer-install.log
+            build-deps/native-lan.log
+            build-deps/native-lan-host.log
           if-no-files-found: ignore
           retention-days: 14

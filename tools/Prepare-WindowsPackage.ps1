@@ -12,4 +12,5 @@ Copy-Item "$hostDirectory/Lockvyn.NativeHost.exe" "$OutputDirectory/Lockvyn.Nati
 Copy-Item browser-extension "$OutputDirectory/browser-extension" -Recurse -Force
 Copy-Item src/BoshaVault.Core/Assets/public_suffix_list.dat "$OutputDirectory/public_suffix_list.dat" -Force
 Copy-Item tools/Install-BrowserAutofill.ps1 "$OutputDirectory/Install-BrowserAutofill.ps1" -Force
+Copy-Item tools/Configure-PrivateTransfer.ps1 "$OutputDirectory/Configure-PrivateTransfer.ps1" -Force
 Copy-Item START-HERE.html "$OutputDirectory/START-HERE.html" -Force

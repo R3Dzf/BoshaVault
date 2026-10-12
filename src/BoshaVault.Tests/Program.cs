@@ -15,6 +15,8 @@ void RejectNow(Action action, string name) { bool rejected = false; try { action
 VaultData Clone(VaultData d) => JsonSerializer.Deserialize<VaultData>(JsonSerializer.Serialize(d, JsonOptions.Strict), JsonOptions.Strict)!;
 try
 {
+    if (args.Length > 0 && args[0] == "--local-transfer-tests") { await LocalTransferTests.Run(); return; }
+    if (args.Length > 0 && args[0] == "--native-lan-host") { await LocalTransferTests.NativeHost(args[1]); return; }
     if (args.Length > 0 && args[0] == "--desktop-tests") { await DesktopTests.Run(); return; }
     if (args.Length > 0 && args[0] == "--ux-tests") { await VaultUxTests.Run(); return; }
     if (args.Length > 0 && args[0] == "--ux-fixtures") { await VaultUxTests.Fixtures(args[1]); return; }

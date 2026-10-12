@@ -29,14 +29,14 @@ public final class MainActivity extends Activity {
     private final Handler handler=new Handler(Looper.getMainLooper());
     private volatile int epoch; private int timeout=2,attempts; private volatile boolean active; private boolean busy; private long lastTouch,retryAfter,clipboardUntil;
     private String filter="all",search="",clipboard;
-    private byte[] exportBytes,pendingImport; private LocalTransfer pendingTransfer;
+    private byte[] exportBytes,pendingImport; private volatile LocalTransfer pendingTransfer;
     private String scannedPairing;
     private final List<AlertDialog> dialogs=new ArrayList<>();
     private final Runnable tick=new Runnable(){public void run(){if(active&&engine!=null&&engine.isOpen()&&SystemClock.elapsedRealtime()-lastTouch>timeout*60000L)lock();handler.postDelayed(this,1000);}};
     @Override public void onCreate(Bundle b){super.onCreate(b);try{engine=Store.engine(this);}catch(Exception e){Ui.error(this,e);finish();return;}handler.post(tick);}
     @Override protected void onStart(){super.onStart();active=true;showLock();}
     @Override protected void onResume(){super.onResume();if(scannedPairing!=null){String code=scannedPairing;scannedPairing=null;showPairing(Store.vault(this).exists(),code);}}
-    @Override protected void onStop(){super.onStop();active=false;epoch++;for(AlertDialog d:new ArrayList<>(dialogs))d.dismiss();dialogs.clear();displayedEntries.clear();list=null;entryAdapter=null;vaultStats=null;if(root!=null)root.removeAllViews();worker.execute(()->engine.close());}
+    @Override protected void onStop(){super.onStop();active=false;epoch++;cancelLocalTransfer();for(AlertDialog d:new ArrayList<>(dialogs))d.dismiss();dialogs.clear();displayedEntries.clear();list=null;entryAdapter=null;vaultStats=null;if(root!=null)root.removeAllViews();worker.execute(()->engine.close());}
     @Override protected void onDestroy(){handler.removeCallbacks(tick);worker.shutdown();super.onDestroy();}
     @Override public boolean dispatchTouchEvent(android.view.MotionEvent e){lastTouch=SystemClock.elapsedRealtime();return super.dispatchTouchEvent(e);}
     @Override public void onUserInteraction(){super.onUserInteraction();lastTouch=SystemClock.elapsedRealtime();}
@@ -46,7 +46,8 @@ public final class MainActivity extends Activity {
         if(busy)return;busy=true;int stamp=epoch;
         worker.execute(()->{Exception failure=null;try{action.run();}catch(Exception e){failure=e;}if(!active||stamp!=epoch)engine.close();Exception error=failure;runOnUiThread(()->{busy=false;if(!active||stamp!=epoch)return;if(error!=null)Ui.error(this,error);else done.run();});});
     }
-    private void lock(){epoch++;for(AlertDialog d:new ArrayList<>(dialogs))d.dismiss();dialogs.clear();displayedEntries.clear();list=null;entryAdapter=null;vaultStats=null;clearClipboard();worker.execute(()->engine.close());showLock();}
+    private void cancelLocalTransfer(){LocalTransfer current=pendingTransfer;pendingTransfer=null;if(current!=null)current.cancel();}
+    private void lock(){epoch++;cancelLocalTransfer();for(AlertDialog d:new ArrayList<>(dialogs))d.dismiss();dialogs.clear();displayedEntries.clear();list=null;entryAdapter=null;vaultStats=null;clearClipboard();worker.execute(()->engine.close());showLock();}
     private void toast(String s){Toast.makeText(this,s,Toast.LENGTH_LONG).show();}
     private void showLock(){
         if(!active)return;root=Ui.screen(this);Ui.gap(root,35);LinearLayout logo=Ui.card(this,Ui.SOFT);logo.addView(Ui.brandIcon(this,64));logo.addView(Ui.text(this,"Your private space.",27,Ui.INK,true));Ui.gap(logo,9);logo.addView(Ui.text(this,"Encrypted. Local. Yours.",14,Ui.MUTED,false));root.addView(logo);Ui.gap(root,25);
@@ -312,16 +313,33 @@ public final class MainActivity extends Activity {
         showPairing(existing,"");
     }
     private void showPairing(boolean existing,String scanned){
-        LinearLayout b=Ui.column(this);b.addView(Ui.text(this,"Start a private transfer in the Windows app. Scan its QR or paste the temporary pairing code. Use the same private Wi-Fi network.",13,Ui.MUTED,false));
+        LinearLayout b=Ui.column(this);b.addView(Ui.text(this,"Start a private transfer in Windows and keep its window open. Connect both devices to the same local Wi-Fi or hotspot, then scan its current QR. Internet is not required.",13,Ui.MUTED,false));
         b.addView(Ui.button(this,"Scan QR code",true,()->{if(!busy)startActivityForResult(new Intent(this,ScanQrActivity.class),13);}));Ui.gap(b,18);
         EditText code=Ui.field(b,"Pairing code (BV1:…)",scanned,false,4096);code.setSingleLine(false);code.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);code.setSelectAllOnFocus(true);
         if(!scanned.isEmpty())b.addView(Ui.text(this,"QR scanned. Tap Connect & transfer to continue.",13,Ui.PURPLE,true));
-        AlertDialog d=dialog("Connect your devices",b);d.setOnDismissListener(x->{code.setText("");dialogs.remove(d);});
-        b.addView(Ui.button(this,"Connect & transfer",true,()->{String c=code.getText().toString().trim();code.setText("");task(()->{pendingTransfer=new LocalTransfer(c);pendingImport=pendingTransfer.download();if(engine.isOpen()&&!engine.needsPassphrase(pendingImport)){engine.merge(pendingImport);pendingTransfer.upload(engine.export());pendingImport=null;pendingTransfer=null;}},()->{d.dismiss();if(pendingImport==null){toast("Both devices have the merged vault.");showVault();}else pairingImportPrompt(pendingImport);});}));
+        TextView status=Ui.text(this,"Ready to connect over local Wi-Fi.",13,Ui.MUTED,false);b.addView(status);
+        boolean[] continueTransfer={false};java.util.concurrent.atomic.AtomicBoolean abandoned=new java.util.concurrent.atomic.AtomicBoolean();AlertDialog d=dialog("Connect your devices",b);
+        d.setOnDismissListener(x->{clearCloudFields(b);dialogs.remove(d);if(!continueTransfer[0]){abandoned.set(true);cancelLocalTransfer();pendingImport=null;}});
+        b.addView(Ui.button(this,"Connect & transfer",true,()->{
+            if(busy)return;String c=code.getText().toString().trim();int stamp=epoch;
+            task(()->{
+                LocalTransfer connection=new LocalTransfer(c,(socket,host)->LocalWifi.bind(this,socket,host),message->handler.post(()->{if(active&&epoch==stamp&&d.isShowing()){status.setText(message);lastTouch=SystemClock.elapsedRealtime();}}));
+                pendingTransfer=connection;
+                try{
+                    if(!active||epoch!=stamp||abandoned.get()){connection.cancel();throw new IOException("Transfer cancelled.");}
+                    byte[] bytes=connection.download();if(!active||epoch!=stamp){connection.cancel();throw new IOException("Transfer cancelled.");}
+                    pendingImport=bytes;
+                    if(engine.isOpen()&&!engine.needsPassphrase(bytes)){engine.merge(bytes);connection.upload(engine.export());pendingImport=null;pendingTransfer=null;}
+                }catch(Exception failure){connection.cancel();if(pendingTransfer==connection)pendingTransfer=null;pendingImport=null;throw failure;}
+            },()->{continueTransfer[0]=true;d.dismiss();if(pendingImport==null){toast("Both devices have the merged vault.");showVault();}else pairingImportPrompt(pendingImport);});
+        }));
+        b.addView(Ui.button(this,"Cancel transfer",false,d::dismiss));
     }
     private void pairingImportPrompt(byte[] bytes){
-        pendingImport=null;boolean exists=Store.vault(this).exists();LinearLayout b=Ui.column(this);EditText master=Ui.field(b,exists?"Current phone passphrase":"Windows vault passphrase","",true,1024);EditText incoming=exists?Ui.field(b,"Incoming passphrase if rotated","",true,1024):null;b.addView(Ui.text(this,"Unlock the received vault locally. A newer key is adopted only after verification. No passphrase is sent over the network.",13,Ui.MUTED,false));AlertDialog d=dialog("Complete the encrypted transfer",b);
-        b.addView(Ui.button(this,"Unlock & complete transfer",true,()->{String p=master.getText().toString(),r=incoming==null?"":incoming.getText().toString();master.setText("");if(incoming!=null)incoming.setText("");task(()->{if(exists){if(!engine.isOpen())engine.open(p);if(engine.needsPassphrase(bytes)){engine.mergeUsingPassword(bytes,r.isEmpty()?p:r);Biometrics.disable(this);}else engine.merge(bytes);}else{VaultEngine.importNew(Store.vault(this),bytes,p,Store.device(this));engine.open(p);engine.revokeTrust();}pendingTransfer.upload(engine.export());pendingTransfer=null;},()->{d.dismiss();toast("Transfer complete.");showVault();});}));
+        pendingImport=null;LocalTransfer connection=pendingTransfer;if(connection==null)return;boolean exists=Store.vault(this).exists();LinearLayout b=Ui.column(this);EditText master=Ui.field(b,exists?"Current phone passphrase":"Windows vault passphrase","",true,1024);EditText incoming=exists?Ui.field(b,"Incoming passphrase if rotated","",true,1024):null;b.addView(Ui.text(this,"Unlock the received vault locally. Keep the Windows transfer window open. No passphrase is sent over the network. If sending fails, your phone keeps its merged data.",13,Ui.MUTED,false));AlertDialog d=dialog("Complete the encrypted transfer",b);
+        boolean[] finished={false};d.setOnDismissListener(x->{clearCloudFields(b);dialogs.remove(d);if(!finished[0])cancelLocalTransfer();});
+        b.addView(Ui.button(this,"Unlock & complete transfer",true,()->{String p=master.getText().toString(),r=incoming==null?"":incoming.getText().toString();master.setText("");if(incoming!=null)incoming.setText("");int stamp=epoch;task(()->{if(!active||epoch!=stamp||pendingTransfer!=connection)throw new IOException("Transfer cancelled.");if(exists){if(!engine.isOpen())engine.open(p);if(engine.needsPassphrase(bytes)){engine.mergeUsingPassword(bytes,r.isEmpty()?p:r);Biometrics.disable(this);}else engine.merge(bytes);}else{VaultEngine.importNew(Store.vault(this),bytes,p,Store.device(this));engine.open(p);engine.revokeTrust();}connection.upload(engine.export());pendingTransfer=null;},()->{finished[0]=true;d.dismiss();toast("Transfer complete.");showVault();});}));
+        b.addView(Ui.button(this,"Cancel transfer",false,d::dismiss));
     }
     private void settings(){
         LinearLayout b=Ui.column(this);b.addView(Ui.text(this,"Autofill uses Android's built-in framework. The vault is unlocked for each fill request. Only exact HTTPS hosts or apps you explicitly link are eligible.",13,Ui.MUTED,false));Ui.gap(b,12);
