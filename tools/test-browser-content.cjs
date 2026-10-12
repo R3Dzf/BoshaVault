@@ -93,6 +93,12 @@ vm.runInNewContext(fs.readFileSync("browser-extension/content.js","utf8"),env);
   const accountButton=panel.children.find(x=>x.tagName==="BUTTON" &&
     x.textContent?.includes("demo@example.com"));
   assert.ok(accountButton,"Matched account appears in dropdown");
+  const moreButton=panel.children.find(x=>x.tagName==="BUTTON" && x.textContent?.startsWith("More options"));
+  const advanced=panel.children.find(x=>x.tagName==="DIV" && x.style.display==="none");
+  assert.ok(moreButton&&advanced,"secondary password actions remain collapsed by default");
+  moreButton.events.click({stopPropagation(){}});
+  assert.equal(advanced.style.display,"block","advanced actions open on explicit user request");
+
   // Browser retargets pointerdown inside CLOSED ShadowRoot to the host.
   // A past bug hid the popup on pointerdown before the click action ran.
   handlers.pointerdown({target:popup});
