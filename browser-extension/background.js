@@ -46,6 +46,11 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       password: ["save","update"].includes(message.op) ? message.password : ""
     });
     if (!answer || typeof answer.status !== "string") return {status: "unavailable"};
+    // An HTTPS tab may navigate while the native vault enumerates accounts.
+    // Recheck the exact live document before returning username metadata,
+    // not just before issuing the native request.
+    if (message.op === "list" && !(await sameActiveDocument(sender,page.origin)))
+      return {status:"denied",message:"The browser page changed. Reload and retry."};
     // Navigation during Windows confirmation must not deliver a secret to a
     // different page, even in the same tab.
     if ((message.op === "fill" && answer.status === "filled") ||
