@@ -88,7 +88,7 @@ public final class MainActivity extends Activity {
         worker.execute(()->{Exception failure=null;try{action.run();}catch(Exception e){failure=e;}if(!active||stamp!=epoch)engine.close();Exception error=failure;runOnUiThread(()->{busy=false;if(!active||stamp!=epoch)return;if(error!=null)Ui.error(this,error);else{nextCloudCheck=0;done.run();}});});
     }
     private void cancelLocalTransfer(){LocalTransfer current=pendingTransfer;pendingTransfer=null;if(current!=null)current.cancel();}
-    private void lock(){authGraceUntil=0;authenticatorDialogs=0;autoSession=null;autoSessionSlot=null;autoSessionUntil=0;epoch++;undoEntryId=null;CloudClient running=autoClient;if(running!=null)running.close();cancelLocalTransfer();for(AlertDialog d:new ArrayList<>(dialogs))d.dismiss();dialogs.clear();displayedEntries.clear();list=null;entryAdapter=null;vaultStats=null;syncStatus=null;clearClipboard();worker.execute(()->engine.close());showLock();}
+    private void lock(){authGraceUntil=0;authenticatorDialogs=0;autoSession=null;autoSessionSlot=null;autoSessionUntil=0;epoch++;undoEntryId=null;CloudClient running=autoClient;if(running!=null)running.close();cancelLocalTransfer();for(AlertDialog d:new ArrayList<>(dialogs))d.dismiss();dialogs.clear();displayedEntries.clear();list=null;entryAdapter=null;vaultStats=null;syncStatus=null;clearClipboard();if(!active&&root!=null)root.removeAllViews();worker.execute(()->engine.close());showLock();}
     private void autoSyncTick(){
         long now=SystemClock.elapsedRealtime();if(cloudOpen||busy||now<nextCloudCheck)return;nextCloudCheck=now+12000;
         int stamp=epoch;cloudWorker.execute(()->{
