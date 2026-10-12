@@ -389,10 +389,10 @@ public final class MainActivity extends Activity {
                     try{store.save(next);}finally{CloudSettingsStore.clear(next);}
                 },()->{d.dismiss();cloud();})));
             }));
-        }
             b.addView(Ui.button(this,"Email verification & legacy recovery ▾",false,()->
                 accountAdvanced.setVisibility(accountAdvanced.getVisibility()==View.GONE?View.VISIBLE:View.GONE)));
             b.addView(accountAdvanced);
+        }
         Ui.gap(b,12);b.addView(status);
     }
     /** Guided, authenticated, user-approved pairing; no recovery key in the QR. */
