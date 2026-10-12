@@ -30,12 +30,12 @@ public final class MainActivity extends Activity {
     private volatile int epoch; private int timeout=2,attempts; private volatile boolean active; private boolean busy; private long lastTouch,retryAfter,clipboardUntil;
     private String filter="all",search="",clipboard,undoEntryId;private long undoUntil;private volatile boolean cloudOpen;private volatile long nextCloudCheck;private long autoSessionUntil;private TextView syncStatus;private volatile CloudClient autoClient;private volatile CloudAuth.Session autoSession;private String autoSessionSlot;
     private byte[] exportBytes,pendingImport; private volatile LocalTransfer pendingTransfer;
-    private String scannedPairing,scannedCloud;
+    private String scannedPairing,scannedCloud,scannedSecure;
     private final List<AlertDialog> dialogs=new ArrayList<>();
     private final Runnable tick=new Runnable(){public void run(){if(active&&engine!=null&&engine.isOpen()&&SystemClock.elapsedRealtime()-lastTouch>timeout*60000L)lock();if(active&&engine!=null&&engine.isOpen())autoSyncTick();handler.postDelayed(this,1000);}};
     @Override public void onCreate(Bundle b){super.onCreate(b);try{engine=Store.engine(this);CloudSyncJob.schedule(this);}catch(Exception e){Ui.error(this,e);finish();return;}handler.post(tick);}
     @Override protected void onStart(){super.onStart();active=true;showLock();}
-    @Override protected void onResume(){super.onResume();if(scannedPairing!=null){String code=scannedPairing;scannedPairing=null;showPairing(Store.vault(this).exists(),code);}if(scannedCloud!=null){String code=scannedCloud;scannedCloud=null;joinCloud(code);}}
+    @Override protected void onResume(){super.onResume();if(scannedPairing!=null){String code=scannedPairing;scannedPairing=null;showPairing(Store.vault(this).exists(),code);}if(scannedCloud!=null){String code=scannedCloud;scannedCloud=null;joinCloud(code);}if(scannedSecure!=null&&(!Store.vault(this).exists()||engine.isOpen())){String code=scannedSecure;scannedSecure=null;connectToPc(code);}}
     @Override protected void onStop(){super.onStop();active=false;epoch++;autoSession=null;CloudClient running=autoClient;if(running!=null)running.close();cancelLocalTransfer();for(AlertDialog d:new ArrayList<>(dialogs))d.dismiss();dialogs.clear();displayedEntries.clear();list=null;entryAdapter=null;vaultStats=null;syncStatus=null;if(root!=null)root.removeAllViews();worker.execute(()->engine.close());}
     @Override protected void onDestroy(){handler.removeCallbacks(tick);worker.shutdown();cloudWorker.shutdown();super.onDestroy();}
     @Override public boolean dispatchTouchEvent(android.view.MotionEvent e){lastTouch=SystemClock.elapsedRealtime();return super.dispatchTouchEvent(e);}
@@ -84,12 +84,14 @@ public final class MainActivity extends Activity {
         root.addView(Ui.button(this,"Import encrypted vault",false,this::chooseImport));
         root.addView(Ui.button(this,"Check for app updates",false,this::appUpdates));
         if(!exists)root.addView(Ui.button(this,"Receive from your Windows app",false,()->showPairing(false)));
-        if(!exists)root.addView(Ui.button(this,"Restore from cloud · one-time pairing",false,()->joinCloud("")));
+        if(!exists)root.addView(Ui.button(this,"Connect to my PC · secure QR",false,()->connectToPc("")));
+        if(!exists)root.addView(Ui.button(this,"Restore from cloud · legacy recovery code",false,()->joinCloud("")));
         Ui.gap(root,25);root.addView(Ui.text(this,"Works offline without an account.\nA lost passphrase cannot be reset. Keep an encrypted backup.",11,Ui.MUTED,false));
         if(pendingImport!=null)handler.post(()->importPrompt(pendingImport));
     }
     private void showVault(){
-        if(!engine.isOpen()||!active)return;lastTouch=SystemClock.elapsedRealtime();list=null;entryAdapter=null;displayedEntries.clear();root=Ui.fixedScreen(this);
+        if(!engine.isOpen()||!active)return;
+        if(scannedSecure!=null){String code=scannedSecure;scannedSecure=null;handler.post(()->connectToPc(code));}lastTouch=SystemClock.elapsedRealtime();list=null;entryAdapter=null;displayedEntries.clear();root=Ui.fixedScreen(this);
         LinearLayout top=new LinearLayout(this);top.setGravity(Gravity.CENTER_VERTICAL);top.addView(Ui.text(this,"Lockvyn",21,Ui.INK,true),new LinearLayout.LayoutParams(0,-2,1));
         TextView lock=Ui.text(this,"Lock",13,Ui.PURPLE,true);lock.setPadding(Ui.dp(this,12),Ui.dp(this,12),Ui.dp(this,12),Ui.dp(this,12));lock.setOnClickListener(v->lock());top.addView(lock);root.addView(top);
         LinearLayout heading=new LinearLayout(this);heading.setGravity(Gravity.CENTER_VERTICAL);
@@ -318,7 +320,7 @@ public final class MainActivity extends Activity {
             CheckBox auto=check(b,"Sync automatically on this device",profile.optBoolean("autoSync",true));auto.setOnCheckedChangeListener((button,enabled)->cloudTask(status,()->{synchronized(CloudClient.GATE){JSONObject latest=store.load(profile.getString("vaultId"));if(latest==null)throw new IOException("Cloud is disconnected on this device.");try{latest.put("autoSync",enabled);store.save(latest);profile.put("autoSync",enabled);}finally{CloudSettingsStore.clear(latest);}}},()->{status.setText(enabled?"Automatic sync is on.":"Automatic sync is paused on this device.");if(enabled)nextCloudCheck=0;}));
             b.addView(Ui.button(this,"Sync now",true,()->cloudRefresh(client,profile,store,status,signedIn->{int[] conflicts={0};cloudTask(status,()->conflicts[0]=client.sync(engine,profile,store,signedIn),()->{status.setText("Synced successfully. "+conflicts[0]+" conflict copies kept.");renderList();});})));
             b.addView(Ui.button(this,"Cloud account security · 2FA",false,()->cloudRefresh(client,profile,store,status,signedIn->cloudSecurity(client,signedIn,profile,store))));
-            b.addView(Ui.button(this,"Copy connection code for your other device",false,()->{try{copy(CloudSnapshot.pairing(profile));status.setText("Connection code copied. Share it only with your own trusted device; clipboard clears in 20 seconds.");}catch(Exception e){Ui.error(this,e);}}));
+            b.addView(Ui.button(this,"Copy legacy recovery code (advanced)",false,()->{try{copy(CloudSnapshot.pairing(profile));status.setText("Permanent cloud recovery key copied; keep private. The clipboard clears in 20 seconds.");}catch(Exception e){Ui.error(this,e);}}));
             b.addView(Ui.text(this,"Connect your other device once using this account and connection code. The code contains your recovery key. Keep an encrypted local backup.",12,Ui.MUTED,false));
             b.addView(Ui.button(this,"Disconnect this device",false,()->new AlertDialog.Builder(this).setTitle("Disconnect cloud?").setMessage("Keep your local vault and encrypted cloud backups, and sign out this cloud session? Keep your connection code on another trusted device first.").setNegativeButton("Cancel",null).setPositiveButton("Disconnect",(x,y)->cloudRefresh(client,profile,store,status,signedIn->cloudTask(status,()->client.signOut(signedIn,store),()->{d.dismiss();toast("Cloud session signed out. Previously issued access tokens expire normally. Local vault unchanged.");}))).show()));
             b.addView(Ui.button(this,"Forget local cloud settings (offline)",false,()->new AlertDialog.Builder(this).setTitle("Forget cloud settings?").setMessage("This forgets your recovery key and saved sign-in on this phone. It does not revoke server sessions or remove cloud backups. Keep your code elsewhere first.").setNegativeButton("Cancel",null).setPositiveButton("Forget",(x,y)->cloudTask(status,store::forget,()->{d.dismiss();toast("Local settings forgotten; server session not revoked.");})).show()));
@@ -327,7 +329,8 @@ public final class MainActivity extends Activity {
             b.addView(Ui.text(this,"Your offline vault needs no account. The cloud password is separate from your master passphrase.",12,Ui.MUTED,false));
             EditText email=Ui.field(b,"Cloud account email","",false,320),password=Ui.field(b,"Separate cloud password (16+ characters)","",true,1024),code=Ui.field(b,"Other device's cloud connection code (only when joining)","",true,1024);email.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
             EditText confirmation=Ui.field(b,"Email confirmation code (if shown in your email)","",true,10);confirmation.setInputType(InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_VARIATION_PASSWORD);
-            b.addView(Ui.text(this,"First device: create and confirm a cloud account, then start a new cloud vault. On another device, use the same account and connection code after importing the same encrypted vault.",12,Ui.MUTED,false));
+            b.addView(Ui.text(this,"First device: create and confirm a cloud account, then start a new cloud vault. To join this vault from a connected PC, choose Connect to my PC and scan its temporary QR.",12,Ui.MUTED,false));
+            b.addView(Ui.button(this,"Connect to my PC · scan secure QR",true,()->{d.dismiss();connectToPc("");}));
             b.addView(Ui.button(this,"Create cloud account",false,()->{String secret=password.getText().toString(),address=email.getText().toString().trim();password.setText("");cloudTask(status,()->client.signUp(address,secret),()->status.setText("Confirm the account using your email, then sign in below. Local vault unchanged."));}));
             b.addView(Ui.button(this,"Resend confirmation email",false,()->{String address=email.getText().toString().trim();cloudTask(status,()->client.resendConfirmation(address),()->status.setText("If the account is awaiting confirmation, check your email including Spam. Wait at least 60 seconds before requesting another message."));}));
             b.addView(Ui.button(this,"Confirm email code",false,()->{String digits=confirmation.getText().toString().trim(),address=email.getText().toString().trim();confirmation.setText("");cloudTask(status,()->client.auth.verifyEmail(address,digits),()->status.setText("Email confirmed. Enter your cloud password and sign in below. 2FA is checked separately."));}));
@@ -342,6 +345,95 @@ public final class MainActivity extends Activity {
             }));
         }
         Ui.gap(b,12);b.addView(status);
+    }
+    /** Guided, authenticated, user-approved pairing; no recovery key in the QR. */
+    private void connectToPc(String invitation){
+        if(busy)return;
+        boolean existing=Store.vault(this).exists();
+        if(existing&&!engine.isOpen()){scannedSecure=invitation.isEmpty()?null:invitation;toast("Unlock the existing vault first, then connect from Sync.");return;}
+        LinearLayout b=Ui.column(this);
+        b.addView(Ui.text(this,"On Windows open Sync → Add device. Scan its temporary QR; never share a permanent recovery code.",14,Ui.MUTED,false));
+        b.addView(Ui.button(this,"Scan secure Add device QR",true,()->startActivityForResult(new Intent(this,ScanQrActivity.class).putExtra("securePairing",true),15)));
+        if(invitation.isEmpty()){dialog("Connect to my PC",b);return;}
+        final DevicePairing peer;
+        try{peer=new DevicePairing(invitation);}catch(Exception error){Ui.error(this,error);return;}
+        b.addView(Ui.text(this,"Secure QR scanned. Sign in using the SAME cloud account as Windows. The phone will show six digits to compare.",13,Ui.PURPLE,true));
+        EditText email=Ui.field(b,"Cloud account email","",false,320),
+            password=Ui.field(b,"Cloud account password","",true,1024);
+        email.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
+        EditText master=existing?null:Ui.field(b,"Existing Windows vault master passphrase","",true,1024);
+        TextView number=Ui.text(this,"••• •••",26,Ui.INK,true);
+        number.setGravity(Gravity.CENTER);b.addView(number);
+        TextView status=Ui.text(this,"Ready. This pairing expires after two minutes.",13,Ui.MUTED,false);
+        b.addView(status);
+        int stamp=epoch; CloudSettingsStore store=new CloudSettingsStore(this);
+        CloudClient client=new CloudClient(()->{if(!active||stamp!=epoch)throw new IOException("Pairing was interrupted.");});
+        AlertDialog d=dialog("Connect to my PC · verify",b);
+        final Runnable[] poll={null};
+        final CloudAuth.Session[] authSession={null};
+        final boolean[] finished={false};
+        d.setOnDismissListener(x->{
+            dialogs.remove(d);if(!finished[0])client.close();peer.close();
+            clearCloudFields(b);cloudOpen=false;nextCloudCheck=0;
+        });
+        b.addView(Ui.button(this,"Sign in & request approval",true,()->{
+            String address=email.getText().toString().trim(),secret=password.getText().toString();
+            String passphrase=master==null?"":master.getText().toString();
+            password.setText("");if(master!=null)master.setText("");
+            cloudTask(status,()->authSession[0]=client.signIn(address,secret),()->{
+                if(!d.isShowing())return;
+                cloudAssure(client,authSession[0],null,store,status,false,verified->{
+                    authSession[0]=verified;
+                    cloudTask(status,()->client.pairingRequest(peer,verified),()->{
+                        if(!d.isShowing())return;
+                        try{
+                            String sas=peer.securityCode();
+                            number.setText(sas.substring(0,3)+" "+sas.substring(3));
+                            status.setText("Compare this number with Windows. The PC owner must explicitly approve.");
+                            poll[0]=new Runnable(){public void run(){
+                                if(!d.isShowing()||finished[0])return;
+                                if(System.currentTimeMillis()/1000>=peer.expiresUnix){status.setText("Pairing expired. Scan a new QR.");return;}
+                                if(busy){handler.postDelayed(this,1500);return;}
+                                String[] sealed={null};
+                                cloudTask(status,()->sealed[0]=client.pairingSealed(peer,verified),()->{
+                                    if(!d.isShowing())return;
+                                    if(sealed[0]==null){
+                                        status.setText("Waiting for Windows to approve the matching security code…");
+                                        handler.postDelayed(poll[0],2000);return;
+                                    }
+                                    cloudTask(status,()->{
+                                        String secretPairing=peer.open(sealed[0]);
+                                        JSONObject paired=CloudSnapshot.pairing(secretPairing,existing?engine.snapshot().getString("vaultId"):null,verified.owner);
+                                        if(existing){
+                                            if(!engine.isOpen())throw new IOException("Unlock your vault before pairing.");
+                                            JSONObject old=store.load(paired.getString("vaultId"));
+                                            if(old!=null){CloudSettingsStore.clear(old);throw new Exception("This vault is already connected. Disconnect explicitly before changing cloud keys.");}
+                                        }else if(Store.vault(MainActivity.this).exists())throw new IOException("Vault was created during pairing. No data was replaced.");
+                                        byte[] inner=null;
+                                        try{
+                                            if(!existing){
+                                                inner=client.firstSnapshot(paired,verified);
+                                                VaultEngine.importNew(Store.vault(MainActivity.this),inner,passphrase,Store.device(MainActivity.this));
+                                                engine.open(passphrase);engine.revokeTrust();
+                                            }
+                                            JSONObject profile=new JSONObject()
+                                                .put("version",1).put("ownerId",verified.owner).put("vaultId",paired.getString("vaultId"))
+                                                .put("vaultSlot",paired.getString("vaultSlot")).put("deviceSlot",UUID.randomUUID().toString())
+                                                .put("recoveryKey",paired.getString("recoveryKey")).put("refreshToken",verified.refresh)
+                                                .put("email",address).put("lastSyncUtc","").put("autoSync",true);
+                                            try{store.save(profile);}finally{CloudSettingsStore.clear(profile);}
+                                            client.pairingComplete(peer,verified);
+                                        }finally{if(inner!=null)Arrays.fill(inner,(byte)0);}
+                                    },()->{finished[0]=true;status.setText("Connected successfully. Automatic sync is on.");d.dismiss();showVault();});
+                                });
+                            }};
+                            handler.postDelayed(poll[0],300);
+                        }catch(Exception error){status.setText("Secure pairing failed: "+error.getMessage());}
+                    });
+                });
+            });
+        }));
+        b.addView(Ui.button(this,"Cancel pairing",false,d::dismiss));
     }
     private void joinCloud(String scanned){
         if(Store.vault(this).exists()){toast("A vault already exists. Unlock and use Sync to connect it.");return;}
@@ -365,7 +457,7 @@ public final class MainActivity extends Activity {
         }));
     }
     private void chooseImport(){startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*").addCategory(Intent.CATEGORY_OPENABLE),12);}
-    @Override protected void onActivityResult(int request,int result,Intent intent){super.onActivityResult(request,result,intent);if(request==13){scannedPairing="";if(result==RESULT_OK&&intent!=null){String code=intent.getStringExtra(ScanQrActivity.RESULT_PAIRING);try{new LocalTransfer(code);scannedPairing=code;}catch(Exception e){toast("The scanned code is not a valid Lockvyn pairing code.");}}return;}if(request==14){if(result==RESULT_OK&&intent!=null)scannedCloud=intent.getStringExtra(ScanQrActivity.RESULT_PAIRING);return;}if(result!=RESULT_OK||intent==null||intent.getData()==null){exportBytes=null;return;}Uri uri=intent.getData();
+    @Override protected void onActivityResult(int request,int result,Intent intent){super.onActivityResult(request,result,intent);if(request==13){scannedPairing="";if(result==RESULT_OK&&intent!=null){String code=intent.getStringExtra(ScanQrActivity.RESULT_PAIRING);try{new LocalTransfer(code);scannedPairing=code;}catch(Exception e){toast("The scanned code is not a valid Lockvyn pairing code.");}}return;}if(request==14){if(result==RESULT_OK&&intent!=null)scannedCloud=intent.getStringExtra(ScanQrActivity.RESULT_PAIRING);return;}if(request==15){if(result==RESULT_OK&&intent!=null)scannedSecure=intent.getStringExtra(ScanQrActivity.RESULT_PAIRING);return;}if(result!=RESULT_OK||intent==null||intent.getData()==null){exportBytes=null;return;}Uri uri=intent.getData();
         if(request==11&&exportBytes!=null){byte[] bytes=exportBytes;exportBytes=null;task(()->{try(OutputStream out=getContentResolver().openOutputStream(uri,"wt")){if(out==null)throw new Exception("Cannot write the backup.");out.write(bytes);}},()->toast("Encrypted backup saved."));}
         else if(request==12){task(()->{try(InputStream in=getContentResolver().openInputStream(uri)){if(in==null)throw new Exception("Cannot read this file.");pendingImport=VaultEngine.bounded(in);}},()->importPrompt(pendingImport));}
     }
