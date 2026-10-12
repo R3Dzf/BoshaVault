@@ -14,7 +14,7 @@ Keep your credentials organized, encrypted, and within reach — without making 
 ![Android](https://img.shields.io/badge/Android-9%2B-14866D)
 [![MIT License](https://img.shields.io/badge/License-MIT-6558D9)](LICENSE)
 
-**[Download for Windows](https://github.com/R3Dzf/BoshaVault/releases/tag/windows-v1.17.0)** &nbsp;·&nbsp;
+**[Download for Windows](https://github.com/R3Dzf/BoshaVault/releases/tag/windows-v1.18.0)** &nbsp;·&nbsp;
 **[Download for Android](https://github.com/R3Dzf/BoshaVault/releases/tag/android-v1.14.0)** &nbsp;·&nbsp;
 **[Security](docs/SECURITY.md)**
 
@@ -58,7 +58,7 @@ The **Calm Pro** interface focuses on what matters: your vault, connected device
 
 ### Windows
 
-1. Open **[Download for Windows](https://github.com/R3Dzf/BoshaVault/releases/tag/windows-v1.17.0)** and download `Lockvyn-win-Setup.exe`.
+1. Open **[Download for Windows](https://github.com/R3Dzf/BoshaVault/releases/tag/windows-v1.18.0)** and download `Lockvyn-win-Setup.exe`.
 2. Install and launch Lockvyn, then create a vault with a strong master passphrase.
 3. Add your first login. Use **Sync & Devices** only if you want cloud sync or device pairing.
 4. Future updates can be checked and applied inside the app. The updater shows the expected download size, including a smaller Delta package when available.
@@ -127,16 +127,17 @@ git clone https://github.com/R3Dzf/BoshaVault.git
 cd BoshaVault
 ```
 
-The currently published application source is tracked by its corresponding release branches. For a reproducible build, check out the release branch you intend to test and follow its [build guide](https://github.com/R3Dzf/BoshaVault/blob/release/windows-v1.17.0/docs/GITHUB-BUILD.md). Do not publish APKs with temporary signing keys as upgrades to the official Android app.
+The currently published application source is tracked by its corresponding release branches. For a reproducible build, check out the release branch you intend to test and follow its [build guide](https://github.com/R3Dzf/BoshaVault/blob/release/windows-v1.18.0/docs/GITHUB-BUILD.md). Do not publish APKs with temporary signing keys as upgrades to the official Android app.
 
 **Useful documentation**
 
 - [Security model & limitations](docs/SECURITY.md)
 - [Cloud account setup and 2FA](https://github.com/R3Dzf/BoshaVault/blob/release/android-v1.14.0/docs/CLOUD-ACCOUNT-SETUP.md)
 - [Device pairing and its current limitations](https://github.com/R3Dzf/BoshaVault/blob/release/android-v1.14.0/docs/DEVICE-PAIRING.md)
-- [Windows updates](https://github.com/R3Dzf/BoshaVault/blob/release/windows-v1.17.0/docs/WINDOWS-UPDATES.md)
+- [Browser Autofill setup, Quiet Mode & profile support](https://github.com/R3Dzf/BoshaVault/blob/release/windows-v1.18.0/docs/BROWSER-AUTOFILL.md)
+- [Windows updates](https://github.com/R3Dzf/BoshaVault/blob/release/windows-v1.18.0/docs/WINDOWS-UPDATES.md)
 - [Android updates](https://github.com/R3Dzf/BoshaVault/blob/release/android-v1.14.0/docs/ANDROID-UPDATES.md)
-- [Calm Pro design direction](https://github.com/R3Dzf/BoshaVault/blob/release/windows-v1.17.0/docs/CALM-PRO-UI.md)
+- [Calm Pro design direction](https://github.com/R3Dzf/BoshaVault/blob/release/windows-v1.18.0/docs/CALM-PRO-UI.md)
 
 ## Project status
 
