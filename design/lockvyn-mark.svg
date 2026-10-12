@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="512" height="512">
+  <title>Lockvyn — shield and keyhole</title>
+  <rect width="108" height="108" rx="25" fill="#7762DF"/>
+  <path d="M54 17 L82 29 V51 C82 69 71 83 54 92 C37 83 26 69 26 51 V29 Z" fill="#FFF"/>
+  <circle cx="54" cy="45" r="10" fill="#7762DF"/>
+  <path d="M50 51 H58 L62 70 H46 Z" fill="#7762DF"/>
+</svg>

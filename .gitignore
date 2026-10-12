@@ -25,3 +25,6 @@ private/
 *.bak
 __pycache__/
 *.py[cod]
+
+# Supabase CLI local cache
+supabase/.temp/

@@ -115,13 +115,13 @@
   function title(ctx) {
     setup();
     panel.replaceChildren();
-    line("🔐 BoshaVault","top");
+    line("🔐 Lockvyn","top");
     line(location.hostname,"sub");
     position(ctx.anchor);
   }
   async function fill(ctx,id) {
     const at=origin;
-    message("Confirm this login in the BoshaVault Windows window…");
+    message("Confirm this login in the Lockvyn Windows window…");
     try {
       const answer=await chrome.runtime.sendMessage({op:"fill",entryId:id});
       if(at!==location.origin || focus?.anchor!==ctx.anchor ||
@@ -131,21 +131,21 @@
       if(ctx.user?.isConnected) assign(ctx.user,answer.username);
       if(ctx.pass?.isConnected) {
         if(!assign(ctx.pass,answer.password)){
-          message("Site password field rejected the password. Use BoshaVault's Copy password as a fallback.");
+          message("Site password field rejected the password. Use Lockvyn's Copy password as a fallback.");
           return;
         }
         hide();
       }else {
         message("Username filled. Continue to the password step and select the same account again.");
       }
-    } catch {message("BoshaVault did not respond. Please retry.");}
+    } catch {message("Lockvyn did not respond. Please retry.");}
   }
   function generate(ctx,length,symbols) {
     if (!visible(ctx.pass) || !safeFormDestination(ctx.form)) {hide();return;}
     const allowed=ctx.pass.maxLength>=0?ctx.pass.maxLength:64;
     const actual=Math.min(length,allowed);
     if(actual<16) {
-      message("This page limits passwords to fewer than 16 characters. BoshaVault won't generate a weak password.");
+      message("This page limits passwords to fewer than 16 characters. Lockvyn won't generate a weak password.");
       return;
     }
     // Only the deliberate button click creates a secret.
@@ -162,7 +162,7 @@
       " Complete signup on the website separately.");
     const username=(ctx.user?.value||"").trim();
     line("Username/email: "+(username || "Not found here — enter it in Windows before saving."),"sub");
-    button("Save username + password in BoshaVault",()=>save(ctx),true);
+    button("Save username + password in Lockvyn",()=>save(ctx),true);
     for(const entry of savedMatches.filter(e=>!e.related).slice(0,5)) {
       if(typeof entry.id!=="string" || typeof entry.username!=="string")continue;
       button("Update saved password · "+entry.username,()=>updatePassword(ctx,entry.id));
@@ -176,7 +176,7 @@
     }
     const sentOrigin=location.origin;
     const username=(ctx.user?.value||"").trim();
-    message("Review the saved account and new password change in BoshaVault Windows…");
+    message("Review the saved account and new password change in Lockvyn Windows…");
     try {
       const answer=await chrome.runtime.sendMessage({
         op:"update",entryId:id,username,password:draft.password
@@ -194,11 +194,11 @@
   }
   async function save(ctx) {
     if(!liveDraft(ctx)){message("The form changed. Focus the password field again to regenerate.");return;}
-    if (!safeFormDestination(ctx.form)){message("This form submits to a different site. BoshaVault will not save it.");return;}
+    if (!safeFormDestination(ctx.form)){message("This form submits to a different site. Lockvyn will not save it.");return;}
     if(location.origin!==origin || !ctx.pass.isConnected){hide();return;}
     const username=(ctx.user?.value||"").trim();
     const password=draft.password;
-    message("Review the website and username in BoshaVault Windows, then choose Save encrypted login.");
+    message("Review the website and username in Lockvyn Windows, then choose Save encrypted login.");
     try {
       // Username and generated password leave the content script ONLY at this
       // explicit Save click. No background password-field reading or storage.
@@ -206,13 +206,13 @@
       if(location.origin!==origin || !ctx.pass.isConnected){hide();return;}
       if(answer?.status==="saved"){
         draft=null;
-        message("Saved encrypted in BoshaVault. Submit the signup form on this website when ready.");
+        message("Saved encrypted in Lockvyn. Submit the signup form on this website when ready.");
       }else if(answer?.status==="locked"){
-        message("Unlock BoshaVault on Windows, then focus this field and click Save again.");
+        message("Unlock Lockvyn on Windows, then focus this field and click Save again.");
       }else{
         message(answer?.message || "Not saved. The password is still in the form — do not leave this page until you save it.");
       }
-    } catch {message("Could not save. Keep this page open and retry after starting BoshaVault.");}
+    } catch {message("Could not save. Keep this page open and retry after starting Lockvyn.");}
   }
   function render(ctx,reply) {
     if(!(ctx.pass?.isConnected || ctx.user?.isConnected) || !focus || focus.anchor!==ctx.anchor || location.origin!==origin)return;
@@ -237,14 +237,14 @@
       if(reply.accounts.length)line("Creating a different account?","sub");
       else line("No saved accounts for this HTTPS host. Try saving this website, or check the saved website address.","sub");
     } else if(reply?.status==="locked"){
-      button("Unlock BoshaVault on Windows",async()=>{
-        message("Unlock in BoshaVault, then focus the password field again.");
+      button("Unlock Lockvyn on Windows",async()=>{
+        message("Unlock in Lockvyn, then focus the password field again.");
         await chrome.runtime.sendMessage({op:"open"}).catch(()=>{});
       });
     } else if(reply?.status==="unavailable"){
-      line("Windows vault is disconnected. Generating still works, but saving needs BoshaVault running.");
+      line("Windows vault is disconnected. Generating still works, but saving needs Lockvyn running.");
     }
-    button("Save current website in BoshaVault",()=>capture(ctx),!ctx.pass);
+    button("Save current website in Lockvyn",()=>capture(ctx),!ctx.pass);
     if(ctx.pass) {
       button("Generate strong password · 24 characters",()=>generate(ctx,24,true),true);
       button("Generate extra-long password · 32 characters",()=>generate(ctx,32,true));
@@ -256,12 +256,12 @@
     if(!safeFormDestination(ctx.form)) {message("This page form targets another origin. Saving is blocked.");return;}
     const previousOrigin=origin;
     const username=(ctx.user?.isConnected?ctx.user.value:"").trim();
-    message("BoshaVault Windows will open a prefilled login form. Review the exact site before saving.");
+    message("Lockvyn Windows will open a prefilled login form. Review the exact site before saving.");
     try {
       const reply=await chrome.runtime.sendMessage({op:"capture",username});
       if(location.origin!==previousOrigin || !ctx.anchor.isConnected){hide();return;}
-      message(reply?.message || "Finish adding the login in BoshaVault Windows.");
-    }catch {message("Could not connect to BoshaVault Windows. Check that it is open and unlocked.");}
+      message(reply?.message || "Finish adding the login in Lockvyn Windows.");
+    }catch {message("Could not connect to Lockvyn Windows. Check that it is open and unlocked.");}
   }
   let debounce;
   function showForInput(input) {

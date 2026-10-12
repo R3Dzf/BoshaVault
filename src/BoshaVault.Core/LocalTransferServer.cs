@@ -7,6 +7,7 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.Json;
+using System.Collections.Concurrent;
 
 namespace BoshaVault.Core;
 
@@ -21,11 +22,15 @@ public sealed class LocalTransferServer(Func<byte[]> export, Action<byte[]> impo
     private X509Certificate2? cert;
     private DateTime deadline;
     private int downloads, uploads;
+    private readonly SemaphoreSlim requestGate = new(1, 1);
+    private readonly ConcurrentDictionary<TcpClient, byte> clients = new();
+    private byte[]? downloadedBytes, uploadedDigest;
     private volatile bool running;
     private volatile string? lastIssue;
     public DateTime ExpiresUtc => deadline;
     public bool IsActive => running && !stop.IsCancellationRequested && DateTime.UtcNow < deadline;
     public string? LastIssue => lastIssue;
+    public bool IsCompleted => Volatile.Read(ref uploads) != 0;
 
     private void Diagnostic(string stage, Exception? ex = null)
     {
@@ -52,7 +57,8 @@ public sealed class LocalTransferServer(Func<byte[]> export, Action<byte[]> impo
             listener.Start(4);
             deadline = DateTime.UtcNow.AddMinutes(3);
             running = true;
-            _ = Run();
+            // Never inherit the WPF dispatcher context for socket reads or TLS.
+            _ = Task.Run(Run);
             string raw = JsonSerializer.Serialize(new
             {
                 v = 1,
@@ -85,11 +91,7 @@ public sealed class LocalTransferServer(Func<byte[]> export, Action<byte[]> impo
     {
         try
         {
-            return NetworkInterface.GetAllNetworkInterfaces()
-                .Where(n => n.OperationalStatus == OperationalStatus.Up && n.NetworkInterfaceType != NetworkInterfaceType.Loopback)
-                .OrderBy(n => n.NetworkInterfaceType == NetworkInterfaceType.Wireless80211 ? 0 : n.NetworkInterfaceType == NetworkInterfaceType.Ethernet ? 1 : 2)
-                .SelectMany(n => n.GetIPProperties().UnicastAddresses).Select(a => a.Address)
-                .FirstOrDefault(a => a.AddressFamily == AddressFamily.InterNetwork && PrivateAddress(a))?.ToString()
+            return PrivateInterfaces().FirstOrDefault()?.Host
                 ?? throw new VaultException("No private IPv4 address found. Connect both devices to the same Wi-Fi.");
         }
         catch (NetworkInformationException)
@@ -100,49 +102,44 @@ public sealed class LocalTransferServer(Func<byte[]> export, Action<byte[]> impo
         }
     }
 
+    public sealed record PrivateInterface(string Host, string Label);
+    public static IReadOnlyList<PrivateInterface> PrivateInterfaces()
+    {
+        return NetworkInterface.GetAllNetworkInterfaces()
+            .Where(n => n.OperationalStatus == OperationalStatus.Up && n.NetworkInterfaceType != NetworkInterfaceType.Loopback)
+            .OrderBy(n => n.NetworkInterfaceType == NetworkInterfaceType.Wireless80211 ? 0 :
+                n.NetworkInterfaceType == NetworkInterfaceType.Ethernet && !VirtualInterface(n) ? 1 : 2)
+            .SelectMany(n => n.GetIPProperties().UnicastAddresses
+                .Where(a => a.Address.AddressFamily == AddressFamily.InterNetwork && PrivateAddress(a.Address))
+                .Select(a => new PrivateInterface(a.Address.ToString(), $"{n.Name} · {a.Address}")))
+            .DistinctBy(n => n.Host).ToArray();
+    }
+    private static bool VirtualInterface(NetworkInterface network) =>
+        new[] { "virtual", "vethernet", "radmin", "vpn", "tailscale", "wireguard", "vmware", "tunnel" }
+            .Any(word => (network.Name + " " + network.Description).Contains(word, StringComparison.OrdinalIgnoreCase));
+
     private async Task Run()
     {
         stop.CancelAfter(TimeSpan.FromMinutes(3));
+        var pending = new List<Task>();
         try
         {
-            // A broken handshake, a stale client, or an incomplete GET must not kill the listener.
-            for (int i = 0; i < 16 && !stop.IsCancellationRequested && uploads == 0; i++)
+            // One stale/half-open socket must not block a phone's next connection.
+            // Work is bounded to four clients; authenticated vault operations are serialized.
+            while (!stop.IsCancellationRequested)
             {
-                using var client = await listener!.AcceptTcpClientAsync(stop.Token);
+                var client = await listener!.AcceptTcpClientAsync(stop.Token);
                 if (client.Client.RemoteEndPoint is not IPEndPoint peer || !PrivateAddress(peer.Address))
                 {
                     lastIssue = "A non-private network client was rejected.";
                     Diagnostic("peer-rejected");
+                    client.Dispose();
                     continue;
                 }
-
-                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(stop.Token);
-                timeout.CancelAfter(TimeSpan.FromSeconds(60));
-                string stage = "tls";
-                try
-                {
-                    await using var tls = new SslStream(client.GetStream(), false);
-                    await tls.AuthenticateAsServerAsync(new SslServerAuthenticationOptions
-                    {
-                        ServerCertificate = cert,
-                        EnabledSslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13,
-                        ClientCertificateRequired = false
-                    }, timeout.Token);
-                    stage = "http";
-                    await Handle(tls, timeout.Token);
-                }
-                catch (OperationCanceledException) when (stop.IsCancellationRequested)
-                {
-                    break; // Normal expiry/lock/tray stop.
-                }
-                catch (Exception ex) when (ex is not OutOfMemoryException)
-                {
-                    Diagnostic(stage + "-failed", ex);
-                    lastIssue = stage == "tls"
-                        ? "TLS handshake closed. Check transfer.log for the error type, and verify Windows firewall, selected Wi-Fi IPv4 and the temporary certificate."
-                        : "Transfer interrupted. Check transfer.log for the error type; try the current QR again while the countdown is active.";
-                    // Continue accepting legitimate retries until expiry or a successful upload.
-                }
+                if (clients.Count >= 4) { client.Dispose(); Diagnostic("listener-busy"); continue; }
+                clients.TryAdd(client, 0);
+                pending.RemoveAll(t => t.IsCompleted);
+                pending.Add(Serve(client));
             }
         }
         catch (Exception ex) when (ex is SocketException or OperationCanceledException or ObjectDisposedException)
@@ -158,14 +155,51 @@ public sealed class LocalTransferServer(Func<byte[]> export, Action<byte[]> impo
         {
             running = false;
             listener?.Stop();
+            stop.Cancel();
+            foreach (var client in clients.Keys) client.Dispose();
+            await Task.WhenAll(pending);
             cert?.Dispose();
             CryptographicOperations.ZeroMemory(token);
+            if (downloadedBytes is not null) CryptographicOperations.ZeroMemory(downloadedBytes);
+            if (uploadedDigest is not null) CryptographicOperations.ZeroMemory(uploadedDigest);
             Diagnostic("listener-stopped");
         }
     }
 
-    private async Task Handle(SslStream tls, CancellationToken ct)
+    private async Task Serve(TcpClient client)
     {
+        using (client)
+        using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(stop.Token))
+        {
+            timeout.CancelAfter(TimeSpan.FromSeconds(12));
+            string stage = "tls";
+            try
+            {
+                await using var tls = new SslStream(client.GetStream(), false);
+                await tls.AuthenticateAsServerAsync(new SslServerAuthenticationOptions
+                {
+                    ServerCertificate = cert,
+                    EnabledSslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13,
+                    ClientCertificateRequired = false
+                }, timeout.Token);
+                stage = "http";
+                await Handle(tls, timeout);
+            }
+            catch (OperationCanceledException) when (stop.IsCancellationRequested) { }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                Diagnostic(stage + "-failed", ex);
+                if (!IsCompleted) lastIssue = stage == "tls"
+                    ? "An incomplete connection was closed. The current QR is still ready for your phone."
+                    : "Transfer interrupted. Retry the current QR while its countdown is active. Your vault is preserved.";
+            }
+            finally { clients.TryRemove(client, out _); }
+        }
+    }
+
+    private async Task Handle(SslStream tls, CancellationTokenSource timeout)
+    {
+        CancellationToken ct = timeout.Token;
         using var headers = new MemoryStream();
         var one = new byte[1];
         int tail = 0;
@@ -196,35 +230,70 @@ public sealed class LocalTransferServer(Func<byte[]> export, Action<byte[]> impo
             return;
         }
         if (fields.ContainsKey("Transfer-Encoding")) { await Respond(tls, 400, [], ct); Diagnostic("http-chunked-rejected"); return; }
+        timeout.CancelAfter(TimeSpan.FromSeconds(60));
 
         // A transient TCP loss after a successful write cannot prove Android read all bytes.
         // Permit at most three authenticated downloads of this encrypted blob, before POST.
-        if (lines[0] == "GET /vault HTTP/1.1" && downloads < 3 && uploads == 0)
+        if (lines[0] == "GET /vault HTTP/1.1")
         {
-            byte[] bytes;
-            try { bytes = export(); }
-            catch (Exception ex) when (ex is VaultException or IOException)
+            await requestGate.WaitAsync(ct);
+            try
             {
-                lastIssue = "Vault unavailable. Unlock the vault and start a new transfer.";
-                Diagnostic("vault-export-failed", ex);
-                await Respond(tls, 409, [], ct); return;
+                if (downloads >= 3 || uploads != 0) { await Respond(tls, 409, [], ct); return; }
+                try { downloadedBytes ??= export(); }
+                catch (Exception ex) when (ex is VaultException or IOException)
+                {
+                    lastIssue = "Vault unavailable. Unlock the vault and start a new transfer.";
+                    Diagnostic("vault-export-failed", ex);
+                    await Respond(tls, 409, [], ct); return;
+                }
+                downloads++;
+                await Respond(tls, 200, downloadedBytes, ct);
+                Diagnostic("encrypted-download-sent");
+                lastIssue = "Encrypted data sent. Complete the passphrase prompt on your phone before expiry.";
+                return;
             }
-            downloads++; // Bounded even if the response is interrupted midstream.
-            await Respond(tls, 200, bytes, ct);
-            Diagnostic("encrypted-download-sent");
-            lastIssue = "Phone received the encrypted transfer response. Complete the passphrase prompt before expiry.";
-            return;
+            finally { requestGate.Release(); }
         }
-        if (lines[0] == "POST /vault HTTP/1.1" && downloads > 0 && uploads == 0 &&
+        if (lines[0] == "POST /vault HTTP/1.1" &&
             fields.TryGetValue("Content-Length", out string? size) && int.TryParse(size, out int n) && n >= 100 && n <= VaultCodec.MaxFileBytes)
         {
             var bytes = new byte[n];
-            await tls.ReadExactlyAsync(bytes, ct);
-            import(bytes); // Validates/decrypts/merges locally in the unlocked Windows session.
-            uploads++;
-            await Respond(tls, 200, Encoding.UTF8.GetBytes("Merged"), ct);
-            Diagnostic("encrypted-upload-merged");
-            return;
+            try
+            {
+                await tls.ReadExactlyAsync(bytes, ct);
+                await requestGate.WaitAsync(ct);
+                try
+                {
+                    if (downloads == 0) { await Respond(tls, 409, [], ct); return; }
+                    byte[] digest = SHA256.HashData(bytes);
+                    if (uploads != 0)
+                    {
+                        // A lost acknowledgement can retry the EXACT encrypted upload,
+                        // never merge twice or accept a second/different payload.
+                        if (!CryptographicOperations.FixedTimeEquals(digest, uploadedDigest!))
+                        { await Respond(tls, 409, [], ct); return; }
+                        await Respond(tls, 200, Encoding.UTF8.GetBytes("Merged"), ct);
+                        Diagnostic("encrypted-upload-receipt-replayed"); return;
+                    }
+                    ct.ThrowIfCancellationRequested();
+                    try { import(bytes); }
+                    catch (Exception ex) when (ex is VaultException or IOException)
+                    {
+                        Diagnostic("vault-import-rejected", ex);
+                        lastIssue = "Windows could not merge this upload. Local changes on your phone are retained; check the Windows prompt.";
+                        await Respond(tls, 409, [], ct); return;
+                    }
+                    uploadedDigest = digest;
+                    Volatile.Write(ref uploads, 1);
+                    stop.CancelAfter(TimeSpan.FromSeconds(Math.Max(0, Math.Min(10, (deadline - DateTime.UtcNow).TotalSeconds))));
+                    lastIssue = "Transfer complete. Both devices have the merged vault.";
+                    await Respond(tls, 200, Encoding.UTF8.GetBytes("Merged"), ct);
+                    Diagnostic("encrypted-upload-merged"); return;
+                }
+                finally { requestGate.Release(); }
+            }
+            finally { CryptographicOperations.ZeroMemory(bytes); }
         }
         await Respond(tls, 400, [], ct);
         Diagnostic("http-state-rejected");
@@ -232,7 +301,7 @@ public sealed class LocalTransferServer(Func<byte[]> export, Action<byte[]> impo
 
     private static async Task Respond(SslStream tls, int status, byte[] body, CancellationToken ct)
     {
-        byte[] header = Encoding.ASCII.GetBytes($"HTTP/1.1 {status} {(status == 200 ? "OK" : "Rejected")}\r\nContent-Type: application/octet-stream\r\nContent-Length: {body.Length}\r\nConnection: close\r\nCache-Control: no-store\r\n\r\n");
+        byte[] header = Encoding.ASCII.GetBytes($"HTTP/1.1 {status} {(status == 200 ? "OK" : "Rejected")}\r\nContent-Type: application/octet-stream\r\nContent-Length: {body.Length}\r\nConnection: close\r\nCache-Control: no-store\r\nX-Lockvyn-Transfer: 2\r\n\r\n");
         await tls.WriteAsync(header, ct);
         await tls.WriteAsync(body, ct);
         await tls.FlushAsync(ct);
@@ -243,6 +312,7 @@ public sealed class LocalTransferServer(Func<byte[]> export, Action<byte[]> impo
     {
         stop.Cancel();
         listener?.Stop();
+        foreach (var client in clients.Keys) client.Dispose();
         // The pending SslStream handshake finishes before the cert is disposed by Run().
     }
 }

@@ -1,8 +1,8 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>BoshaVault Autofill</title>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Lockvyn Autofill</title>
 <style>
 body{box-sizing:border-box;margin:0;width:315px;background:#faf9ff;color:#2a2740;font:13px "Segoe UI",system-ui,sans-serif}
 header{padding:15px 15px 12px;background:#fff;border-bottom:1px solid #e6e1f2}
-h1{font-size:17px;margin:0 0 5px;color:#5943bf}
+h1{font-size:17px;margin:0 0 5px;color:#5943bf;display:flex;align-items:center;gap:8px}h1 img{width:24px;height:24px}
 small{display:block;color:#767086;overflow-wrap:anywhere;line-height:1.5}
 main{padding:15px}
 button{display:block;width:100%;border:1px solid #dfd8f7;background:#f1edff;color:#45318f;padding:11px;border-radius:9px;font:600 13px "Segoe UI",system-ui;cursor:pointer;margin-bottom:9px}
@@ -11,11 +11,11 @@ button:hover{filter:brightness(.95)}
 #status{font-size:12px;line-height:1.5;padding:10px;border-radius:9px;background:#fff;min-height:21px;overflow-wrap:anywhere}
 footer{padding:0 15px 15px;color:#888;font-size:11px;line-height:1.5}
 </style></head><body>
-<header><h1>🔐 BoshaVault</h1><small id="site">Detecting current HTTPS website…</small></header>
+<header><h1><img src="icons/lockvyn-32.png" alt="">Lockvyn</h1><small id="site">Detecting current HTTPS website…</small></header>
 <main>
 <button class="primary" id="show">Show saved logins</button>
-<button id="save">Save this website in BoshaVault</button>
-<p id="status" role="status" aria-live="polite">Keep BoshaVault Windows running and unlocked.</p>
+<button id="save">Save this website in Lockvyn</button>
+<p id="status" role="status" aria-live="polite">Keep Lockvyn Windows running and unlocked.</p>
 </main><footer>Exact HTTPS website matching · User-approved filling · Local-only connection</footer>
 <script src="popup.js"></script>
 </body></html>

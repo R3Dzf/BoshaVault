@@ -15,7 +15,7 @@ public partial class MainWindow
             if (exiting || resourcesReleased) return new() { Status = "unavailable" };
             string host = BrowserAutofillProtocol.Validate(request);
             if (!preferences.BrowserAutofillEnabled)
-                return new() { Status = "denied", Message = "Browser Autofill is disabled in BoshaVault settings." };
+                return new() { Status = "denied", Message = "Browser Autofill is disabled in Lockvyn settings." };
             if (request.Op == "open")
             {
                 BringToFront();
@@ -23,12 +23,13 @@ public partial class MainWindow
             }
             var activeSession = session;
             if (activeSession == null || !activeSession.IsOpen)
-                return new() { Status = "locked", Message = "Unlock BoshaVault on Windows first." };
+                return new() { Status = "locked", Message = "Unlock Lockvyn on Windows first." };
             if (request.Op == "capture")
             {
                 int captureStamp=generation;
                 BringToFront();
-                var captured=FormDialog.Edit(this,null,"https://"+host+"/",request.Username);
+                var captured=FormDialog.Edit(this,null,"https://"+host+"/",request.Username,
+                    FolderCatalog.Choices(activeSession.Data), preferences.Generator, SaveGeneratorDefaults);
                 if(captured==null)
                     return new(){Status="denied",Message="Saving a new login was canceled."};
                 if(generation!=captureStamp || session!=activeSession || !activeSession.IsOpen ||
@@ -37,7 +38,7 @@ public partial class MainWindow
                 if(activeSession.Data.Entries.Any(e=>!e.Deleted && e.Url.Length>0 &&
                     e.Username.Equals(captured.Username,StringComparison.OrdinalIgnoreCase) &&
                     OriginPolicy.Matches(e.Url,captured.Url)))
-                    return new(){Status="denied",Message="That account already exists; edit it in BoshaVault."};
+                    return new(){Status="denied",Message="That account already exists; edit it in Lockvyn."};
                 activeSession.Upsert(captured);
                 selected=captured;
                 Refresh();
@@ -63,8 +64,8 @@ public partial class MainWindow
                     "\n\nA new generated password will replace the existing saved password. "+
                     "Make sure you have changed the password on the real website. "+
                     "The previous encrypted file backup may contain the old password.\n\n"+
-                    "BoshaVault will not submit any form or verify that the site accepted the change.",
-                    "BoshaVault · Confirm password update",
+                    "Lockvyn will not submit any form or verify that the site accepted the change.",
+                    "Lockvyn · Confirm password update",
                     MessageBoxButton.YesNo,MessageBoxImage.Warning,MessageBoxResult.No)
                     ==MessageBoxResult.Yes;
                 if(!accepted || generation!=updateStamp || session!=activeSession || !activeSession.IsOpen)
@@ -136,7 +137,7 @@ public partial class MainWindow
                 selected = item;
                 Refresh();
                 lastActivity = DateTime.UtcNow;
-                return new() { Status = "saved", Message = "Saved to your encrypted BoshaVault vault. Complete signup on the website separately." };
+                return new() { Status = "saved", Message = "Saved to your encrypted Lockvyn vault. Complete signup on the website separately." };
             }
             // Exact matches are always first. Related eTLD+1 accounts are
             // SUGGESTIONS only, never silently filled or used for updates.
@@ -189,7 +190,7 @@ public partial class MainWindow
                     "Review the browser address bar carefully; this may disclose your password to the current site." :
                     "\n\nOnly approve if you are currently signing in at this website.") +
                 "\n\nThis fills only after your explicit approval.",
-                "BoshaVault · Confirm browser Autofill", MessageBoxButton.YesNo,
+                "Lockvyn · Confirm browser Autofill", MessageBoxButton.YesNo,
                 MessageBoxImage.Question, MessageBoxResult.No) == MessageBoxResult.Yes;
             if (!allowed || generation != stamp || session != activeSession || !activeSession.IsOpen)
                 return new() { Status = "denied", Message = "Browser fill canceled." };
@@ -202,7 +203,7 @@ public partial class MainWindow
         }
         catch (Exception ex) when (ex is VaultException or InvalidOperationException or ArgumentException or System.IO.IOException)
         {
-            return new() { Status = "denied", Message = "BoshaVault refused an unsafe browser request." };
+            return new() { Status = "denied", Message = "Lockvyn refused an unsafe browser request." };
         }
     }
 }

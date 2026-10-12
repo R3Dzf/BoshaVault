@@ -27,7 +27,7 @@ catch (Exception)
 {
     // Deliberately no exception detail: browser UI gets a safe bounded status.
     answer = new BrowserAutofillResponse { Status = "unavailable",
-        Message = "BoshaVault Windows is not running, or its browser integration is unavailable." };
+        Message = "Lockvyn Windows is not running, or its browser integration is unavailable." };
 }
 try
 {

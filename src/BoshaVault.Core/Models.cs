@@ -16,6 +16,8 @@ public sealed class VaultEntry
     public string Folder { get; set; } = "Personal";
     public bool Favorite { get; set; }
     public bool Deleted { get; set; }
+    public bool Purged { get; set; }
+    public string ReviewAcknowledgement { get; set; } = "";
     public string UpdatedUtc { get; set; } = DateTimeOffset.UtcNow.ToString("O");
     public Dictionary<string, long> Clock { get; set; } = [];
     public VaultEntry Clone() => JsonSerializer.Deserialize<VaultEntry>(JsonSerializer.Serialize(this, JsonOptions.Strict), JsonOptions.Strict)!;
@@ -31,11 +33,12 @@ public sealed class TrustedApp
 
 public sealed class VaultData
 {
-    public int Schema { get; set; } = 1;
+    public int Schema { get; set; } = 2;
     public string VaultId { get; set; } = "";
     public long Revision { get; set; }
     public List<VaultEntry> Entries { get; set; } = [];
     public List<TrustedApp> TrustedApps { get; set; } = [];
+    public List<string> Folders { get; set; } = [];
 }
 
 public sealed class KdfHeader

@@ -15,7 +15,24 @@ void RejectNow(Action action, string name) { bool rejected = false; try { action
 VaultData Clone(VaultData d) => JsonSerializer.Deserialize<VaultData>(JsonSerializer.Serialize(d, JsonOptions.Strict), JsonOptions.Strict)!;
 try
 {
+    if (args.Length > 0 && args[0] == "--local-transfer-tests") { await LocalTransferTests.Run(); return; }
+    if (args.Length > 0 && args[0] == "--native-lan-host") { await LocalTransferTests.NativeHost(args[1]); return; }
     if (args.Length > 0 && args[0] == "--desktop-tests") { await DesktopTests.Run(); return; }
+    if (args.Length > 0 && args[0] == "--ux-tests") { await VaultUxTests.Run(); return; }
+    if (args.Length > 0 && args[0] == "--ux-fixtures") { await VaultUxTests.Fixtures(args[1]); return; }
+    if (args.Length > 0 && args[0] == "--verify-java-ux") { await VaultUxTests.Verify(args[1]); return; }
+    if (args.Length > 0 && args[0] == "--cloud-tests") { await CloudAccountTests.Run(); return; }
+    if (args.Length > 0 && args[0] == "--automatic-cloud-tests") { await AutomaticCloudSyncTests.Run(); return; }
+    if (args.Length > 0 && args[0] == "--cloud-store-tests") { CloudStoreTests.Run(); return; }
+    if (args.Length > 0 && args[0] == "--cloud-live-tests") { await CloudLiveTests.Run(args[1]); return; }
+    if (args.Length > 0 && args[0] == "--cloud-mfa-live-tests") { await CloudMfaLiveTests.Run(args[1]); return; }
+    if (args.Length > 0 && args[0] == "--verify-java-cloud")
+    {
+        var profile=JsonSerializer.Deserialize<CloudProfile>(File.ReadAllBytes(args[1]+"/cloud-profile.json"),CloudPairing.Json)!;
+        byte[] key=CloudSnapshotCodec.ParseRecoveryKey(profile.RecoveryKey);
+        try {Check(CloudSnapshotCodec.Open(File.ReadAllBytes(args[1]+"/java.cloud"),key,profile.VaultSlot,profile.DeviceSlot).SequenceEqual(File.ReadAllBytes(args[1]+"/dotnet.boshavault")),"Java cloud envelope opens in .NET");}
+        finally {CryptographicOperations.ZeroMemory(key);profile.Clear();}return;
+    }
     if (args.Length > 0 && args[0] == "--activation-client") { Environment.ExitCode = await BoshaVault.Windows.InstanceActivationChannel.RequestOpen(args[1]) ? 0 : 1; return; }
     if (args.Length > 0 && args[0] == "--tls-handshake-tests") { await TlsHandshakeTests.Run(); return; }
     if (args.Length > 0 && args[0] == "--tls-certificate-tests")
@@ -307,6 +324,15 @@ try
         MergeEngine.Merge(ra, rb, devA);
         File.WriteAllText(folder + "/merge-expected.json", JsonSerializer.Serialize(ra, JsonOptions.Strict));
         File.WriteAllText(folder + "/merge-base.json", JsonSerializer.Serialize(source, JsonOptions.Strict));
+        var cloudProfile = new CloudProfile { OwnerId=Guid.NewGuid(),VaultId=Guid.Parse(f.Data.VaultId),
+            VaultSlot=Guid.NewGuid(),DeviceSlot=Guid.NewGuid(),RecoveryKey=CloudSnapshotCodec.NewRecoveryKey(),
+            RefreshToken="synthetic-refresh-token-for-fixture",Email="synthetic@example.invalid" };
+        byte[] recovery=CloudSnapshotCodec.ParseRecoveryKey(cloudProfile.RecoveryKey);
+        try {
+            File.WriteAllBytes(folder+"/dotnet.cloud",CloudSnapshotCodec.Seal(f.ExportEncrypted(),recovery,cloudProfile.VaultSlot,cloudProfile.DeviceSlot));
+            File.WriteAllText(folder+"/cloud-pairing.txt",CloudPairing.Encode(cloudProfile));
+            File.WriteAllText(folder+"/cloud-profile.json",JsonSerializer.Serialize(cloudProfile,CloudPairing.Json));
+        } finally {CryptographicOperations.ZeroMemory(recovery);cloudProfile.Clear();}
     }
     if (args.Length > 0 && args[0] == "--verify-java")
     {

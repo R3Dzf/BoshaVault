@@ -3,7 +3,9 @@
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
-    <AssemblyName>BoshaVault.NativeHost</AssemblyName>
+    <AssemblyName>Lockvyn.NativeHost</AssemblyName>
+    <Product>Lockvyn</Product>
+    <Version>1.10.0</Version>
   </PropertyGroup>
   <ItemGroup><ProjectReference Include="../BoshaVault.Core/BoshaVault.Core.csproj"/></ItemGroup>
 </Project>

@@ -1,4 +1,4 @@
-name: Build BoshaVault (Windows and Android)
+name: Build Lockvyn (Windows and Android)
 
 on:
   push:
@@ -18,10 +18,60 @@ permissions:
   contents: read
 
 jobs:
+  cloud-interop:
+    name: Cloud encryption / .NET and Java compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+          cache: false
+      - name: Validate every Arabic email with Go template rendering
+        run: go run tools/validate-email-templates.go
+      - name: Fetch pinned JVM test dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build-deps/java-cloud
+          curl --fail --location --retry 3 https://repo.maven.apache.org/maven2/org/bouncycastle/bcprov-jdk18on/1.86/bcprov-jdk18on-1.86.jar --output build-deps/bcprov.jar
+          curl --fail --location --retry 3 https://repo.maven.apache.org/maven2/org/json/json/20250517/json-20250517.jar --output build-deps/json.jar
+          sha256sum --check <<'PINS'
+          2af190b300cbb0b35e248ccf5f4a06b6072030aeb3da7a98ec73abe5b4cb371f  build-deps/bcprov.jar
+          3ea61b2a06e31edf1c91134fe9106b0ebb16628be169f3db75bc7a2b06b45796  build-deps/json.jar
+          PINS
+      - name: Test cloud account and atomic merge, then generate synthetic fixtures
+        run: |
+          dotnet run --project src/BoshaVault.Tests -c Release -- --cloud-tests
+          dotnet run --project src/BoshaVault.Tests -c Release -- --automatic-cloud-tests
+          dotnet run --project src/BoshaVault.Tests -c Release -- --ux-tests
+          dotnet run --project src/BoshaVault.Tests -c Release -- --fixtures build-deps/cloud-fixtures
+          dotnet run --project src/BoshaVault.Tests -c Release -- --ux-fixtures build-deps/ux-fixtures
+      - name: Validate cloud encryption and pairing in both directions
+        shell: bash
+        run: |
+          set -euo pipefail
+          javac -cp build-deps/bcprov.jar:build-deps/json.jar -d build-deps/java-cloud android/app/src/main/java/com/bosha/vault/VaultEngine.java android/app/src/main/java/com/bosha/vault/StrictJson.java android/app/src/main/java/com/bosha/vault/CloudAuth.java android/app/src/main/java/com/bosha/vault/CloudSnapshot.java android/app/src/main/java/com/bosha/vault/DevicePairing.java android/app/src/main/java/com/bosha/vault/FolderCatalog.java android/app/src/main/java/com/bosha/vault/PasswordHealth.java android/app/src/main/java/com/bosha/vault/PasswordOptions.java android/app/src/main/java/com/bosha/vault/AndroidUpdateFeed.java tools/CloudAuthTest.java tools/DevicePairingTest.java tools/CloudInteropTest.java tools/VaultUxInteropTest.java tools/AndroidUpdateFeedTest.java
+          java -cp build-deps/java-cloud:build-deps/json.jar com.bosha.vault.AndroidUpdateFeedTest
+          java -cp build-deps/java-cloud:build-deps/bcprov.jar:build-deps/json.jar com.bosha.vault.DevicePairingTest
+          java -cp build-deps/java-cloud:build-deps/bcprov.jar:build-deps/json.jar com.bosha.vault.CloudAuthTest
+          java -cp build-deps/java-cloud:build-deps/bcprov.jar:build-deps/json.jar com.bosha.vault.CloudInteropTest build-deps/cloud-fixtures
+          dotnet run --project src/BoshaVault.Tests -c Release -- --verify-java-cloud build-deps/cloud-fixtures
+          java -cp build-deps/java-cloud:build-deps/bcprov.jar:build-deps/json.jar com.bosha.vault.VaultUxInteropTest build-deps/ux-fixtures
+          dotnet run --project src/BoshaVault.Tests -c Release -- --verify-java-ux build-deps/ux-fixtures
+
   windows:
     name: Windows x64 / .NET 10
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - name: Validate local signing setup script syntax
@@ -29,23 +79,36 @@ jobs:
         run: |
           $tokens = $null
           $parseErrors = $null
-          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'tools/Configure-AndroidSigning.ps1'), [ref]$tokens, [ref]$parseErrors) | Out-Null
-          if ($parseErrors.Count -gt 0) {
-            $parseErrors | ForEach-Object { Write-Error $_ }
-            exit 1
+          foreach ($file in 'tools/Configure-AndroidSigning.ps1','tools/Configure-PrivateTransfer.ps1','tools/Prepare-WindowsPackage.ps1','tools/Package-Windows.ps1','tools/Test-WindowsUpdates.ps1') {
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file), [ref]$tokens, [ref]$parseErrors) | Out-Null
+            if ($parseErrors.Count) { throw "Script syntax invalid: $file - $parseErrors" }
           }
       - name: Install .NET 10
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+      - name: Restore pinned Windows update dependencies
+        run: dotnet restore src/BoshaVault.Windows --locked-mode
+      - name: Build pinned update acceptance checker before runtime publishing
+        run: |
+          dotnet restore tools/Lockvyn.UpdateChecks --locked-mode
+          dotnet build tools/Lockvyn.UpdateChecks -c Release --no-restore
       - name: Core, storage, and crypto tests
         run: dotnet run --project src/BoshaVault.Tests -c Release
+      - name: Folder, review, deletion, migration and generator tests
+        run: dotnet run --project src/BoshaVault.Tests -c Release -- --ux-tests
       - name: Desktop tests
         run: dotnet run --project src/BoshaVault.Tests -c Release -- --desktop-tests
+      - name: Cloud account, pairing, atomic merge and DPAPI storage tests
+        run: |
+          dotnet run --project src/BoshaVault.Tests -c Release -- --cloud-tests
+          dotnet run --project src/BoshaVault.Tests -c Release -- --cloud-store-tests
       - name: Certificate tests
         run: dotnet run --project src/BoshaVault.Tests -c Release -- --tls-certificate-tests
       - name: TLS / Schannel handshake test
         run: dotnet run --project src/BoshaVault.Tests -c Release -- --tls-handshake-tests
+      - name: Real private-address TLS transfer and retry lifecycle
+        run: dotnet run --project src/BoshaVault.Tests -c Release -- --local-transfer-tests
       - name: Publish Windows x64 executable
         run: >-
           dotnet publish src/BoshaVault.Windows
@@ -71,7 +134,7 @@ jobs:
       - name: Native Messaging binary protocol smoke test
         shell: pwsh
         run: |
-          powershell -NoProfile -ExecutionPolicy Bypass -File tools/Test-NativeHost.ps1 -Exe dist/nativehost/BoshaVault.NativeHost.exe
+          powershell -NoProfile -ExecutionPolicy Bypass -File tools/Test-NativeHost.ps1 -Exe dist/nativehost/Lockvyn.NativeHost.exe
       - name: Validate Chrome and Edge extension JavaScript
         shell: pwsh
         run: |
@@ -90,12 +153,14 @@ jobs:
       - name: Bundle extension and native host with Windows
         shell: pwsh
         run: |
-          Copy-Item 'dist/nativehost/BoshaVault.NativeHost.exe' 'dist/windows/BoshaVault.NativeHost.exe' -Force
+          Copy-Item 'dist/nativehost/Lockvyn.NativeHost.exe' 'dist/windows/Lockvyn.NativeHost.exe' -Force
           Copy-Item 'browser-extension' 'dist/windows/browser-extension' -Recurse -Force
           Copy-Item 'src/BoshaVault.Core/Assets/public_suffix_list.dat' 'dist/windows/public_suffix_list.dat' -Force
           $suffix = Get-Content 'dist/windows/public_suffix_list.dat' -Raw
           if (-not $suffix.Contains('BEGIN PRIVATE DOMAINS') -or -not $suffix.Contains('github.io')) { throw 'Offline private PSL data missing or invalid' }
           Copy-Item 'tools/Install-BrowserAutofill.ps1' 'dist/windows/Install-BrowserAutofill.ps1' -Force
+          Copy-Item 'tools/Configure-PrivateTransfer.ps1' 'dist/windows/Configure-PrivateTransfer.ps1' -Force
+          Copy-Item 'START-HERE.html' 'dist/windows/START-HERE.html' -Force
           if (!(Test-Path 'dist/windows/browser-extension/manifest.json')) { throw 'Extension missing from bundle' }
       - name: Test Chrome and Edge native host registration
         shell: pwsh
@@ -105,20 +170,61 @@ jobs:
           $hostManifest = Join-Path $env:LOCALAPPDATA 'BoshaVault/NativeMessaging/com.boshavault.desktop.json'
           $saved = Get-Content $hostManifest -Raw | ConvertFrom-Json
           if (@($saved.allowed_origins).Count -ne 2) { throw 'Expected two allowed browser extension origins' }
-          if ($saved.path -notlike '*BoshaVault.NativeHost.exe') { throw 'Native host path missing' }
-          $expectedHost = (Resolve-Path 'dist/windows/BoshaVault.NativeHost.exe').Path
+          if ($saved.path -notlike '*Lockvyn.NativeHost.exe') { throw 'Native host path missing' }
+          $expectedHost = (Resolve-Path 'dist/windows/Lockvyn.NativeHost.exe').Path
           if ($saved.path -ne $expectedHost) { throw "Auto-detected AppFolder is incorrect: $($saved.path)" }
           $chromeReg=(Get-Item 'HKCU:/Software/Google/Chrome/NativeMessagingHosts/com.boshavault.desktop').GetValue('')
           $edgeReg=(Get-Item 'HKCU:/Software/Microsoft/Edge/NativeMessagingHosts/com.boshavault.desktop').GetValue('')
           if ($chromeReg -ne $hostManifest -or $edgeReg -ne $hostManifest) { throw 'Native host registry registration mismatch' }
+      - name: Verify optional private Wi-Fi firewall scope and repeated setup
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows') { throw 'Disposable Windows CI only.' }
+          if (Get-NetFirewallRule -Name 'Lockvyn-Private-Transfer' -ErrorAction SilentlyContinue) { throw 'Refusing to replace an existing rule in this test.' }
+          try {
+            ./tools/Configure-PrivateTransfer.ps1 -ProgramPath dist/windows/Lockvyn.exe
+            ./tools/Configure-PrivateTransfer.ps1 -ProgramPath dist/windows/Lockvyn.exe
+            $rule=@(Get-NetFirewallRule -Name 'Lockvyn-Private-Transfer')
+            if ($rule.Count -ne 1 -or "$($rule[0].Profile)" -ne 'Private' -or "$($rule[0].Direction)" -ne 'Inbound' -or "$($rule[0].Action)" -ne 'Allow' -or "$($rule[0].EdgeTraversalPolicy)" -ne 'Block') { throw 'Unexpected rule scope.' }
+            $app=$rule | Get-NetFirewallApplicationFilter
+            $port=$rule | Get-NetFirewallPortFilter
+            $address=$rule | Get-NetFirewallAddressFilter
+            if ($app.Program -ne (Resolve-Path dist/windows/Lockvyn.exe).Path -or "$($port.Protocol)" -notin 'TCP','6' -or @($address.RemoteAddress).Count -ne 1 -or @($address.RemoteAddress)[0] -ne 'LocalSubnet') { throw 'Unexpected app/protocol/address scope.' }
+            Write-Host 'PASS: repeated private-transfer setup retains one app-scoped, Private/local-subnet TCP rule.'
+          } finally { Remove-NetFirewallRule -Name 'Lockvyn-Private-Transfer' -ErrorAction SilentlyContinue }
+      - name: Prepare Windows update package
+        shell: pwsh
+        run: ./tools/Prepare-WindowsPackage.ps1
+      - name: Build Windows installer and feed
+        shell: pwsh
+        run: ./tools/Package-Windows.ps1 -SkipPrevious
+      - name: Accept delta download, corruption fallback and real installed update
+        shell: pwsh
+        run: ./tools/Test-WindowsUpdates.ps1
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: Lockvyn-Windows-Setup-x64
+          path: |
+            dist/velopack/*Setup.exe
+            dist/velopack/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload Windows release packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: Lockvyn-Windows-update-feed
+          path: dist/velopack/*
+          if-no-files-found: error
+          retention-days: 14
       - name: Archive Windows build
         shell: pwsh
-        run: Compress-Archive -Path 'dist/windows/*' -DestinationPath 'dist/BoshaVault-Windows-x64.zip' -Force
+        run: Compress-Archive -Path 'dist/windows/*' -DestinationPath 'dist/Lockvyn-Windows-x64.zip' -Force
       - name: Upload Windows build
         uses: actions/upload-artifact@v4
         with:
-          name: BoshaVault-Windows-x64
-          path: dist/BoshaVault-Windows-x64.zip
+          name: Lockvyn-Windows-x64
+          path: dist/Lockvyn-Windows-x64.zip
           if-no-files-found: error
           retention-days: 14
 
@@ -167,31 +273,157 @@ jobs:
             fi
             SIGNING_PASSWORD="$(openssl rand -hex 24)"
             SIGNING_ALIAS='boshavault-test'
-            keytool -genkeypair -noprompt -alias "$SIGNING_ALIAS" -keyalg RSA -keysize 3072 -validity 7 -storetype PKCS12 -keystore "$STORE" -storepass "$SIGNING_PASSWORD" -keypass "$SIGNING_PASSWORD" -dname 'CN=BoshaVault CI test,O=Temporary build,C=US'
+            keytool -genkeypair -noprompt -alias "$SIGNING_ALIAS" -keyalg RSA -keysize 3072 -validity 7 -storetype PKCS12 -keystore "$STORE" -storepass "$SIGNING_PASSWORD" -keypass "$SIGNING_PASSWORD" -dname 'CN=Lockvyn CI test,O=Temporary build,C=US'
             NOTICE='TEMPORARY CI SIGNING KEY. This APK is only for installation/testing on a clean test device. It CANNOT upgrade an existing APK signed with a different certificate, and the signing key is discarded after this run. Never uninstall an existing vault without a verified encrypted backup.'
           fi
           BOSHAVAULT_KEYSTORE_PASSWORD="$SIGNING_PASSWORD" python tools/build-android.py --sdk "$ANDROID_HOME/platforms/android-35" --tools "$ANDROID_HOME/build-tools/35.0.0" --keystore "$STORE" --alias "$SIGNING_ALIAS"
           printf '%s\n' "$NOTICE" > dist/ANDROID-SIGNING-NOTICE.txt
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs dist/BoshaVault-Android.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs dist/Lockvyn-Android-LegacyPackage.apk
           if [[ "$SIGNED_RELEASE" != "true" ]]; then
             BOSHAVAULT_KEYSTORE_PASSWORD="$SIGNING_PASSWORD" python tools/build-android.py --sdk "$ANDROID_HOME/platforms/android-35" --tools "$ANDROID_HOME/build-tools/35.0.0" --keystore "$STORE" --alias "$SIGNING_ALIAS" --isolated-test-app
-            "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose dist/BoshaVault-Android-Test.apk
+            "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose dist/Lockvyn-Android.apk
           fi
           unset SIGNING_PASSWORD STABLE_KEYSTORE_PASSWORD STABLE_KEYSTORE_BASE64
-      - name: Upload isolated biometric test app (separate storage)
+      - name: Upload Lockvyn Android app (separate storage)
         if: ${{ !startsWith(github.ref, 'refs/tags/v') && !(github.event_name == 'workflow_dispatch' && inputs.signed_release) }}
         uses: actions/upload-artifact@v4
         with:
-          name: BoshaVault-Android-BIOMETRIC-TEST
-          path: dist/BoshaVault-Android-Test.apk
+          name: Lockvyn-Android
+          path: |
+            dist/Lockvyn-Android.apk
+            dist/ANDROID-SIGNING-NOTICE.txt
           if-no-files-found: error
           retention-days: 14
       - name: Upload Android APK and signing notice
         uses: actions/upload-artifact@v4
         with:
-          name: BoshaVault-Android-APK
+          name: Lockvyn-Android-LegacyPackage
           path: |
-            dist/BoshaVault-Android.apk
+            dist/Lockvyn-Android-LegacyPackage.apk
             dist/ANDROID-SIGNING-NOTICE.txt
           if-no-files-found: error
+          retention-days: 14
+
+  android-ui:
+    name: Android native Wi-Fi, update, email, MFA and navigation
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build the synthetic .NET private-transfer host
+        run: dotnet build src/BoshaVault.Tests -c Release
+      - name: Enable emulator acceleration and install SDK packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -e /dev/kvm
+          sudo chmod 666 /dev/kvm
+          SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager -print -quit)"
+          "$SDKMANAGER" --install 'platform-tools' 'platforms;android-35' 'build-tools;35.0.0' 'emulator' 'system-images;android-35;google_apis;x86_64'
+      - name: Build isolated app and matching-signed instrumentation
+        shell: bash
+        env:
+          BOSHAVAULT_KEYSTORE_PASSWORD: boshavault-disposable-ui-test
+        run: |
+          set -euo pipefail
+          mkdir -p build-deps
+          keytool -genkeypair -keystore build-deps/ui-demo.p12 -storepass "$BOSHAVAULT_KEYSTORE_PASSWORD" -keypass "$BOSHAVAULT_KEYSTORE_PASSWORD" -alias boshavault -keyalg RSA -keysize 2048 -validity 7 -dname 'CN=Lockvyn Disposable UI Test'
+          mkdir -p dist/android/updates
+          python tools/build-android.py --sdk "$ANDROID_HOME/platforms/android-35" --tools "$ANDROID_HOME/build-tools/35.0.0" --keystore build-deps/ui-demo.p12 --lockvyn-package --version-code 9000 --version-name 9.0.0
+          cp dist/Lockvyn-Android.apk dist/android/updates/baseline.apk
+          python tools/build-android.py --sdk "$ANDROID_HOME/platforms/android-35" --tools "$ANDROID_HOME/build-tools/35.0.0" --keystore build-deps/ui-demo.p12 --lockvyn-package --version-code 9001 --version-name 9.0.1
+          cp dist/Lockvyn-Android.apk dist/android/updates/update.apk
+          keytool -genkeypair -keystore build-deps/ui-wrong.p12 -storepass "$BOSHAVAULT_KEYSTORE_PASSWORD" -keypass "$BOSHAVAULT_KEYSTORE_PASSWORD" -alias boshavault -keyalg RSA -keysize 2048 -validity 7 -dname 'CN=Wrong disposable signing identity'
+          python tools/build-android.py --sdk "$ANDROID_HOME/platforms/android-35" --tools "$ANDROID_HOME/build-tools/35.0.0" --keystore build-deps/ui-wrong.p12 --lockvyn-package --version-code 9002 --version-name 9.0.2
+          cp dist/Lockvyn-Android.apk dist/android/updates/wrong-signer.apk
+          cp dist/android/updates/baseline.apk dist/Lockvyn-Android.apk
+      - name: Run native keyboard, email-code, MFA and scrolling acceptance tests
+        shell: bash
+        env:
+          BOSHAVAULT_KEYSTORE_PASSWORD: boshavault-disposable-ui-test
+        run: |
+          set -euo pipefail
+          export PATH="$ANDROID_HOME/platform-tools:$PATH"
+          export ANDROID_USER_HOME="$RUNNER_TEMP/lockvyn-android"
+          export ANDROID_EMULATOR_HOME="$ANDROID_USER_HOME"
+          export ANDROID_AVD_HOME="$ANDROID_USER_HOME/avd"
+          mkdir -p "$ANDROID_AVD_HOME"
+          AVDMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name avdmanager -print -quit)"
+          printf 'no\n' | "$AVDMANAGER" create avd --force --name LockvynUi --path "$ANDROID_AVD_HOME/LockvynUi.avd" --package 'system-images;android-35;google_apis;x86_64' --device 'pixel_2'
+          test -f "$ANDROID_AVD_HOME/LockvynUi.ini"
+          "$ANDROID_HOME/emulator/emulator" -list-avds
+          "$ANDROID_HOME/emulator/emulator" -avd LockvynUi -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -accel on > build-deps/emulator.log 2>&1 &
+          BV_EMULATOR_PID=$!
+          trap 'kill "$BV_EMULATOR_PID" || true' EXIT
+          sleep 2
+          kill -0 "$BV_EMULATOR_PID" || { cat build-deps/emulator.log; exit 1; }
+          timeout 180 adb wait-for-device
+          for attempt in $(seq 1 150); do
+            kill -0 "$BV_EMULATOR_PID" || { cat build-deps/emulator.log; exit 1; }
+            if [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = '1' ]; then break; fi
+            sleep 2
+          done
+          test "$(adb shell getprop sys.boot_completed | tr -d '\r')" = '1'
+          adb shell settings put global window_animation_scale 0
+          adb shell settings put global transition_animation_scale 0
+          adb shell settings put global animator_duration_scale 0
+          adb shell settings put secure show_ime_with_hard_keyboard 1
+          adb shell ime list -s
+          adb shell settings get secure default_input_method
+          adb shell input keyevent 82
+          adb install --no-incremental dist/Lockvyn-Android.apk
+          mkdir -p build-deps/native-lan
+          dotnet src/BoshaVault.Tests/bin/Release/net10.0/BoshaVault.Tests.dll --native-lan-host build-deps/native-lan > build-deps/native-lan-host.log 2>&1 &
+          BV_LAN_PID=$!
+          trap 'kill "$BV_LAN_PID" "$BV_EMULATOR_PID" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 100); do
+            if [ -s build-deps/native-lan/pairing.txt ]; then break; fi
+            kill -0 "$BV_LAN_PID" || { cat build-deps/native-lan-host.log; exit 1; }
+            sleep 0.2
+          done
+          test -s build-deps/native-lan/pairing.txt
+          python tools/build-android-ui-test.py --sdk "$ANDROID_HOME/platforms/android-35" --tools "$ANDROID_HOME/build-tools/35.0.0" --keystore build-deps/ui-demo.p12 --update-apk dist/android/updates/update.apk --wrong-signer-apk dist/android/updates/wrong-signer.apk --lan-pairing build-deps/native-lan/pairing.txt
+          adb install --no-incremental dist/android/Lockvyn-UI-Test.apk
+          adb logcat -c
+          adb shell am instrument -w com.bosha.vault.uismoke/com.bosha.vault.tests.LanSmoke | tee build-deps/native-lan.log
+          python -c "from pathlib import Path; text=Path('build-deps/native-lan.log').read_text(); assert 'NATIVE_LAN_PASS:' in text, text"
+          wait "$BV_LAN_PID"
+          grep -q 'NATIVE_LAN_HOST_PASS:' build-deps/native-lan-host.log
+          UI_INSTRUMENT_EXIT=0
+          adb shell am instrument -w com.bosha.vault.uismoke/com.bosha.vault.tests.UiSmoke | tee build-deps/native-ui.log || UI_INSTRUMENT_EXIT=$?
+          adb logcat -b crash -d > build-deps/native-crash.log
+          cat build-deps/native-crash.log
+          test "$UI_INSTRUMENT_EXIT" = 0
+          python -c "from pathlib import Path; text=Path('build-deps/native-ui.log').read_text(); assert 'UI_SMOKE_PASS:' in text, text"
+          adb shell appops set com.lockvyn.app REQUEST_INSTALL_PACKAGES deny
+          adb shell am instrument -w -e mode seed com.bosha.vault.uismoke/com.bosha.vault.tests.UpdateSmoke | tee build-deps/android-update-seed.log
+          python -c "from pathlib import Path; text=Path('build-deps/android-update-seed.log').read_text(); assert 'UPDATE_SMOKE_PASS:' in text, text"
+          # A different certificate must fail without uninstalling or clearing data.
+          if adb install --no-incremental -r dist/android/updates/wrong-signer.apk > build-deps/wrong-signer-install.log 2>&1; then echo 'Wrong signing certificate was accepted'; exit 1; fi
+          grep -q 'INSTALL_FAILED_UPDATE_INCOMPATIBLE' build-deps/wrong-signer-install.log
+          adb install --no-incremental -r dist/android/updates/update.apk
+          adb shell am instrument -w -e mode verify com.bosha.vault.uismoke/com.bosha.vault.tests.UpdateSmoke | tee build-deps/android-update-verify.log
+          python -c "from pathlib import Path; text=Path('build-deps/android-update-verify.log').read_text(); assert 'UPDATE_SMOKE_PASS:' in text, text"
+      - name: Upload native UI test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Lockvyn-Android-UI-Logs
+          path: |
+            build-deps/native-ui.log
+            build-deps/native-crash.log
+            build-deps/emulator.log
+            build-deps/android-update-seed.log
+            build-deps/android-update-verify.log
+            build-deps/wrong-signer-install.log
+            build-deps/native-lan.log
+            build-deps/native-lan-host.log
+          if-no-files-found: ignore
           retention-days: 14

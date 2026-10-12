@@ -27,8 +27,8 @@ final class AutofillStatus {
     }
     static String summary(Context context) {
         if(context.getSystemService(AutofillManager.class)==null)return "Autofill is unavailable on this Android device.";
-        if(!isEnabled(context))return "Status: Not selected. Tap Enable Android Autofill and select BoshaVault as the autofill provider.";
-        return "Status: BoshaVault is selected as the Android autofill provider.";
+        if(!isEnabled(context))return "Status: Not selected. Tap Enable Android Autofill and select Lockvyn as the autofill provider.";
+        return "Status: Lockvyn is selected as the Android autofill provider.";
     }
     static String diagnostic(Context context) {
         android.content.SharedPreferences p=context.getSharedPreferences(PREFS,Context.MODE_PRIVATE);
@@ -43,7 +43,7 @@ final class AutofillStatus {
             case "AMBIGUOUS_FORM":detail="The form had multiple or conflicting credential fields. Autofill refused for safety.";break;
             case "TOO_COMPLEX":detail="The form was too complex to analyze safely.";break;
             case "BUSY":detail="Too many pending unlock requests. Tap a field again.";break;
-            case "READY":detail="Android was given a BoshaVault suggestion. Whether it is shown depends on the target app and keyboard.";break;
+            case "READY":detail="Android was given a Lockvyn suggestion. Whether it is shown depends on the target app and keyboard.";break;
             case "SERVICE_CALLED":detail="The service received the request but did not produce a suggestion.";break;
             case "INTERNAL_ERROR":detail="The service hit an unexpected failure. No private form data was recorded.";break;
             default:detail="Autofill state: "+code;break;

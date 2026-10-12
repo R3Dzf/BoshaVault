@@ -28,7 +28,7 @@ public final class FillActivity extends Activity {
             if(target==null)throw new Exception("Autofill request could not be restored. Tap the login field again.");
             target.validate(this);
             engine=Store.engine(this);
-            if(!Store.vault(this).exists())throw new Exception("Create or import your vault in BoshaVault first.");
+            if(!Store.vault(this).exists())throw new Exception("Create or import your vault in Lockvyn first.");
             showUnlock();
         }catch(Exception e){
             AutofillStatus.report(this,"AUTH_FAILED");
@@ -42,7 +42,7 @@ public final class FillActivity extends Activity {
             Ui.error(this,e);
         }
     }
-    private void showUnlock(){LinearLayout root=Ui.screen(this);Ui.gap(root,20);root.addView(Ui.text(this,"BoshaVault",28,Ui.INK,true));Ui.gap(root,20);root.addView(Ui.text(this,"Unlock to fill",22,Ui.INK,true));Ui.gap(root,10);root.addView(Ui.text(this,"Destination: "+(target.browser?target.domain:target.pkg),13,Ui.MUTED,false));Ui.gap(root,22);EditText p=Ui.field(root,"Master passphrase","",true,1024);
+    private void showUnlock(){LinearLayout root=Ui.screen(this);Ui.gap(root,20);root.addView(Ui.text(this,"Lockvyn",28,Ui.INK,true));Ui.gap(root,20);root.addView(Ui.text(this,"Unlock to fill",22,Ui.INK,true));Ui.gap(root,10);root.addView(Ui.text(this,"Destination: "+(target.browser?target.domain:target.pkg),13,Ui.MUTED,false));Ui.gap(root,22);EditText p=Ui.field(root,"Master passphrase","",true,1024);
         root.addView(Ui.button(this,"Unlock & choose a login",true,()->{if(SystemClock.elapsedRealtime()<retryAfter){Toast.makeText(this,"Wait before trying again.",Toast.LENGTH_SHORT).show();return;}String password=p.getText().toString();p.setText("");run(()->engine.open(password),this::afterUnlock);}));
         if(Biometrics.available(this))root.addView(Ui.button(this,"Use fingerprint",false,()->Biometrics.unlock(this,(key,error)->{if(error!=null){Ui.error(this,error);return;}run(()->{try{engine.openWithKey(key);}finally{Arrays.fill(key,(byte)0);}},this::afterUnlock);} )));
         root.addView(Ui.button(this,"Cancel",false,this::finish));

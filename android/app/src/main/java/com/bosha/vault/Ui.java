@@ -5,6 +5,7 @@ import android.content.*;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.StateListDrawable;
 import android.os.Build;
 import android.text.InputType;
 import android.view.*;
@@ -14,14 +15,48 @@ import android.widget.*;
 final class Ui {
     static final int INK=Color.rgb(36,35,53),MUTED=Color.rgb(121,118,142),PURPLE=Color.rgb(119,98,223),BG=Color.rgb(248,247,253),SOFT=Color.rgb(240,236,255),GREEN=Color.rgb(234,246,241);
     static int dp(Context c,int x){return Math.round(x*c.getResources().getDisplayMetrics().density);}
+    static ImageView brandIcon(Context c,int size){ImageView icon=new ImageView(c);icon.setImageResource(c.getResources().getIdentifier("ic_vault","drawable",c.getPackageName()));icon.setContentDescription("Lockvyn");icon.setLayoutParams(new LinearLayout.LayoutParams(dp(c,size),dp(c,size)));return icon;}
     static GradientDrawable shape(int fill,int radius){GradientDrawable d=new GradientDrawable();d.setColor(fill);d.setCornerRadius(radius);return d;}
     static LinearLayout column(Context c){LinearLayout x=new LinearLayout(c);x.setOrientation(LinearLayout.VERTICAL);return x;}
     static TextView text(Context c,String s,int size,int color,boolean bold){TextView t=new TextView(c);t.setText(s);t.setTextSize(size);t.setTextColor(color);if(bold)t.setTypeface(Typeface.create("sans-serif",Typeface.BOLD));return t;}
     static void gap(LinearLayout x,int h){Space s=new Space(x.getContext());x.addView(s,new LinearLayout.LayoutParams(1,dp(x.getContext(),h)));}
+    static void showKeyboard(EditText field){
+        field.requestFocus();
+        field.post(()->{
+            if(!field.isAttachedToWindow()||!field.hasWindowFocus()||!field.hasFocus())return;
+            if(Build.VERSION.SDK_INT>=30){WindowInsetsController controller=field.getWindowInsetsController();if(controller!=null){controller.show(WindowInsets.Type.ime());return;}}
+            android.view.inputmethod.InputMethodManager ime=(android.view.inputmethod.InputMethodManager)field.getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
+            if(ime!=null)ime.showSoftInput(field,android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);
+        });
+    }
     static LinearLayout card(Context c,int color){LinearLayout l=column(c);int p=dp(c,18);l.setPadding(p,p,p,p);l.setBackground(shape(color,dp(c,17)));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=dp(c,12);l.setLayoutParams(lp);return l;}
     static Button button(Context c,String s,boolean primary,Runnable r){Button b=new Button(c);b.setText(s);b.setTextSize(13);b.setAllCaps(false);b.setTextColor(primary?Color.WHITE:PURPLE);b.setTypeface(null,Typeface.BOLD);b.setBackground(shape(primary?PURPLE:SOFT,dp(c,12)));b.setMinHeight(dp(c,46));b.setPadding(dp(c,12),dp(c,10),dp(c,12),dp(c,10));LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2);p.topMargin=dp(c,10);b.setLayoutParams(p);b.setOnClickListener(v->r.run());return b;}
-    static EditText field(LinearLayout parent,String label,String value,boolean secret,int max){Context c=parent.getContext();parent.addView(text(c,label,12,MUTED,false));EditText e=new EditText(c);e.setText(value);e.setTextSize(14);e.setTextColor(INK);e.setSingleLine(true);e.setInputType(secret?InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD:InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);e.setImeOptions(EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING|EditorInfo.IME_ACTION_NEXT);e.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(max)});e.setBackground(shape(Color.WHITE,dp(c,10)));e.setPadding(dp(c,12),dp(c,10),dp(c,12),dp(c,10));LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,dp(c,46));p.topMargin=dp(c,7);p.bottomMargin=dp(c,15);parent.addView(e,p);return e;}
+    private static GradientDrawable fieldShape(Context c,int fill,int border,int width){
+        GradientDrawable background=shape(fill,dp(c,12));background.setStroke(dp(c,width),border);return background;
+    }
+    static EditText field(LinearLayout parent,String label,String value,boolean secret,int max){
+        Context c=parent.getContext();TextView caption=text(c,label,13,INK,true);parent.addView(caption);
+        EditText e=new EditText(c);e.setId(View.generateViewId());e.setSaveEnabled(false);caption.setLabelFor(e.getId());
+        e.setText(value);e.setTextSize(16);e.setTextColor(INK);e.setHintTextColor(Color.rgb(103,95,123));e.setSingleLine(true);
+        e.setInputType(secret?InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD:InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        e.setImeOptions(EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING|EditorInfo.IME_ACTION_NEXT);
+        e.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(max)});
+        StateListDrawable background=new StateListDrawable();
+        background.addState(new int[]{android.R.attr.state_enabled,android.R.attr.state_focused},fieldShape(c,Color.WHITE,PURPLE,2));
+        background.addState(new int[]{-android.R.attr.state_enabled},fieldShape(c,Color.rgb(241,239,248),Color.rgb(187,181,206),1));
+        background.addState(new int[]{},fieldShape(c,Color.WHITE,Color.rgb(139,131,166),1));
+        e.setBackgroundTintList(null);e.setBackground(background);e.setMinHeight(dp(c,56));
+        e.setPadding(dp(c,14),dp(c,14),dp(c,14),dp(c,14));
+        // Let text and multiline editors grow with the user's system font size.
+        LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2);p.topMargin=dp(c,7);p.bottomMargin=dp(c,16);
+        e.setShowSoftInputOnFocus(true);e.setOnClickListener(v->showKeyboard(e));parent.addView(e,p);return e;
+    }
     static LinearLayout screen(Activity a){a.getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE,WindowManager.LayoutParams.FLAG_SECURE);a.getWindow().setStatusBarColor(BG);a.getWindow().setNavigationBarColor(BG);LinearLayout root=column(a);root.setBackgroundColor(BG);root.setPadding(dp(a,23),dp(a,25),dp(a,23),dp(a,26));ScrollView s=new ScrollView(a);s.setFillViewport(true);s.addView(root);a.setContentView(s);if(Build.VERSION.SDK_INT>=35)s.setOnApplyWindowInsetsListener((v,insets)->{android.graphics.Insets sys=insets.getInsets(WindowInsets.Type.systemBars());s.setPadding(sys.left,sys.top,sys.right,sys.bottom);return insets;});return root;}
+    static LinearLayout fixedScreen(Activity a){
+        a.getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE,WindowManager.LayoutParams.FLAG_SECURE);a.getWindow().setStatusBarColor(BG);a.getWindow().setNavigationBarColor(BG);
+        LinearLayout root=column(a);root.setBackgroundColor(BG);int horizontal=dp(a,20),vertical=dp(a,14);root.setPadding(horizontal,vertical,horizontal,vertical);root.setFocusableInTouchMode(true);a.setContentView(root);root.requestFocus();root.post(()->{android.view.inputmethod.InputMethodManager ime=(android.view.inputmethod.InputMethodManager)a.getSystemService(Context.INPUT_METHOD_SERVICE);if(ime!=null)ime.hideSoftInputFromWindow(root.getWindowToken(),0);});
+        if(Build.VERSION.SDK_INT>=35)root.setOnApplyWindowInsetsListener((v,insets)->{android.graphics.Insets sys=insets.getInsets(WindowInsets.Type.systemBars());root.setPadding(horizontal+sys.left,vertical+sys.top,horizontal+sys.right,vertical+sys.bottom);return insets;});return root;
+    }
     static void error(Activity a,Exception e){
         // Keep the useful AndroidKeyStore exception class even if its original
         // message is empty or too long. Do not log vault contents or keys.
@@ -35,7 +70,7 @@ final class Ui {
         if(message==null||message.trim().isEmpty())message="Android supplied no further error details.";
         message=message.replace('\r',' ').replace('\n',' ').trim();
         if(message.length()>360)message=message.substring(0,357)+"...";
-        new AlertDialog.Builder(a).setTitle("BoshaVault · "+type)
+        new AlertDialog.Builder(a).setTitle("Lockvyn · "+type)
             .setMessage(message+"\n\nYour encrypted vault was not deleted. Unlock with your master passphrase.")
             .setPositiveButton("OK",null).show();
     }

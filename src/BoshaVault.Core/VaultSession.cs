@@ -26,7 +26,7 @@ public sealed class VaultSession : IDisposable
         byte[] kek = await VaultCodec.DeriveKey(password, env.Kdf);
         try { env.Wrap = VaultCodec.Encrypt(kek, secret, VaultCodec.WrapAad(env)); }
         finally { CryptographicOperations.ZeroMemory(kek); }
-        var data = new VaultData { VaultId = env.VaultId };
+        var data = new VaultData { VaultId = env.VaultId, Folders = [.. FolderCatalog.Defaults] };
         var bytes = VaultCodec.Seal(env, data, secret);
         try { AtomicWrite(path, bytes, null, false); }
         catch { CryptographicOperations.ZeroMemory(secret); throw; }
@@ -55,12 +55,42 @@ public sealed class VaultSession : IDisposable
         var candidate = CloneData();
         var old = candidate.Entries.FirstOrDefault(e => e.Id == entry.Id);
         var copy = entry.Clone();
+        if (copy.Purged || old?.Purged == true) throw new VaultException("A permanently deleted login cannot be restored.");
+        copy.Folder = FolderCatalog.Empty(copy.Folder) ? "Personal" : FolderCatalog.Normalize(copy.Folder);
+        FolderCatalog.Add(candidate, copy.Folder);
+        copy.Folder = candidate.Folders.First(f => string.Equals(f, copy.Folder, StringComparison.OrdinalIgnoreCase));
+        if (old != null && (old.Password != copy.Password || old.Username != copy.Username)) copy.ReviewAcknowledgement = "";
         copy.Clock = old == null ? [] : new(old.Clock);
         MergeEngine.Tick(copy.Clock, DeviceId);
         copy.UpdatedUtc = DateTimeOffset.UtcNow.ToString("O");
         if (old != null) candidate.Entries.Remove(old);
         candidate.Entries.Add(copy); candidate.Revision++;
         Commit(candidate);
+    }
+
+    public void AddFolder(string name)
+    {
+        EnsureOpen(); var candidate = CloneData();
+        FolderCatalog.Add(candidate, name); candidate.Revision++; Commit(candidate);
+    }
+    public void AcknowledgeReview(string entryId)
+    {
+        EnsureOpen();
+        var entry = Data.Entries.FirstOrDefault(e => e.Id == entryId && !e.Deleted) ?? throw new VaultException("Login not found.");
+        var finding = PasswordHealth.Audit(Data.Entries, true).Findings.FirstOrDefault(f => f.EntryId == entryId)
+            ?? throw new VaultException("This login has no current review warnings.");
+        var copy = entry.Clone(); copy.ReviewAcknowledgement = finding.Fingerprint; Upsert(copy);
+    }
+    public void DeletePermanently(string entryId)
+    {
+        EnsureOpen(); var candidate = CloneData();
+        var entry = candidate.Entries.FirstOrDefault(e => e.Id == entryId && e.Deleted && !e.Purged)
+            ?? throw new VaultException("Only a login in Trash can be permanently deleted.");
+        entry.Title = "Deleted login"; entry.Username = entry.Password = entry.Url = entry.Notes = entry.Folder = entry.ReviewAcknowledgement = "";
+        entry.Favorite = false; entry.Purged = true;
+        MergeEngine.Tick(entry.Clock, DeviceId); entry.UpdatedUtc = DateTimeOffset.UtcNow.ToString("O"); candidate.Revision++;
+        Commit(candidate, false);
+        if (File.Exists(Path + ".previous")) File.Delete(Path + ".previous");
     }
 
     /// <summary>Imports validated entries using one atomic encrypted update, never a partial CSV import.</summary>
@@ -79,6 +109,9 @@ public sealed class VaultSession : IDisposable
                 entry.Deleted || entry.Username.Length > 2000 || entry.Password.Length is 0 or > 4096)
                 throw new VaultException("Invalid import item; no entries were saved.");
             var copy = entry.Clone();
+            if (copy.Purged) throw new VaultException("Cannot import a permanent deletion marker as a login.");
+            copy.Folder = FolderCatalog.Empty(copy.Folder) ? "Personal" : FolderCatalog.Normalize(copy.Folder);
+            FolderCatalog.Add(candidate, copy.Folder);
             copy.Clock = [];
             MergeEngine.Tick(copy.Clock, DeviceId);
             copy.UpdatedUtc = DateTimeOffset.UtcNow.ToString("O");
@@ -104,6 +137,41 @@ public sealed class VaultSession : IDisposable
     }
 
     public bool NeedsPassphrase(byte[] bytes) { EnsureOpen(); return VaultCodec.Parse(bytes).KeyEpoch != envelope.KeyEpoch; }
+
+    /// <summary>Authenticate every cloud input before one atomic local commit.</summary>
+    public int MergeCloudSnapshots(IReadOnlyCollection<byte[]> snapshots)
+    {
+        EnsureOpen();
+        if (snapshots.Count > 64) throw new VaultException("Too many cloud devices.");
+        if (snapshots.Count == 0) return 0;
+        var candidate = CloneData();
+        int conflicts = 0;
+        try
+        {
+            foreach (byte[] bytes in snapshots)
+            {
+                var remoteEnv = VaultCodec.Parse(bytes);
+                if (remoteEnv.VaultId != envelope.VaultId) throw new VaultException("Cloud backup belongs to a different vault.");
+                if (remoteEnv.KeyEpoch != envelope.KeyEpoch)
+                    throw new VaultException("A device changed the master passphrase. Merge all devices over Wi-Fi or encrypted backups first. Then disconnect cloud on both devices, start a new cloud vault on one, and rejoin with its new code. No cloud changes were applied.");
+                var remote = VaultCodec.OpenBody(remoteEnv, key!);
+                try { conflicts += MergeEngine.Merge(candidate, remote, DeviceId); }
+                finally { ClearData(remote); }
+            }
+            // A metadata poll must not create a new encrypted revision and wake
+            // the other device when every authenticated entry is already known.
+            long revision = candidate.Revision; candidate.Revision = Data.Revision;
+            byte[] before = JsonSerializer.SerializeToUtf8Bytes(Data, JsonOptions.Strict);
+            byte[] after = JsonSerializer.SerializeToUtf8Bytes(candidate, JsonOptions.Strict);
+            bool changed;
+            try { changed = !before.AsSpan().SequenceEqual(after); }
+            finally { CryptographicOperations.ZeroMemory(before); CryptographicOperations.ZeroMemory(after); }
+            candidate.Revision = revision;
+            if (changed) Commit(candidate); else ClearData(candidate);
+            return conflicts;
+        }
+        catch { ClearData(candidate); throw; }
+    }
     public async Task<int> MergeUsingPassword(byte[] bytes, string incomingPassword)
     {
         EnsureOpen();
@@ -164,12 +232,37 @@ public sealed class VaultSession : IDisposable
         if (!CryptographicOperations.FixedTimeEquals(fileHash, SHA256.HashData(bytes))) throw new VaultException("The vault changed outside this session. Lock and reopen it.");
         return bytes;
     }
-    private VaultData CloneData() => JsonSerializer.Deserialize<VaultData>(JsonSerializer.Serialize(Data, JsonOptions.Strict), JsonOptions.Strict)!;
-    private void Commit(VaultData candidate)
+    public static async Task<VaultSession> RestoreCloudNew(string path, byte[] bytes, string password, string deviceId)
     {
+        if (File.Exists(path)) throw new VaultException("A local vault already exists. Unlock it and connect that vault instead.");
+        string staged = path + "." + Guid.NewGuid().ToString("N") + ".import";
+        Directory.CreateDirectory(System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(path))!);
+        try
+        {
+            AtomicWrite(staged, bytes, null, false);
+            using (var checkedVault = await Open(staged, password, deviceId))
+            {
+                var candidate = checkedVault.CloneData(); candidate.TrustedApps.Clear();
+                checkedVault.Commit(candidate, false);
+                byte[] verified = checkedVault.ExportEncrypted();
+                try { AtomicWrite(path, verified, null, false); }
+                finally { CryptographicOperations.ZeroMemory(verified); }
+            }
+            return await Open(path, password, deviceId);
+        }
+        finally { foreach (string file in new[] { staged, staged + ".lock", staged + ".previous" }) if (File.Exists(file)) File.Delete(file); }
+    }
+    private VaultData CloneData() => JsonSerializer.Deserialize<VaultData>(JsonSerializer.Serialize(Data, JsonOptions.Strict), JsonOptions.Strict)!;
+    private void Commit(VaultData candidate, bool keepPrevious = true)
+    {
+        candidate.Schema = 2;
+        var purged = candidate.Entries.Where(e => e.Purged).Select(e => e.Id).ToHashSet(StringComparer.Ordinal);
+        bool newPurge = purged.Except(Data.Entries.Where(e => e.Purged).Select(e => e.Id)).Any();
+        foreach (var app in candidate.TrustedApps) app.EntryIds.RemoveAll(purged.Contains);
         var bytes = VaultCodec.Seal(envelope, candidate, key!);
-        AtomicWrite(Path, bytes, fileHash, true);
+        AtomicWrite(Path, bytes, fileHash, keepPrevious && !newPurge);
         var previousData = Data; Data = candidate; fileHash = SHA256.HashData(bytes); ClearData(previousData);
+        if (newPurge && File.Exists(Path + ".previous")) File.Delete(Path + ".previous");
     }
     private void EnsureOpen() { if (key == null) throw new VaultException("Vault is locked."); }
 
@@ -202,7 +295,7 @@ public sealed class VaultSession : IDisposable
         finally { if (File.Exists(temp)) File.Delete(temp); }
     }
     private static void ClearData(VaultData data)
-    { foreach (var e in data.Entries) { e.Password = ""; e.Username = ""; e.Notes = ""; e.Title = ""; e.Url = ""; } data.Entries.Clear(); data.TrustedApps.Clear(); }
+    { foreach (var e in data.Entries) { e.Password = ""; e.Username = ""; e.Notes = ""; e.Title = ""; e.Url = ""; e.Folder = ""; e.ReviewAcknowledgement = ""; } data.Entries.Clear(); data.TrustedApps.Clear(); data.Folders.Clear(); }
     public void Dispose()
     { if (key != null) { CryptographicOperations.ZeroMemory(key); key = null; } ClearData(Data); }
 }
