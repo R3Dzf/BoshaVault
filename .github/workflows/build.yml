@@ -154,6 +154,8 @@ jobs:
           $parseErrors = $null
           [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'tools/Install-BrowserAutofill.ps1'),[ref]$tokens,[ref]$parseErrors) | Out-Null
           if ($parseErrors.Count) { throw "Autofill installer syntax invalid: $parseErrors" }
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'tools/Get-BrowserAutofillStatus.ps1'),[ref]$tokens,[ref]$parseErrors) | Out-Null
+          if ($parseErrors.Count) { throw "Browser profile audit syntax invalid: $parseErrors" }
       - name: Bundle extension and native host with Windows
         shell: pwsh
         run: |
@@ -163,6 +165,7 @@ jobs:
           $suffix = Get-Content 'dist/windows/public_suffix_list.dat' -Raw
           if (-not $suffix.Contains('BEGIN PRIVATE DOMAINS') -or -not $suffix.Contains('github.io')) { throw 'Offline private PSL data missing or invalid' }
           Copy-Item 'tools/Install-BrowserAutofill.ps1' 'dist/windows/Install-BrowserAutofill.ps1' -Force
+          Copy-Item 'tools/Get-BrowserAutofillStatus.ps1' 'dist/windows/Get-BrowserAutofillStatus.ps1' -Force
           Copy-Item 'tools/Configure-PrivateTransfer.ps1' 'dist/windows/Configure-PrivateTransfer.ps1' -Force
           Copy-Item 'START-HERE.html' 'dist/windows/START-HERE.html' -Force
           if (!(Test-Path 'dist/windows/browser-extension/manifest.json')) { throw 'Extension missing from bundle' }
@@ -180,6 +183,16 @@ jobs:
           $chromeReg=(Get-Item 'HKCU:/Software/Google/Chrome/NativeMessagingHosts/com.boshavault.desktop').GetValue('')
           $edgeReg=(Get-Item 'HKCU:/Software/Microsoft/Edge/NativeMessagingHosts/com.boshavault.desktop').GetValue('')
           if ($chromeReg -ne $hostManifest -or $edgeReg -ne $hostManifest) { throw 'Native host registry registration mismatch' }
+          $savedBefore = Get-Content $hostManifest -Raw | ConvertFrom-Json
+          $savedBefore.path = 'C:\\old-lockvyn-app\\Lockvyn.NativeHost.exe'
+          $mock = $savedBefore | ConvertTo-Json -Depth 6
+          [IO.File]::WriteAllText($hostManifest,$mock,(New-Object Text.UTF8Encoding($false)))
+          powershell -NoProfile -ExecutionPolicy Bypass -File dist/windows/Install-BrowserAutofill.ps1 -RepairOnly -Browser All -AppFolder dist/windows
+          $repaired = Get-Content $hostManifest -Raw | ConvertFrom-Json
+          if ($repaired.path -ne $expectedHost) { throw 'Native host repair did not update the executable path' }
+          if (@($repaired.allowed_origins).Count -ne 2) { throw 'Repair changed the approved extension allowlist' }
+          powershell -NoProfile -ExecutionPolicy Bypass -File dist/windows/Get-BrowserAutofillStatus.ps1
+
       - name: Verify optional private Wi-Fi firewall scope and repeated setup
         shell: pwsh
         run: |
