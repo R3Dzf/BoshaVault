@@ -601,6 +601,10 @@ public final class MainActivity extends Activity {
         b.addView(Ui.button(this,"Advanced security & troubleshooting ▾",false,
             ()->advanced.setVisibility(advanced.getVisibility()==View.GONE?View.VISIBLE:View.GONE)));
         b.addView(advanced);
-        dialog("Settings",b);
+        AlertDialog settingsDialog=dialog("Settings",b);
+        settingsDialog.setOnDismissListener(x->{
+            dialogs.remove(settingsDialog);
+            current.setText("");next.setText("");confirm.setText("");
+        });
     }
 }
