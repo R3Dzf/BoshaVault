@@ -33,3 +33,22 @@ Chrome and Edge enforce extension installation choices. Supported automatic stor
 ### Security boundary
 
 The native host manifest retains **only explicitly approved extension origins**; wildcard origins are rejected. Lockvyn's repair path never expands the allowlist, never reads user browser passwords/cookies/history, and keeps the encrypted vault in the existing Windows application. Don't include secrets or complete browser profile files in bug reports.
+
+## Hiding the Chrome/Windows Hello passkey dropdown (experimental)
+
+Lockvyn Autofill **0.8.0** includes an explicit, **off-by-default** switch in its extension popup:
+**Hide automatic Passkey suggestions**.
+
+When switched on, the extension installs a small JavaScript interception at the start of **new HTTPS page loads**, only for:
+`navigator.credentials.get({publicKey: ..., mediation: "conditional"})`.
+The site receives a standard `NotAllowedError` for those silent conditional requests, which can prevent its automatic WebAuthn/passkey suggestion list. A passkey sign-in initiated explicitly by clicking a website's sign-in button (without conditional mediation) remains available, as does passkey **creation**. No challenge, response, private key, password, cookie or account information is collected or sent.
+
+Important limitations:
+- This modifies a web API within a website's scripting context and **does not guarantee** suppression of Chrome's browser-owned credential menu, already-saved Chrome passwords, Windows Hello UI, or websites with other passkey mechanisms.
+- Some login pages may fall back less gracefully after a conditional request is declined. Disable the switch on sites where passkey sign-in behaves unexpectedly.
+- The script is shared with the website's JavaScript. It is a **convenience feature, not a tamper-proof security control**. A website can override web APIs or show its own login UI.
+- On/off changes apply to the active HTTPS tab where possible and to future page loads; **reload other open login pages** after changing the setting. Browser-specific restricted pages and nested iframe login forms may not be affected.
+- The extension never deletes stored passkeys or changes Chrome policies, browser password settings, Windows Hello settings, or Microsoft accounts.
+- Because this feature manipulates WebAuthn page calls, browser updates or site changes may change the outcome. Always leave this option off when in doubt.
+
+If the screenshot shows entries labeled `Passkey · Windows Hello` even when the experimental switch is on, record the browser version and exact site and report that the browser-native dropdown persists. Do not delete passkeys or turn off Windows Hello merely to hide UI.
