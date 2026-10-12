@@ -48,6 +48,13 @@ jobs:
           "LOCKVYN_VERSION=$version" | Add-Content $env:GITHUB_ENV
           dotnet restore src/BoshaVault.Windows --locked-mode
           if ($LASTEXITCODE) { throw 'Pinned dependency restore failed.' }
+      - name: Build pinned real-release verification tool before publish mutates runtime restore assets
+        shell: pwsh
+        run: |
+          dotnet restore tools/Lockvyn.UpdateChecks --locked-mode
+          if ($LASTEXITCODE) { throw 'Pinned update-check dependencies failed to restore.' }
+          dotnet build tools/Lockvyn.UpdateChecks -c Release --no-restore
+          if ($LASTEXITCODE) { throw 'Update-check tool failed to build.' }
       - name: Prepare Windows package
         shell: pwsh
         run: ./tools/Prepare-WindowsPackage.ps1
@@ -83,10 +90,6 @@ jobs:
             if (!(Test-Path $oldPackage) -or !(Test-Path $targetPackage)) {
               throw 'Real old or new package is missing; refusing to publish an untested delta.'
             }
-            dotnet restore tools/Lockvyn.UpdateChecks --locked-mode
-            if ($LASTEXITCODE) { throw 'Pinned update-check dependencies failed to restore.' }
-            dotnet build tools/Lockvyn.UpdateChecks -c Release --no-restore
-            if ($LASTEXITCODE) { throw 'Update-check tool failed to build.' }
             $testRoot=Join-Path $env:RUNNER_TEMP ('release-delta-'+[guid]::NewGuid().ToString('N'))
             dotnet tools/Lockvyn.UpdateChecks/bin/Release/net10.0/Lockvyn.UpdateChecks.dll --published-release-delta 'dist/velopack' $testRoot $oldPackage
             if ($LASTEXITCODE) { throw 'Real release delta reconstruction failed. Nothing was published.' }
