@@ -2,7 +2,7 @@ name: Build Lockvyn (Windows and Android)
 
 on:
   push:
-    branches: [main, 'feat/browser-autofill-seamless-host']
+    branches: [main, 'feat/browser-safe-quickfill']
     tags: ['v*']
   pull_request:
     branches: [main, 'feat/browser-safe-quickfill']
