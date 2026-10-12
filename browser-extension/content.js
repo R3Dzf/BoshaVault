@@ -62,7 +62,8 @@
     frame.style.cssText="position:fixed;z-index:2147483646;width:310px;max-width:calc(100vw - 16px);pointer-events:auto;";
     shadow=frame.attachShadow({mode:"closed"});
     const style=document.createElement("style");
-    style.textContent=".panel{box-sizing:border-box;width:100%;background:#fff;color:#242335;border:1px solid #dcd5f9;border-radius:12px;box-shadow:0 9px 26px #18122a3b;padding:10px;max-height:min(420px,76vh);overflow-y:auto;overscroll-behavior:contain;font:13px system-ui,sans-serif}.top{font-weight:700;padding:5px;color:#7762df}.sub{font-size:11px;color:#777;overflow-wrap:anywhere;padding:0 6px 7px}button{display:block;text-align:left;width:100%;background:#f5f3ff;color:#32276c;border:0;border-radius:8px;padding:10px;margin:5px 0;cursor:pointer;font:13px system-ui,sans-serif}button:hover{background:#e8e0ff}button.primary{color:#fff;background:#7762df}button.primary:hover{background:#6250c1}.msg{padding:9px;line-height:1.4;white-space:pre-wrap}";
+    style.textContent=".panel{box-sizing:border-box;width:100%;background:#fff;color:#242335;border:1px solid #dcd5f9;border-radius:12px;box-shadow:0 9px 26px #18122a3b;padding:10px;max-height:min(420px,76vh);overflow-y:auto;scrollbar-width:thin;scrollbar-color:#b8a9e4 transparent;overscroll-behavior:contain;font:13px system-ui,sans-serif}.top{font-weight:700;padding:5px;color:#7762df}.sub{font-size:11px;color:#777;overflow-wrap:anywhere;padding:0 6px 7px}button{display:block;text-align:left;width:100%;background:#f5f3ff;color:#32276c;border:0;border-radius:8px;padding:10px;margin:5px 0;cursor:pointer;font:13px system-ui,sans-serif}button:hover{background:#e8e0ff}button.primary{color:#fff;background:#7762df}button.primary:hover{background:#6250c1}.msg{padding:9px;line-height:1.4;white-space:pre-wrap}";
+    style.textContent += ".panel::-webkit-scrollbar{width:6px}.panel::-webkit-scrollbar-track{background:transparent}.panel::-webkit-scrollbar-thumb{background:#b8a9e4;border-radius:12px}.account-filter{box-sizing:border-box;width:100%;padding:9px;margin:5px 0 8px;background:#faf9ff;color:#242335;border:1px solid #ded7f6;border-radius:9px;font:13px system-ui,sans-serif}";
     panel=document.createElement("div");
     panel.className="panel";
     shadow.append(style,panel);
@@ -222,13 +223,26 @@
       line("⚠️ "+reply.warning);
     savedMatches=reply?.status==="ok" && Array.isArray(reply.accounts) ? reply.accounts.slice(0,10) : [];
     if(reply?.status==="ok" && Array.isArray(reply.accounts)) {
+      const accountRows=[];
+      if(reply.accounts.length) {
+        const search=document.createElement("input");
+        search.type="search"; search.className="account-filter";
+        search.placeholder="Search saved accounts…";
+        search.setAttribute("aria-label","Search saved accounts");
+        panel.append(search);
+        search.addEventListener("input",()=>{
+          const query=search.value.toLocaleLowerCase().trim();
+          for(const row of accountRows)row.element.style.display=row.key.includes(query)?"block":"none";
+        });
+      }
       for(const account of reply.accounts.slice(0,20)){
         if(!account || typeof account.id!=="string" || typeof account.username!=="string")continue;
         const exact = account.related !== true;
         const savedHost = typeof account.website === "string" ? account.website : "";
         const hint = exact ? "✓ Exact match" : "↗ Related domain · Review before filling";
-        button(hint+" · "+(account.title||"Saved login")+" · "+account.username+
+        const accountButton=button(hint+" · "+(account.title||"Saved login")+" · "+account.username+
           (exact?"":" · saved: "+savedHost),()=>fill(ctx,account.id),exact);
+        accountRows.push({element:accountButton,key:((account.title||"")+" "+account.username+" "+savedHost).toLocaleLowerCase()});
       }
       if(reply.accounts.some(x=>x?.related===true)){
         line("Related accounts are from another subdomain of this site's registrable domain. " +
