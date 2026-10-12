@@ -25,9 +25,9 @@ public final class ScanQrActivity extends Activity implements SurfaceHolder.Call
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);setResult(RESULT_CANCELED);
         LinearLayout root=Ui.screen(this);
-        boolean cloud=getIntent().getBooleanExtra("cloud",false);
-        root.addView(Ui.text(this,cloud?"Scan cloud connection QR":"Scan your Windows QR",25,Ui.INK,true));Ui.gap(root,12);
-        root.addView(Ui.text(this,cloud?"On your own Windows device, open Sync and show its connection QR. It contains your cloud recovery key.":"Start a private transfer on your computer. Point the camera at the QR shown in Lockvyn.",14,Ui.MUTED,false));Ui.gap(root,18);
+        boolean cloud=getIntent().getBooleanExtra("cloud",false);boolean secure=getIntent().getBooleanExtra("securePairing",false);
+        root.addView(Ui.text(this,secure?"Scan secure Add device QR":cloud?"Scan cloud connection QR":"Scan your Windows QR",25,Ui.INK,true));Ui.gap(root,12);
+        root.addView(Ui.text(this,secure?"On Windows, open Sync → Add device. The QR contains a temporary public key only.":cloud?"On your own Windows device, open Sync and show its connection QR. It contains your cloud recovery key.":"Start a private transfer on your computer. Point the camera at the QR shown in Lockvyn.",14,Ui.MUTED,false));Ui.gap(root,18);
         previewBox=new FrameLayout(this);previewBox.setBackgroundColor(Ui.INK);
         preview=new SurfaceView(this);preview.getHolder().addCallback(this);
         previewBox.addView(preview,new FrameLayout.LayoutParams(-1,-1,Gravity.CENTER));
@@ -100,7 +100,7 @@ public final class ScanQrActivity extends Activity implements SurfaceHolder.Call
             if(result==null)return;final String code=result;
             runOnUiThread(()->{
                 if(!resumed||completed||stamp!=generation)return;
-                try{if(getIntent().getBooleanExtra("cloud",false)){if(!code.startsWith("BVCLOUD1:")||code.length()>1024)throw new Exception();}else new LocalTransfer(code);}
+                try{if(getIntent().getBooleanExtra("securePairing",false)){try(DevicePairing ignored=new DevicePairing(code)){} }else if(getIntent().getBooleanExtra("cloud",false)){if(!code.startsWith("BVCLOUD1:")||code.length()>1024)throw new Exception();}else new LocalTransfer(code);}
                 catch(Exception ignored){status.setText("This is not the Lockvyn QR for this step.");return;}
                 completed=true;generation++;closeCamera();setResult(RESULT_OK,new Intent().putExtra(RESULT_PAIRING,code));finish();
             });
