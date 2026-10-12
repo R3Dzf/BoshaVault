@@ -74,6 +74,16 @@ public final class UiSmoke extends Instrumentation {
                 check(addControl!=null&&addControl.getElevation()==0f&&addControl.getTranslationZ()==0f&&addControl.getStateListAnimator()==null,
                       "Calm Pro Android primary button has no native shadow or elevation animator");
                 ListView list=(ListView)field("list");check(list.getAdapter().getCount()==1000,"all 1000 logins are listed");check(list.getChildCount()>0&&list.getChildCount()<40,"rows are recycled instead of creating 1000 views");before[0]=visible(find(activity.findViewById(android.R.id.content),Button.class,"Tools"));list.setSelection(999);});waitForIdleSync();
+            main(()->{
+                TextView syncTab=find(activity.findViewById(android.R.id.content),TextView.class,"Sync");
+                check(syncTab!=null&&syncTab.getParent() instanceof View,
+                      "Sync icon-and-label navigation has a clickable semantic destination");
+                ((View)syncTab.getParent()).performClick();
+                AlertDialog opened=currentDialog();
+                check(find(opened.getWindow().getDecorView(),TextView.class,"Sync & Devices")!=null,
+                      "bottom navigation opens the unified Sync & Devices page");
+                opened.dismiss();
+            });waitForIdleSync();
             main(()->{Rect after=visible(find(activity.findViewById(android.R.id.content),Button.class,"Tools"));check(before[0].equals(after) ,"Tools stays fixed after scrolling to login 1000");
                 Button add=find(activity.findViewById(android.R.id.content),Button.class,"+ Add login");check(add!=null&&add.isShown(),"Add login stays visible on the vault screen");add.performClick();});waitForIdleSync();
             main(()->{AlertDialog editor=currentDialog();check(editor.getWindow().getAttributes().width==WindowManager.LayoutParams.MATCH_PARENT,"login editor uses a full-width screen");
