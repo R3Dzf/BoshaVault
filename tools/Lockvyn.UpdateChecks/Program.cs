@@ -24,10 +24,21 @@ if (args.Length == 2 && args[0] is "--create-vault" or "--verify-vault")
     Console.WriteLine("PASS: Synthetic encrypted vault remains usable"); return;
 }
 if (args.Length < 2) throw new ArgumentException("Usage: update-checks <feed> <test-root> [--apply-installed]");
-string feedDir = Path.GetFullPath(args[0]), testRoot = Path.GetFullPath(args[1]);
+bool published = args[0] == "--published-release-delta";
+if (published && args.Length != 4) throw new ArgumentException("Usage: --published-release-delta <feed> <test-root> <base-full-package>");
+string feedDir = Path.GetFullPath(args[published ? 1 : 0]), testRoot = Path.GetFullPath(args[published ? 2 : 1]);
 var feed = VelopackAssetFeed.FromJson(File.ReadAllText(Path.Combine(feedDir, "releases.win.json")));
-var baseline = feed.Assets.Single(a => a.Type == VelopackAssetType.Full && a.Version.ToString() == "9.0.0");
-var target = feed.Assets.Single(a => a.Type == VelopackAssetType.Full && a.Version.ToString() == "9.0.1");
+VelopackAsset baseline;
+if (published)
+{
+    string name = Path.GetFileName(args[3]);
+    var match = System.Text.RegularExpressions.Regex.Match(name, @"^Lockvyn-(\d+\.\d+\.\d+)-full\.nupkg$");
+    if (!match.Success) throw new Exception("Unexpected published baseline name.");
+    baseline = new VelopackAsset { PackageId = "Lockvyn", Type = VelopackAssetType.Full, Version = SemanticVersion.Parse(match.Groups[1].Value), FileName = name };
+    File.Copy(args[3], Path.Combine(feedDir, name), true);
+}
+else baseline = feed.Assets.Single(a => a.Type == VelopackAssetType.Full && a.Version.ToString() == "9.0.0");
+var target = published ? feed.Assets.Single(a => a.Type == VelopackAssetType.Full) : feed.Assets.Single(a => a.Type == VelopackAssetType.Full && a.Version.ToString() == "9.0.1");
 int checks = 0;
 void Check(bool condition, string message) { if (!condition) throw new Exception(message); Console.WriteLine("PASS: " + message); checks++; }
 void SameContent(string actual, string expected)
@@ -37,6 +48,25 @@ void SameContent(string actual, string expected)
     var bFiles = b.Entries.Where(e => !e.FullName.EndsWith('/')).ToDictionary(e => e.FullName);
     Check(aFiles.Keys.Order().SequenceEqual(bFiles.Keys.Order()), "Reconstructed package contains every target file");
     Check(bFiles.All(p => { using var s1 = p.Value.Open(); using var s2 = aFiles[p.Key].Open(); return SHA256.HashData(s1).SequenceEqual(SHA256.HashData(s2)); }), "Every reconstructed file matches the target SHA-256");
+}
+if (published)
+{
+    string packages = Path.Combine(testRoot, "packages"), current = Path.Combine(testRoot, "current");
+    Directory.CreateDirectory(packages); Directory.CreateDirectory(current);
+    var patcher = new Velopack.NuGet.ZipPackage(Path.Combine(feedDir, baseline.FileName), loadUpdateExe: true).UpdateExeBytes ?? throw new Exception("Published baseline has no updater.");
+    File.WriteAllBytes(Path.Combine(testRoot, "Update.exe"), patcher);
+    using (var package = ZipFile.OpenRead(Path.Combine(feedDir, baseline.FileName))) package.Entries.Single(e => e.FullName.EndsWith(".nuspec", StringComparison.OrdinalIgnoreCase)).ExtractToFile(Path.Combine(current, "sq.version"), true);
+    File.Copy(Path.Combine(feedDir, baseline.FileName), Path.Combine(packages, baseline.FileName), true);
+    var source = new TrackedSource(feedDir);
+    var locator = new TestVelopackLocator("Lockvyn", baseline.Version.ToString(), packages, current, testRoot, Path.Combine(testRoot, "Update.exe"), "win", new FixtureLogger());
+    var manager = new UpdateManager(source, new UpdateOptions { ExplicitChannel = "win" }, locator);
+    var update = await manager.CheckForUpdatesAsync() ?? throw new Exception("Published upgrade was not discovered.");
+    Check(update.TargetFullRelease.Version == target.Version && !update.IsDowngrade, "published target is discovered from the real feed");
+    await manager.DownloadUpdatesAsync(update);
+    Check(source.Downloads.Any(x => x.EndsWith("-delta.nupkg")) && !source.Downloads.Any(x => x.EndsWith("-full.nupkg")), "real published baseline reconstructs the update by downloading only its delta");
+    SameContent(Path.Combine(packages, target.FileName), Path.Combine(feedDir, target.FileName));
+    Check(manager.UpdatePendingRestart?.Version == target.Version, "verified real update is ready for restart");
+    Console.WriteLine($"PUBLISHED_DELTA_PASS: {baseline.Version} -> {target.Version}; {source.BytesRequested} delta bytes; {target.Size} full bytes; every target file verified."); return;
 }
 if (args.Contains("--apply-installed"))
 {
