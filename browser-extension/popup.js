@@ -4,6 +4,25 @@ const status=document.getElementById("status");
 const show=document.getElementById("show");
 const save=document.getElementById("save");
 const quiet=document.getElementById("quiet");
+const blockPasskeys=document.getElementById("blockPasskeys");
+chrome.storage.local.get({blockConditionalPasskeys:false},prefs=>{
+  blockPasskeys.checked=prefs?.blockConditionalPasskeys===true;
+});
+blockPasskeys.addEventListener("change",()=>{
+  const enabled=blockPasskeys.checked;
+  blockPasskeys.disabled=true;
+  chrome.storage.local.set({blockConditionalPasskeys:enabled},()=>{
+    blockPasskeys.disabled=false;
+    if(chrome.runtime.lastError){
+      blockPasskeys.checked=!enabled;
+      status.textContent="Could not save setting: "+chrome.runtime.lastError.message;
+      return;
+    }
+    status.textContent=enabled
+      ? "Auto Passkey suppression is enabled for supported HTTPS sites. Refresh any other open login tabs."
+      : "Normal Chrome Passkey requests are restored. Refresh other open login tabs if needed.";
+  });
+});
 chrome.storage.local.get({quietMode:false},prefs=>{
   quiet.checked=prefs?.quietMode===true;
 });
