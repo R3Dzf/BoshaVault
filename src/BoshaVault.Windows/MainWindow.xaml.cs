@@ -340,7 +340,7 @@ public partial class MainWindow : Window
         }
         networks.SelectionChanged += (_, _) => { if (networks.SelectedItem is LocalTransferServer.PrivateInterface choice) address.Text = choice.Host; };
         d.Body.Children.Add(networks); RefreshNetworks();
-        d.Action("Refresh Wi-Fi addresses", RefreshNetworks);
+        d.Action("Refresh Wi-Fi addresses", RefreshNetworks, inBody: true);
         var pairing = new TextBox { IsReadOnly = true, MaxLength = 4096, TextWrapping = TextWrapping.Wrap, MinHeight = 80, Margin = new(0, 10, 0, 0) };
         var qr = new Image { Width = 310, Height = 310, Stretch = Stretch.Uniform, SnapsToDevicePixels = true };
         RenderOptions.SetBitmapScalingMode(qr, BitmapScalingMode.NearestNeighbor);
@@ -411,7 +411,7 @@ public partial class MainWindow : Window
             }
             catch (Win32Exception) { status.Text = "Administrator approval was cancelled. Private-network access was not changed."; }
             catch (IOException) { status.Text = "Cannot locate the installed app's private-transfer helper. Update Lockvyn and retry."; }
-        });
+        }, inBody: true);
         d.Label("This optional action allows only this installed app on Private networks and local-subnet TCP. It needs Windows administrator approval; Public networks stay blocked.");
         d.Label("Encrypted backup files"); d.Action("Export encrypted backup", Export); d.Action("Merge an encrypted backup", ImportMerge);
         d.Action("Optional encrypted cloud sync", () =>
