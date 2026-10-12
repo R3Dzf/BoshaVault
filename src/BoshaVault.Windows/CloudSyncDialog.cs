@@ -41,13 +41,21 @@ internal static class CloudSyncDialog
             }, primary, inBody);
             buttons.Add(button); return button;
         }
+        void ScrubFields(UIElement element)
+        {
+            if (element is PasswordBox secret) secret.Clear();
+            if (element is TextBox value) value.Clear();
+            if (element is Image image) image.Source = null;
+            if (element is Panel panel)
+                foreach (UIElement child in panel.Children) ScrubFields(child);
+            if (element is ContentControl control && control.Content is UIElement nested)
+                ScrubFields(nested);
+        }
         void ClearPage()
         {
-            foreach (var element in d.Body.Children)
-            {
-                if (element is PasswordBox password) password.Clear();
-                if (element is TextBox text) text.Clear();
-            }
+            // Legacy recovery codes can now live inside an Advanced expander. Recursively
+            // clear those fields and QR bitmaps before replacing or closing the page.
+            foreach (UIElement element in d.Body.Children) ScrubFields(element);
             foreach (var b in buttons) b.Visibility = Visibility.Collapsed;
             d.Body.Children.Clear();
         }
