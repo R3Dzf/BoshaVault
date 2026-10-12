@@ -14,18 +14,25 @@ final class CloudAuth {
     private byte[] post(String path,JSONObject body,String token)throws Exception{return transport.request("POST","auth/v1/"+path,body,token);}
     static final class Session {
         final String owner,access,refresh,assurance;
+        final long expiresUnix;
         Session(byte[] bytes)throws Exception{
             try{
                 JSONObject j=StrictJson.object(new String(bytes,StandardCharsets.UTF_8));owner=j.getJSONObject("user").getString("id");access=j.getString("access_token");refresh=j.getString("refresh_token");
                 if(!VaultEngine.id(owner)||UUID.fromString(owner).equals(new UUID(0,0))||access.length()<20||access.length()>8192||refresh.length()<10||refresh.length()>8192||access.matches("(?s).*\\p{Cntrl}.*")||refresh.matches("(?s).*\\p{Cntrl}.*"))throw new Exception();
                 String[] parts=access.split("\\.");if(parts.length!=3)throw new Exception();
                 byte[] claims=Base64.getUrlDecoder().decode(parts[1]);
-                try{JSONObject jwt=StrictJson.object(new String(claims,StandardCharsets.UTF_8));if(!owner.equals(jwt.getString("sub")))throw new Exception();assurance=jwt.optString("aal","aal1");if(!assurance.equals("aal1")&&!assurance.equals("aal2"))throw new Exception();}
+                try{JSONObject jwt=StrictJson.object(new String(claims,StandardCharsets.UTF_8));if(!owner.equals(jwt.getString("sub")))throw new Exception();assurance=jwt.optString("aal","aal1");
+                    if(!assurance.equals("aal1")&&!assurance.equals("aal2"))throw new Exception();
+                    // Real Supabase sessions include exp. Synthetic test sessions may
+                    // omit it and are then conservatively cached for 90 seconds.
+                    expiresUnix=jwt.has("exp")?jwt.getLong("exp"):System.currentTimeMillis()/1000L+90;
+                    if(expiresUnix<=System.currentTimeMillis()/1000L-30L)throw new Exception();}
                 finally{Arrays.fill(claims,(byte)0);}
             }catch(Exception invalid){throw new Exception("Cloud account returned an invalid session.");}
             finally{Arrays.fill(bytes,(byte)0);}
         }
         boolean hasSecondFactor(){return assurance.equals("aal2");}
+        boolean usableForSeconds(int seconds){return expiresUnix>System.currentTimeMillis()/1000L+seconds;}
     }
     static final class Factor {
         final String id,name,type;final boolean verified;
