@@ -544,26 +544,57 @@ public final class MainActivity extends Activity {
         b.addView(Ui.button(this,"Cancel transfer",false,d::dismiss));
     }
     private void settings(){
-        LinearLayout b=Ui.column(this);b.addView(Ui.text(this,"Autofill setup · 1. Enable Lockvyn below. 2. Return here and refresh the provider status. 3. Tap a login field in a trusted app and unlock to choose an account.",13,Ui.MUTED,false));
-        b.addView(Ui.text(this,"The vault is unlocked for each fill. Only exact HTTPS hosts or apps you explicitly link are eligible.",12,Ui.MUTED,false));Ui.gap(b,12);
-        b.addView(Ui.text(this,"Autofill provider status",17,Ui.INK,true));
-        Ui.gap(b,8);
-        TextView providerStatus=Ui.text(this,AutofillStatus.summary(this),13,Ui.INK,false);
-        b.addView(providerStatus);
-        Ui.gap(b,8);
+        if(!engine.isOpen()||busy)return;
+        LinearLayout b=Ui.column(this);
+        b.addView(Ui.text(this,"Security, Autofill and software updates.",14,Ui.MUTED,false));
+        Ui.gap(b,12);
+        LinearLayout provider=Ui.card(this,Ui.SOFT);
+        provider.addView(Ui.text(this,"Android Autofill",18,Ui.INK,true));
+        TextView providerStatus=Ui.text(this,AutofillStatus.summary(this),13,Ui.MUTED,false);
+        provider.addView(providerStatus);b.addView(provider);
+        b.addView(Ui.button(this,"Enable Android Autofill",true,()->{
+            try{startActivity(new Intent(Settings.ACTION_REQUEST_SET_AUTOFILL_SERVICE,Uri.parse("package:"+getPackageName())));}
+            catch(Exception e){startActivity(new Intent(Settings.ACTION_SETTINGS));}
+        }));
+        b.addView(Ui.button(this,Biometrics.available(this)?"Disable fingerprint unlock":"Enable fingerprint unlock",false,()->{
+            try{
+                if(Biometrics.available(this)){Biometrics.disable(this);toast("Fingerprint unlock disabled.");}
+                else Biometrics.enable(this,engine.biometricKey(),(key,error)->{
+                    if(error!=null)Ui.error(this,error);
+                    else toast("Fingerprint unlock enabled for this phone.");
+                });
+            }catch(Exception e){Ui.error(this,e);}
+        }));
+        b.addView(Ui.button(this,"Software updates",false,this::appUpdates));
+        b.addView(Ui.button(this,"Cloud account security · 2FA",false,()->cloud()));
+        LinearLayout advanced=Ui.column(this);advanced.setVisibility(View.GONE);
+        advanced.addView(Ui.text(this,"Troubleshooting & security options",16,Ui.INK,true));
         TextView lastRequest=Ui.text(this,AutofillStatus.diagnostic(this),12,Ui.MUTED,false);
-        b.addView(lastRequest);
-        b.addView(Ui.button(this,"Refresh Autofill status",false,()->{
+        advanced.addView(lastRequest);
+        advanced.addView(Ui.button(this,"Refresh Autofill status",false,()->{
             providerStatus.setText(AutofillStatus.summary(this));
             lastRequest.setText(AutofillStatus.diagnostic(this));
         }));
-        b.addView(Ui.text(this,"How it appears: Tap a recognized login field in another app or browser. Android can show 'Fill with Lockvyn' near the field. Unlock, then select a matching account. If nothing appears, return here and refresh status. Verified HTTPS websites and approved apps only.",12,Ui.MUTED,false));
-        Ui.gap(b,8);
-        b.addView(Ui.button(this,"Enable Android Autofill",true,()->{try{startActivity(new Intent(Settings.ACTION_REQUEST_SET_AUTOFILL_SERVICE,Uri.parse("package:"+getPackageName())));}catch(Exception e){startActivity(new Intent(Settings.ACTION_SETTINGS));}}));
-        b.addView(Ui.button(this,Biometrics.available(this)?"Disable fingerprint unlock":"Enable fingerprint unlock",false,()->{
-            try{if(Biometrics.available(this)){Biometrics.disable(this);toast("Fingerprint unlock disabled.");}else Biometrics.enable(this,engine.biometricKey(),(key,error)->{if(error!=null)Ui.error(this,error);else toast("Fingerprint unlock enabled for this phone.");});}catch(Exception e){Ui.error(this,e);}
-        }));b.addView(Ui.button(this,"Check for app updates",false,this::appUpdates));b.addView(Ui.button(this,"Clear Autofill diagnostics",false,()->{AutofillStatus.clear(this);lastRequest.setText(AutofillStatus.diagnostic(this));}));
-        b.addView(Ui.button(this,"Revoke all Autofill app approvals",false,()->task(engine::revokeTrust,()->toast("Approvals revoked. Apps must be approved again."))));
-        Ui.gap(b,20);EditText current=Ui.field(b,"Current master passphrase","",true,1024),next=Ui.field(b,"New master passphrase (16+ characters)","",true,1024),confirm=Ui.field(b,"Confirm new passphrase","",true,1024);b.addView(Ui.button(this,"Change master passphrase",false,()->{String c=current.getText().toString(),n=next.getText().toString();if(!n.equals(confirm.getText().toString())){toast("Passphrases do not match.");return;}current.setText("");next.setText("");confirm.setText("");task(()->{engine.changePassword(c,n);Biometrics.disable(this);},()->toast("Passphrase changed. Old backups still use their original passphrase."));}));Ui.gap(b,16);b.addView(Ui.text(this,"Screenshots are blocked where Android supports it. Copying a password exposes it to the clipboard. Malware on an unlocked device can still steal data. Optional cloud sync is available in Devices & encrypted backup. Passkeys and online breach lookup are not included.",11,Ui.MUTED,false));dialog("Your vault settings",b);
+        advanced.addView(Ui.button(this,"Clear Autofill diagnostics",false,()->{
+            AutofillStatus.clear(this);lastRequest.setText(AutofillStatus.diagnostic(this));
+        }));
+        advanced.addView(Ui.button(this,"Revoke all Autofill app approvals",false,
+            ()->task(engine::revokeTrust,()->toast("Approvals revoked. Apps must be approved again."))));
+        Ui.gap(advanced,16);
+        EditText current=Ui.field(advanced,"Current master passphrase","",true,1024);
+        EditText next=Ui.field(advanced,"New master passphrase (16+ characters)","",true,1024);
+        EditText confirm=Ui.field(advanced,"Confirm new passphrase","",true,1024);
+        advanced.addView(Ui.button(this,"Change master passphrase",false,()->{
+            String oldPassword=current.getText().toString(),newPassword=next.getText().toString();
+            if(!newPassword.equals(confirm.getText().toString())){toast("Passphrases do not match.");return;}
+            current.setText("");next.setText("");confirm.setText("");
+            task(()->{engine.changePassword(oldPassword,newPassword);Biometrics.disable(this);},
+                 ()->toast("Passphrase changed. Older backups still use their original passphrase."));
+        }));
+        advanced.addView(Ui.text(this,"Your encrypted vault is not uploaded for Autofill. Keep a separate encrypted backup before changing master passphrases.",12,Ui.MUTED,false));
+        b.addView(Ui.button(this,"Advanced security & troubleshooting ▾",false,
+            ()->advanced.setVisibility(advanced.getVisibility()==View.GONE?View.VISIBLE:View.GONE)));
+        b.addView(advanced);
+        dialog("Settings",b);
     }
 }
