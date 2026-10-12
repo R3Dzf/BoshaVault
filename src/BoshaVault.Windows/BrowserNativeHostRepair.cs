@@ -30,6 +30,63 @@ internal static class BrowserNativeHostRepair
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "BoshaVault", "NativeMessaging", HostName + ".json");
 
+    internal static void RegisterApproved(string extensionId, string installedAppFolder)
+    {
+        if (!Regex.IsMatch(extensionId, @"^[a-p]{32}$", RegexOptions.CultureInvariant))
+            throw new ArgumentException("Copy the exact 32-letter extension ID from the browser.", nameof(extensionId));
+
+        string binary = Path.Combine(installedAppFolder, "Lockvyn.NativeHost.exe");
+        if (!File.Exists(binary))
+            binary = Path.Combine(installedAppFolder, "BoshaVault.NativeHost.exe");
+        if (!File.Exists(binary))
+            throw new IOException("The native host was not included in this installation.");
+
+        string file = ManifestPath;
+        var allowed = new List<string>();
+        if (File.Exists(file))
+        {
+            using var previous = JsonDocument.Parse(File.ReadAllText(file, Encoding.UTF8));
+            var root = previous.RootElement;
+            if (!root.TryGetProperty("name", out var hostName) || hostName.GetString() != HostName ||
+                !root.TryGetProperty("type", out var type) || type.GetString() != "stdio" ||
+                !root.TryGetProperty("allowed_origins", out var origins) ||
+                origins.ValueKind != JsonValueKind.Array)
+                throw new InvalidDataException("Native host configuration needs review.");
+            foreach (var origin in origins.EnumerateArray())
+            {
+                if (origin.ValueKind != JsonValueKind.String || !ApprovedOrigin.IsMatch(origin.GetString() ?? ""))
+                    throw new InvalidDataException("Native host contains an unknown extension origin.");
+                allowed.Add(origin.GetString()!);
+            }
+        }
+        allowed.Add("chrome-extension://" + extensionId + "/");
+        string json = JsonSerializer.Serialize(new
+        {
+            name = HostName,
+            description = "Lockvyn local approved browser Autofill",
+            path = binary,
+            type = "stdio",
+            allowed_origins = allowed.Distinct(StringComparer.Ordinal).ToArray()
+        });
+        Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+        string temporary = file + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            File.WriteAllText(temporary, json, new UTF8Encoding(false));
+            File.Move(temporary, file, overwrite: true);
+        }
+        finally { if (File.Exists(temporary)) File.Delete(temporary); }
+
+        // One explicit user approval can cover every installed Chromium profile,
+        // because NativeMessagingHosts is user-scoped, not profile-scoped.
+        // This registers the bridge, NOT the browser extension itself.
+        using var chrome = Registry.CurrentUser.CreateSubKey(BrowserKeys[0]);
+        chrome?.SetValue(null, file, RegistryValueKind.String);
+        using var edge = Registry.CurrentUser.CreateSubKey(BrowserKeys[1]);
+        edge?.SetValue(null, file, RegistryValueKind.String);
+        // Chromium is opt-in through the dedicated install script.
+    }
+
     internal static bool TryRepair(string installedAppFolder)
     {
         try
