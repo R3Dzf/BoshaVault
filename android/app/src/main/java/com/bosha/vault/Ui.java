@@ -36,7 +36,7 @@ final class Ui {
     }
     static EditText field(LinearLayout parent,String label,String value,boolean secret,int max){
         Context c=parent.getContext();TextView caption=text(c,label,13,INK,true);parent.addView(caption);
-        EditText e=new EditText(c);e.setId(View.generateViewId());caption.setLabelFor(e.getId());
+        EditText e=new EditText(c);e.setId(View.generateViewId());e.setSaveEnabled(false);caption.setLabelFor(e.getId());
         e.setText(value);e.setTextSize(16);e.setTextColor(INK);e.setHintTextColor(Color.rgb(103,95,123));e.setSingleLine(true);
         e.setInputType(secret?InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD:InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
         e.setImeOptions(EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING|EditorInfo.IME_ACTION_NEXT);
