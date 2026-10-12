@@ -143,9 +143,10 @@ public partial class MainWindow
             // SUGGESTIONS only, never silently filled or used for updates.
             var matches = activeSession.Data.Entries
                 .Where(e => !e.Deleted && e.Password.Length != 0 && e.Url.Length > 0)
-                .Select(e => (Entry:e, Relation:OriginPolicy.Relation(e.Url,request.Origin)))
+                .Select(e => (Entry:e, Relation:OriginPolicy.Relation(e.Url,request.Origin,preferences.DomainGroups)))
                 .Where(x => x.Relation != OriginPolicy.DomainRelation.None)
-                .OrderBy(x => x.Relation == OriginPolicy.DomainRelation.Exact ? 0 : 1)
+                .OrderBy(x => x.Relation == OriginPolicy.DomainRelation.Exact ? 0 :
+                    x.Relation == OriginPolicy.DomainRelation.TrustedGroup ? 1 : 2)
                 .ThenBy(x => x.Entry.Title,StringComparer.OrdinalIgnoreCase)
                 .Take(20).ToArray();
             if (request.Op == "list")
@@ -164,7 +165,8 @@ public partial class MainWindow
                     Accounts=matches.Select(x=>new BrowserAccount {
                         Id=x.Entry.Id,Title=x.Entry.Title,Username=x.Entry.Username,
                         Website=OriginPolicy.ExactHost(x.Entry.Url),
-                        Related=x.Relation==OriginPolicy.DomainRelation.Related
+                        Related=x.Relation!=OriginPolicy.DomainRelation.Exact,
+                        GroupMatched=x.Relation==OriginPolicy.DomainRelation.TrustedGroup
                     }).ToList()
                 };
             }
@@ -172,7 +174,7 @@ public partial class MainWindow
             if(match.Entry == null)
                 return new() { Status="denied",Message="No safe website match for this account." };
             var target=match.Entry;
-            bool related=match.Relation==OriginPolicy.DomainRelation.Related;
+            bool related=match.Relation!=OriginPolicy.DomainRelation.Exact;
             string savedHost=OriginPolicy.ExactHost(target.Url);
 
             // No longer restore the entire main vault in front of the browser.
@@ -183,7 +185,7 @@ public partial class MainWindow
                 host, savedHost, target.Title, target.Username, related);
             if (!allowed || generation != stamp || session != activeSession || !activeSession.IsOpen)
                 return new() { Status = "denied", Message = "Browser fill canceled." };
-            var verified=OriginPolicy.Relation(target.Url,request.Origin);
+            var verified=OriginPolicy.Relation(target.Url,request.Origin,preferences.DomainGroups);
             if(verified==OriginPolicy.DomainRelation.None ||
                verified!=match.Relation)
                 return new(){Status="denied",Message="Domain trust relationship changed."};
