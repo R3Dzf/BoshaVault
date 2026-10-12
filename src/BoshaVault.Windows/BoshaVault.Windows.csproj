@@ -9,7 +9,7 @@
     <Product>Lockvyn</Product>
     <Title>Lockvyn</Title>
     <Description>Private password manager for Windows and Android</Description>
-    <Version>1.19.0</Version>
+    <Version>1.20.0</Version>
     <StartupObject>BoshaVault.Windows.Program</StartupObject>
     <ApplicationIcon>Assets/lockvyn.ico</ApplicationIcon>
   </PropertyGroup>
