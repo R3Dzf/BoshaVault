@@ -69,7 +69,9 @@ jobs:
           test -f "docs/releases/Lockvyn-Android-$ANDROID_VERSION.md"
           OPTIONS=(--repo '${{ github.repository }}' --target '${{ github.sha }}' --title "Lockvyn $ANDROID_VERSION — Android" --notes-file "docs/releases/Lockvyn-Android-$ANDROID_VERSION.md")
           if [[ "$PUBLISH" != 'true' ]]; then OPTIONS+=(--draft); fi
-          gh release create "$TAG" dist/Lockvyn-Android.apk dist/android-update.json dist/SHA256SUMS-Android.txt "${OPTIONS[@]}"
+          shopt -s nullglob
+          DELTAS=(dist/Lockvyn-Android-from-*.lvdelta.gz)
+          gh release create "$TAG" dist/Lockvyn-Android.apk dist/android-update.json dist/SHA256SUMS-Android.txt "${DELTAS[@]}" "${OPTIONS[@]}"
       - name: Retain public release assets
         uses: actions/upload-artifact@v4
         with:
@@ -78,5 +80,6 @@ jobs:
             dist/Lockvyn-Android.apk
             dist/android-update.json
             dist/SHA256SUMS-Android.txt
+            dist/Lockvyn-Android-from-*.lvdelta.gz
           if-no-files-found: error
           retention-days: 14
