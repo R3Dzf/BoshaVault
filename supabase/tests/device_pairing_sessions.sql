@@ -10,9 +10,12 @@ insert into public.device_pairing_sessions(session_id,owner_id,initiator_public_
 do $$ begin
  if (select count(*) from public.device_pairing_sessions) <> 1 then raise exception 'Owner SELECT failed'; end if;
 end $$;
-update public.device_pairing_sessions
-set state='requested', joiner_public_key=repeat('B',124)
-where session_id='55555555-5555-4555-8555-555555555555';
+do $ begin
+ if not public.lockvyn_pairing_request('55555555-5555-4555-8555-555555555555',repeat('B',124))
+ then raise exception 'Owner pairing RPC request failed'; end if;
+ if public.lockvyn_pairing_request('55555555-5555-4555-8555-555555555555',repeat('B',124))
+ then raise exception 'Replayed pairing RPC was accepted'; end if;
+end $;
 do $$ begin
  if not exists(select 1 from public.device_pairing_sessions where state='requested')
  then raise exception 'One-time pairing request failed'; end if;
@@ -34,6 +37,12 @@ do $$ declare failed boolean:=false; begin
  exception when others then failed:=true; end;
  if not failed then raise exception 'Approved recipient could be replaced'; end if;
 end $$;
+do $ begin
+ if not public.lockvyn_pairing_complete('55555555-5555-4555-8555-555555555555',repeat('B',124))
+ then raise exception 'Approved recipient completion RPC failed'; end if;
+ if public.lockvyn_pairing_complete('55555555-5555-4555-8555-555555555555',repeat('B',124))
+ then raise exception 'Pairing completion replay was allowed'; end if;
+end $;
 select set_config('request.jwt.claims','{"sub":"44444444-4444-4444-8444-444444444444","role":"authenticated","aal":"aal1"}',true);
 do $$ declare n integer; begin
  if exists(select 1 from public.device_pairing_sessions) then raise exception 'Cross-owner SELECT leaked sessions'; end if;
