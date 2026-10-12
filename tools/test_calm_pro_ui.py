@@ -20,7 +20,7 @@ for name in icons:
     vector = root / f"android/app/src/main/res/drawable/ic_nav_{name}.xml"
     xml = ET.parse(vector).getroot()
     assert xml.tag == "vector" and len(xml) > 0, f"Missing vector path: {vector}"
-    assert f"R.drawable.ic_nav_{name}" in main
+    assert f'Ui.drawableId(this,"ic_nav_{name}")' in main
 assert "setStateListAnimator(null)" in android, "Do not reintroduce native Button elevation animator"
 assert "setElevation(0f)" in android and "setTranslationZ(0f)" in android
 assert "RippleDrawable" in android and "bottomNavigation" in android
