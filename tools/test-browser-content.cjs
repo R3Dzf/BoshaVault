@@ -41,6 +41,14 @@ class HTMLFormElement extends FakeElement {
   }
   getAttribute(){return null;}
 }
+function findDeep(element,predicate) {
+  if(predicate(element))return element;
+  for(const child of element.children || []) {
+    const found=findDeep(child,predicate);
+    if(found)return found;
+  }
+  return null;
+}
 const username=new HTMLInputElement("email");
 username.name="email";username.autocomplete="username";
 const password=new HTMLInputElement("password");
@@ -90,9 +98,17 @@ vm.runInNewContext(fs.readFileSync("browser-extension/content.js","utf8"),env);
   assert.ok(shadow,"Suggestion UI must use isolated Shadow DOM");
   const panel=shadow.children.find(x=>x.className==="panel");
   assert.ok(panel,"Popup panel exists");
-  const accountButton=panel.children.find(x=>x.tagName==="BUTTON" &&
+  const accountButton=findDeep(panel,x=>x.tagName==="BUTTON" &&
     x.textContent?.includes("demo@example.com"));
-  assert.ok(accountButton,"Matched account appears in dropdown");
+  assert.ok(accountButton,"Matched account appears in the nested suggestions list");
+  const filter=findDeep(panel,x=>x.tagName==="INPUT" && x.className==="account-search");
+  assert.ok(filter,"Saved-account search field exists");
+  filter.value="not-a-matching-email";
+  filter.events.input();
+  assert.equal(accountButton.style.display,"none","Search hides nonmatching accounts");
+  filter.value="demo@example";
+  filter.events.input();
+  assert.equal(accountButton.style.display,"block","Search finds matching accounts locally");
   const moreButton=panel.children.find(x=>x.tagName==="BUTTON" && x.textContent?.startsWith("More options"));
   const advanced=panel.children.find(x=>x.tagName==="DIV" && x.style.display==="none");
   assert.ok(moreButton&&advanced,"secondary password actions remain collapsed by default");
