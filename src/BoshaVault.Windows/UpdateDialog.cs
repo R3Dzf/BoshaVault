@@ -152,7 +152,7 @@ internal sealed class UpdateDialog : Window
     private async Task DownloadAsync()
     {
         if (update == null) return;
-        Begin("Downloading and verifying the signed package checksums…");
+        Begin("Downloading and verifying the update package checksums…");
         progress.Value = 0;
         progress.Visibility = progressLabel.Visibility = Visibility.Visible;
         progressLabel.Text = $"Preparing · 0% · planned transfer {FormatBytes(plannedBytes)}";
@@ -166,7 +166,7 @@ internal sealed class UpdateDialog : Window
                     progress.Value = p;
                     // SDK reports combined download/verify/reconstruction progress, not
                     // network bytes. Never present a fabricated byte counter as measured.
-                    progressLabel.Text = $"Download & verification: {p}% · planned {FormatBytes(plannedBytes)}" +
+                    progressLabel.Text = $"Download & verification: {p}% · approximately {FormatBytes((long)(plannedBytes * (p / 100d)))} / {FormatBytes(plannedBytes)} (combined estimate)" +
                                          (fullBytes != plannedBytes ? $" · fallback up to {FormatBytes(fullBytes)}" : "");
                 });
         }, cancellation.Token);
