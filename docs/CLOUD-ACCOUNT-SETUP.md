@@ -1,6 +1,14 @@
 # Lockvyn email confirmation and 2FA
 
-Windows **1.11.0**, Android **1.6.0** (code 11). Account security is separate from the encrypted vault's master passphrase.
+Windows **1.13.0**, Android **1.9.0** (code 15). Account security is separate from the encrypted vault's master passphrase.
+
+## Connect once, then sync automatically
+
+On the first device, create/confirm the cloud account and choose **Start a new cloud vault** in **Sync**. Let the first encrypted snapshot upload. Choose **Show QR & copy connection code** on Windows, or **Copy connection code** on Android. The code contains the independent recovery key; show it only to a device you control.
+
+On a new device with no local vault, choose **Restore from cloud · one-time pairing** on the lock screen. Sign in with the same account, scan or paste the code, and enter the original vault master passphrase to validate and decrypt the backup locally. On a device that already has the same vault, unlock it and choose **Join this vault's existing cloud**. An unrelated local vault cannot be overwritten by the cloud restore flow.
+
+With **Sync automatically** enabled, changes retry after connectivity returns. Windows checks while open or locked; Android checks while open and uses periodic OS background jobs when locked. Android controls the timing of jobs, so a background update may take 15 minutes or longer. Open/unlock the phone for the fastest merge. Only encrypted snapshots are staged while locked. Account 2FA must be verified again if session assurance falls below AAL2; the status shows the pause.
 
 ## Confirm your email
 
@@ -17,7 +25,7 @@ Cloud accounts require email confirmation; friends use their own Lockvyn account
 5. Back up your authenticator using its encrypted backup feature or add another authenticator. Sign-in offers a choice between verified TOTP factors. The cloud connection code is an encryption key, not an MFA recovery code.
 6. **Remove [authenticator]** asks for a current code from a verified factor. Removing the last verified factor turns off 2FA; removing one of several leaves the others enabled.
 
-Future password sign-ins require a code for accounts that enabled 2FA. A remembered session that already passed 2FA keeps its AAL2 assurance across refresh and does not require a code for every manual sync. If its assurance falls to AAL1, sync requests a code. Codes, setup keys and QR images are not saved in the cloud profile, logs or shipped artifacts. Closing/locking clears UI references; managed strings cannot be guaranteed erased from memory.
+Future password sign-ins require a code for accounts that enabled 2FA. A remembered session that already passed 2FA keeps its AAL2 assurance across refresh and does not require a code for every automatic sync. If its assurance falls to AAL1, automatic sync pauses and **Sync** requests a code. Codes, setup keys and QR images are not saved in the cloud profile, logs or shipped artifacts. Closing/locking clears UI references; managed strings cannot be guaranteed erased from memory.
 
 Losing every authenticator locks access to the cloud account. This release does not include MFA recovery codes or self-service MFA reset. The offline vault and encrypted local backups remain usable with their master passphrase. Lost cloud passwords also have no recovery UI in this release.
 

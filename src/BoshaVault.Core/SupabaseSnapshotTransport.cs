@@ -23,6 +23,32 @@ public sealed class SupabaseSnapshotTransport(HttpClient http, Uri projectUrl,
         [JsonPropertyName("ciphertext_sha256")] public string CiphertextSha256 { get; set; } = "";
     }
     public sealed record RemoteEncryptedSnapshot(Guid DeviceSlot,byte[] Blob);
+    public sealed record RemoteSnapshotMetadata(Guid DeviceSlot,string Digest);
+
+    public async Task<IReadOnlyList<RemoteSnapshotMetadata>> ListMetadataAsync(Guid vaultSlot, CancellationToken ct = default)
+    {
+        if (vaultSlot == Guid.Empty) throw new VaultException("Invalid cloud vault identifier.");
+        using var req = await MakeRequest(HttpMethod.Get, "rest/v1/opaque_device_snapshots?select=device_slot,ciphertext_sha256&vault_slot=eq." + vaultSlot.ToString("D") + "&order=device_slot&limit=64", ct);
+        using var res = await http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+        if (!res.IsSuccessStatusCode) throw new VaultException("Cloud sync needs sign-in or could not be reached. Open Sync to check your account.");
+        byte[] bytes = await SupabaseCloudAccount.ReadBounded(res.Content, 65536, ct);
+        try
+        {
+            using var json = JsonDocument.Parse(bytes, new JsonDocumentOptions { MaxDepth = 4 });
+            JsonOptions.NoDuplicates(json.RootElement);
+            if (json.RootElement.ValueKind != JsonValueKind.Array || json.RootElement.GetArrayLength() > 64) throw new VaultException("Invalid sync metadata.");
+            var result = new List<RemoteSnapshotMetadata>(); var ids = new HashSet<Guid>();
+            foreach (var row in json.RootElement.EnumerateArray())
+            {
+                Guid id = row.GetProperty("device_slot").GetGuid(); string digest = row.GetProperty("ciphertext_sha256").GetString() ?? "";
+                if (id == Guid.Empty || !ids.Add(id) || digest.Length != 64 || digest.Any(c => !char.IsAsciiHexDigit(c))) throw new VaultException("Invalid sync metadata.");
+                result.Add(new(id, digest.ToLowerInvariant()));
+            }
+            return result;
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException or FormatException) { throw new VaultException("Invalid sync metadata.", ex); }
+        finally { CryptographicOperations.ZeroMemory(bytes); }
+    }
 
     private Uri BaseUri
     {

@@ -10,6 +10,7 @@ namespace BoshaVault.Windows;
 internal sealed class CloudProfileStore(string root)
 {
     private string Path => System.IO.Path.Combine(root, "cloud-profile.dpapi");
+    private string PendingPath => System.IO.Path.Combine(root, "cloud-pending.enc");
     public bool Exists => File.Exists(Path);
     [StructLayout(LayoutKind.Sequential)] private struct Blob { public int Size; public nint Data; }
     [DllImport("crypt32.dll", SetLastError = true)]
@@ -75,5 +76,23 @@ internal sealed class CloudProfileStore(string root)
         finally { if (File.Exists(temporary)) File.Delete(temporary); CryptographicOperations.ZeroMemory(encrypted); }
     }
 
-    public void Forget() { if (Exists) File.Delete(Path); }
+    // Only authenticated, still-encrypted device snapshots are staged here. They
+    // are authenticated again before opening the vault after an offline interval.
+    public byte[]? ReadPending()
+    {
+        if (!File.Exists(PendingPath)) return null;
+        if (new FileInfo(PendingPath).Length > 16_000_000) throw new VaultException("Pending cloud data is too large.");
+        return File.ReadAllBytes(PendingPath);
+    }
+
+    public void WritePending(byte[]? data)
+    {
+        if (data == null) { if (File.Exists(PendingPath)) File.Delete(PendingPath); return; }
+        if (data.Length > 16_000_000) throw new VaultException("Pending cloud data is too large.");
+        string temporary = PendingPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try { File.WriteAllBytes(temporary, data); File.Move(temporary, PendingPath, true); }
+        finally { if (File.Exists(temporary)) File.Delete(temporary); }
+    }
+
+    public void Forget() { if (Exists) File.Delete(Path); WritePending(null); }
 }

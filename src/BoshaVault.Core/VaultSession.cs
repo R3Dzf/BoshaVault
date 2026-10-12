@@ -158,7 +158,16 @@ public sealed class VaultSession : IDisposable
                 try { conflicts += MergeEngine.Merge(candidate, remote, DeviceId); }
                 finally { ClearData(remote); }
             }
-            if (snapshots.Count > 0) Commit(candidate);
+            // A metadata poll must not create a new encrypted revision and wake
+            // the other device when every authenticated entry is already known.
+            long revision = candidate.Revision; candidate.Revision = Data.Revision;
+            byte[] before = JsonSerializer.SerializeToUtf8Bytes(Data, JsonOptions.Strict);
+            byte[] after = JsonSerializer.SerializeToUtf8Bytes(candidate, JsonOptions.Strict);
+            bool changed;
+            try { changed = !before.AsSpan().SequenceEqual(after); }
+            finally { CryptographicOperations.ZeroMemory(before); CryptographicOperations.ZeroMemory(after); }
+            candidate.Revision = revision;
+            if (changed) Commit(candidate); else ClearData(candidate);
             return conflicts;
         }
         catch { ClearData(candidate); throw; }
@@ -222,6 +231,26 @@ public sealed class VaultSession : IDisposable
         EnsureOpen(); var bytes = ReadBounded(Path);
         if (!CryptographicOperations.FixedTimeEquals(fileHash, SHA256.HashData(bytes))) throw new VaultException("The vault changed outside this session. Lock and reopen it.");
         return bytes;
+    }
+    public static async Task<VaultSession> RestoreCloudNew(string path, byte[] bytes, string password, string deviceId)
+    {
+        if (File.Exists(path)) throw new VaultException("A local vault already exists. Unlock it and connect that vault instead.");
+        string staged = path + "." + Guid.NewGuid().ToString("N") + ".import";
+        Directory.CreateDirectory(System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(path))!);
+        try
+        {
+            AtomicWrite(staged, bytes, null, false);
+            using (var checkedVault = await Open(staged, password, deviceId))
+            {
+                var candidate = checkedVault.CloneData(); candidate.TrustedApps.Clear();
+                checkedVault.Commit(candidate, false);
+                byte[] verified = checkedVault.ExportEncrypted();
+                try { AtomicWrite(path, verified, null, false); }
+                finally { CryptographicOperations.ZeroMemory(verified); }
+            }
+            return await Open(path, password, deviceId);
+        }
+        finally { foreach (string file in new[] { staged, staged + ".lock", staged + ".previous" }) if (File.Exists(file)) File.Delete(file); }
     }
     private VaultData CloneData() => JsonSerializer.Deserialize<VaultData>(JsonSerializer.Serialize(Data, JsonOptions.Strict), JsonOptions.Strict)!;
     private void Commit(VaultData candidate, bool keepPrevious = true)

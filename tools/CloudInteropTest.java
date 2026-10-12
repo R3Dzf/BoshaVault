@@ -26,6 +26,8 @@ public final class CloudInteropTest {
                 byte[] before=va.export();reject(()->va.mergeCloud(Arrays.asList(vb.export(),new byte[200])),"Java cloud merge rejects invalid later snapshot");
                 check(Arrays.equals(before,va.export()),"Java invalid cloud batch preserves local file exactly");
                 va.mergeCloud(Collections.singletonList(vb.export()));check(va.snapshot().getJSONArray("entries").length()==2,"Java validated cloud batch applies remote edit");
+                byte[] merged=va.export();va.mergeCloud(Collections.singletonList(vb.export()));
+                check(Arrays.equals(merged,va.export()),"Repeated cloud metadata does not rewrite the encrypted Android vault");
             }
             System.out.println("RESULT: "+passed+" Java cloud crypto/pairing/atomic merge checks passed.");
         }finally{Arrays.fill(key,(byte)0);}

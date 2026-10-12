@@ -45,7 +45,7 @@ public final class CloudSnapshot {
         byte[] data=Base64.getUrlDecoder().decode(code.substring(9));
         try{
             JSONObject result=StrictJson.object(new String(data,StandardCharsets.UTF_8));StrictJson.keys(result,"version","ownerId","vaultId","vaultSlot","recoveryKey");
-            if(StrictJson.number(result,"version")!=1||!result.getString("ownerId").equalsIgnoreCase(ownerId)||!result.getString("vaultId").equalsIgnoreCase(vaultId)||!VaultEngine.id(result.getString("vaultSlot"))||UUID.fromString(result.getString("vaultSlot")).equals(new UUID(0,0)))throw new Exception("Use the same cloud account and vault on both devices. Transfer the same vault over Wi-Fi or import its encrypted backup first.");
+            if(StrictJson.number(result,"version")!=1||!result.getString("ownerId").equalsIgnoreCase(ownerId)||!VaultEngine.id(result.getString("vaultId"))||(vaultId!=null&&!result.getString("vaultId").equalsIgnoreCase(vaultId))||!VaultEngine.id(result.getString("vaultSlot"))||UUID.fromString(result.getString("vaultSlot")).equals(new UUID(0,0)))throw new Exception("Use the same cloud account and vault on both devices.");
             byte[] key=parseKey(result.getString("recoveryKey"));Arrays.fill(key,(byte)0);return result;
         }finally{Arrays.fill(data,(byte)0);}
     }

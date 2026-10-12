@@ -23,6 +23,12 @@ public sealed class CloudProfile
     public string RefreshToken { get; set; } = "";
     public string RecoveryKey { get; set; } = "";
     public string LastSyncUtc { get; set; } = "";
+    public bool AutoSync { get; set; } = true;
+    public long KeyEpoch { get; set; }
+    public string LastUploadedHash { get; set; } = "";
+    public string LastOuterHash { get; set; } = "";
+    public string DownloadedStamp { get; set; } = "";
+    public string MergedStamp { get; set; } = "";
 
     public void Validate(Guid vaultId)
     {
@@ -33,6 +39,10 @@ public sealed class CloudProfile
             throw new VaultException("Cloud settings do not match this vault. Connect again.");
         byte[] key = CloudSnapshotCodec.ParseRecoveryKey(RecoveryKey);
         CryptographicOperations.ZeroMemory(key);
+        foreach (string digest in new[] { LastUploadedHash, LastOuterHash, DownloadedStamp, MergedStamp })
+            if (digest == null || (digest.Length != 0 && (digest.Length != 64 || digest.Any(c => !char.IsAsciiHexDigit(c)))))
+                throw new VaultException("Invalid protected sync checkpoint.");
+        if (KeyEpoch is < 0 or > 1_000_000) throw new VaultException("Invalid cloud key epoch.");
     }
 
     public void Clear() { RefreshToken = ""; RecoveryKey = ""; Email = ""; }
@@ -80,7 +90,7 @@ public sealed class CloudPairing
             JsonOptions.NoDuplicates(document.RootElement);
             var pairing = JsonSerializer.Deserialize<CloudPairing>(data, Json) ?? throw new FormatException();
             if (pairing.Version != 1 || pairing.VaultSlot == Guid.Empty ||
-                pairing.OwnerId != ownerId || pairing.VaultId != vaultId)
+                pairing.OwnerId != ownerId || pairing.VaultId == Guid.Empty || (vaultId != Guid.Empty && pairing.VaultId != vaultId))
                 throw new VaultException("Use the same cloud account and the same vault on both devices. Transfer your vault over Wi-Fi or import its encrypted backup first.");
             byte[] key = CloudSnapshotCodec.ParseRecoveryKey(pairing.RecoveryKey);
             CryptographicOperations.ZeroMemory(key);

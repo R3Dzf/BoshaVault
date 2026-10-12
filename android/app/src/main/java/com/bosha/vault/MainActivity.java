@@ -25,29 +25,48 @@ public final class MainActivity extends Activity {
     private final List<JSONObject> displayedEntries=new ArrayList<>();
     private String folderFilter;
 
-    private final ExecutorService worker=Executors.newSingleThreadExecutor();
+    private final ExecutorService worker=Executors.newSingleThreadExecutor(),cloudWorker=Executors.newSingleThreadExecutor();
     private final Handler handler=new Handler(Looper.getMainLooper());
     private volatile int epoch; private int timeout=2,attempts; private volatile boolean active; private boolean busy; private long lastTouch,retryAfter,clipboardUntil;
-    private String filter="all",search="",clipboard;
+    private String filter="all",search="",clipboard,undoEntryId;private long undoUntil;private boolean cloudOpen;private long nextCloudCheck;private TextView syncStatus;private volatile CloudClient autoClient;
     private byte[] exportBytes,pendingImport; private volatile LocalTransfer pendingTransfer;
-    private String scannedPairing;
+    private String scannedPairing,scannedCloud;
     private final List<AlertDialog> dialogs=new ArrayList<>();
-    private final Runnable tick=new Runnable(){public void run(){if(active&&engine!=null&&engine.isOpen()&&SystemClock.elapsedRealtime()-lastTouch>timeout*60000L)lock();handler.postDelayed(this,1000);}};
-    @Override public void onCreate(Bundle b){super.onCreate(b);try{engine=Store.engine(this);}catch(Exception e){Ui.error(this,e);finish();return;}handler.post(tick);}
+    private final Runnable tick=new Runnable(){public void run(){if(active&&engine!=null&&engine.isOpen()&&SystemClock.elapsedRealtime()-lastTouch>timeout*60000L)lock();if(active&&engine!=null&&engine.isOpen())autoSyncTick();handler.postDelayed(this,1000);}};
+    @Override public void onCreate(Bundle b){super.onCreate(b);try{engine=Store.engine(this);CloudSyncJob.schedule(this);}catch(Exception e){Ui.error(this,e);finish();return;}handler.post(tick);}
     @Override protected void onStart(){super.onStart();active=true;showLock();}
-    @Override protected void onResume(){super.onResume();if(scannedPairing!=null){String code=scannedPairing;scannedPairing=null;showPairing(Store.vault(this).exists(),code);}}
-    @Override protected void onStop(){super.onStop();active=false;epoch++;cancelLocalTransfer();for(AlertDialog d:new ArrayList<>(dialogs))d.dismiss();dialogs.clear();displayedEntries.clear();list=null;entryAdapter=null;vaultStats=null;if(root!=null)root.removeAllViews();worker.execute(()->engine.close());}
-    @Override protected void onDestroy(){handler.removeCallbacks(tick);worker.shutdown();super.onDestroy();}
+    @Override protected void onResume(){super.onResume();if(scannedPairing!=null){String code=scannedPairing;scannedPairing=null;showPairing(Store.vault(this).exists(),code);}if(scannedCloud!=null){String code=scannedCloud;scannedCloud=null;joinCloud(code);}}
+    @Override protected void onStop(){super.onStop();active=false;epoch++;CloudClient running=autoClient;if(running!=null)running.close();cancelLocalTransfer();for(AlertDialog d:new ArrayList<>(dialogs))d.dismiss();dialogs.clear();displayedEntries.clear();list=null;entryAdapter=null;vaultStats=null;syncStatus=null;if(root!=null)root.removeAllViews();worker.execute(()->engine.close());}
+    @Override protected void onDestroy(){handler.removeCallbacks(tick);worker.shutdown();cloudWorker.shutdown();super.onDestroy();}
     @Override public boolean dispatchTouchEvent(android.view.MotionEvent e){lastTouch=SystemClock.elapsedRealtime();return super.dispatchTouchEvent(e);}
     @Override public void onUserInteraction(){super.onUserInteraction();lastTouch=SystemClock.elapsedRealtime();}
     @Override public void onBackPressed(){if(engine.isOpen()){lock();}else super.onBackPressed();}
     interface Work{void run()throws Exception;}
     private void task(Work action,Runnable done){
         if(busy)return;busy=true;int stamp=epoch;
-        worker.execute(()->{Exception failure=null;try{action.run();}catch(Exception e){failure=e;}if(!active||stamp!=epoch)engine.close();Exception error=failure;runOnUiThread(()->{busy=false;if(!active||stamp!=epoch)return;if(error!=null)Ui.error(this,error);else done.run();});});
+        worker.execute(()->{Exception failure=null;try{action.run();}catch(Exception e){failure=e;}if(!active||stamp!=epoch)engine.close();Exception error=failure;runOnUiThread(()->{busy=false;if(!active||stamp!=epoch)return;if(error!=null)Ui.error(this,error);else{nextCloudCheck=0;done.run();}});});
     }
     private void cancelLocalTransfer(){LocalTransfer current=pendingTransfer;pendingTransfer=null;if(current!=null)current.cancel();}
-    private void lock(){epoch++;cancelLocalTransfer();for(AlertDialog d:new ArrayList<>(dialogs))d.dismiss();dialogs.clear();displayedEntries.clear();list=null;entryAdapter=null;vaultStats=null;clearClipboard();worker.execute(()->engine.close());showLock();}
+    private void lock(){epoch++;undoEntryId=null;CloudClient running=autoClient;if(running!=null)running.close();cancelLocalTransfer();for(AlertDialog d:new ArrayList<>(dialogs))d.dismiss();dialogs.clear();displayedEntries.clear();list=null;entryAdapter=null;vaultStats=null;syncStatus=null;clearClipboard();worker.execute(()->engine.close());showLock();}
+    private void autoSyncTick(){
+        long now=SystemClock.elapsedRealtime();if(cloudOpen||busy||now<nextCloudCheck)return;nextCloudCheck=now+12000;
+        int stamp=epoch;cloudWorker.execute(()->{
+            JSONObject profile=null;CloudClient client=null;String result="Cloud not connected · open Sync";
+            try{
+                synchronized(CloudClient.GATE){
+                    String id=engine.snapshot().getString("vaultId");CloudSettingsStore store=new CloudSettingsStore(this);profile=store.load(id);
+                    if(profile==null)return;
+                    if(!profile.optBoolean("autoSync",true)){result="Cloud paused on this phone";return;}
+                    result="Cloud synced · up to date";
+                    client=new CloudClient(()->{if(!active||stamp!=epoch||cloudOpen||!engine.isOpen())throw new IOException("Cloud operation cancelled.");});autoClient=client;
+                    CloudAuth.Session signed=client.refresh(profile,store);
+                    if(client.auth.factors(signed).requiresChallenge(signed))result="Cloud paused · verify 2FA in Sync";
+                    else{int conflicts=client.syncAutomatic(engine,null,profile,store,signed);if(conflicts>0)result="Cloud synced · "+conflicts+" conflict copies";}
+                }
+            }catch(Exception e){result="Cloud offline · changes retry automatically";}
+            finally{CloudSettingsStore.clear(profile);if(client!=null)client.close();autoClient=null;String status=result;runOnUiThread(()->{if(active&&stamp==epoch&&syncStatus!=null){syncStatus.setText(status);if(status.startsWith("Cloud synced"))renderList();}});}
+        });
+    }
     private void toast(String s){Toast.makeText(this,s,Toast.LENGTH_LONG).show();}
     private void showLock(){
         if(!active)return;root=Ui.screen(this);Ui.gap(root,35);LinearLayout logo=Ui.card(this,Ui.SOFT);logo.addView(Ui.brandIcon(this,64));logo.addView(Ui.text(this,"Your private space.",27,Ui.INK,true));Ui.gap(logo,9);logo.addView(Ui.text(this,"Encrypted. Local. Yours.",14,Ui.MUTED,false));root.addView(logo);Ui.gap(root,25);
@@ -61,6 +80,7 @@ public final class MainActivity extends Activity {
         root.addView(Ui.button(this,"Import encrypted vault",false,this::chooseImport));
         root.addView(Ui.button(this,"Check for app updates",false,this::appUpdates));
         if(!exists)root.addView(Ui.button(this,"Receive from your Windows app",false,()->showPairing(false)));
+        if(!exists)root.addView(Ui.button(this,"Restore from cloud · one-time pairing",false,()->joinCloud("")));
         Ui.gap(root,25);root.addView(Ui.text(this,"Works offline without an account.\nA lost passphrase cannot be reset. Keep an encrypted backup.",11,Ui.MUTED,false));
         if(pendingImport!=null)handler.post(()->importPrompt(pendingImport));
     }
@@ -72,7 +92,8 @@ public final class MainActivity extends Activity {
         String title=filter.equals("trash")?"Your trash":filter.equals("favorites")?"Your favorites":filter.equals("health")?"Review":"Your Vault";
         heading.addView(Ui.text(this,title,27,Ui.INK,true),new LinearLayout.LayoutParams(0,-2,1));
         Button options=Ui.button(this,"Options",false,this::options);options.setLayoutParams(new LinearLayout.LayoutParams(-2,-2));heading.addView(options);root.addView(heading);
-        vaultStats=Ui.text(this,"",12,Ui.MUTED,false);Ui.gap(root,8);root.addView(vaultStats);Ui.gap(root,12);
+        vaultStats=Ui.text(this,"",12,Ui.MUTED,false);Ui.gap(root,8);root.addView(vaultStats);
+        Button add=Ui.button(this,"+ Add login",true,()->edit(null));root.addView(add);Ui.gap(root,8);
         EditText find=Ui.field(root,"Search your vault",search,false,200);find.setHint("Name, username or website");find.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int a,int c,int f){}public void onTextChanged(CharSequence s,int a,int b,int c){search=s.toString();renderList();}public void afterTextChanged(Editable e){}});
         LinearLayout tabs=new LinearLayout(this);String[] values={"all","favorites","health","trash"},labels={"All","Favorites","Review","Trash"};
         for(int i=0;i<4;i++){final String value=values[i];TextView t=Ui.text(this,labels[i],12,filter.equals(value)?Ui.PURPLE:Ui.MUTED,true);t.setGravity(Gravity.CENTER);t.setPadding(0,Ui.dp(this,12),0,Ui.dp(this,12));t.setOnClickListener(v->{filter=value;showVault();});tabs.addView(t,new LinearLayout.LayoutParams(0,-2,1));}root.addView(tabs);
@@ -82,7 +103,7 @@ public final class MainActivity extends Activity {
             folders.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener(){public void onItemSelected(AdapterView<?> p,View v,int pos,long id){folderFilter=pos==0?null:names.get(pos);renderList();}public void onNothingSelected(AdapterView<?> p){}});
         }catch(Exception e){Ui.error(this,e);}
         FrameLayout area=new FrameLayout(this);list=new ListView(this);list.setDivider(null);list.setDividerHeight(0);list.setPadding(0,Ui.dp(this,6),0,0);list.setClipToPadding(false);area.addView(list,new FrameLayout.LayoutParams(-1,-1));
-        TextView empty=Ui.text(this,"No logins here. Change the section, folder or search, or use Options to add a login.",14,Ui.MUTED,false);empty.setGravity(Gravity.CENTER);empty.setPadding(Ui.dp(this,14),Ui.dp(this,14),Ui.dp(this,14),Ui.dp(this,14));area.addView(empty,new FrameLayout.LayoutParams(-1,-1));list.setEmptyView(empty);root.addView(area,new LinearLayout.LayoutParams(-1,0,1));
+        TextView empty=Ui.text(this,"No logins here. Change the section, folder or search, or add a login above.",14,Ui.MUTED,false);empty.setGravity(Gravity.CENTER);empty.setPadding(Ui.dp(this,14),Ui.dp(this,14),Ui.dp(this,14),Ui.dp(this,14));area.addView(empty,new FrameLayout.LayoutParams(-1,-1));list.setEmptyView(empty);root.addView(area,new LinearLayout.LayoutParams(-1,0,1));
         entryAdapter=new BaseAdapter(){
             public int getCount(){return displayedEntries.size();}public Object getItem(int position){return displayedEntries.get(position);}public long getItemId(int position){return position;}
             public View getView(int position,View recycled,ViewGroup parent){
@@ -91,6 +112,13 @@ public final class MainActivity extends Activity {
                 JSONObject e=displayedEntries.get(position);text[0].setText(e.optString("title")+(e.optBoolean("favorite")?"   ★":""));text[1].setText(e.optString("username"));text[2].setText(e.optString("folder"));return row;
             }
         };list.setAdapter(entryAdapter);list.setOnItemClickListener((parent,view,position,id)->{if(position<displayedEntries.size())detail(displayedEntries.get(position));});renderList();
+        if(undoEntryId!=null&&SystemClock.elapsedRealtime()<undoUntil){String id=undoEntryId;Button undo=Ui.button(this,"Login moved to trash · Undo",false,()->task(()->{
+            JSONArray entries=engine.snapshot().getJSONArray("entries");for(int i=0;i<entries.length();i++){JSONObject entry=entries.getJSONObject(i);if(entry.getString("id").equals(id)&&entry.getBoolean("deleted")&&!entry.optBoolean("purged")){JSONObject copy=new JSONObject(entry.toString());copy.put("deleted",false);engine.upsert(copy);return;}}
+        },()->{undoEntryId=null;showVault();}));root.addView(undo);handler.postDelayed(()->{if(id.equals(undoEntryId)&&SystemClock.elapsedRealtime()>=undoUntil){undoEntryId=null;undo.setVisibility(View.GONE);}},Math.max(1,undoUntil-SystemClock.elapsedRealtime()));}
+        syncStatus=Ui.text(this,"Cloud · checking when connected",11,Ui.MUTED,false);root.addView(syncStatus);
+        LinearLayout nav=new LinearLayout(this);nav.setGravity(Gravity.CENTER);String[] names={"Vault","Sync","Settings"};Runnable[] actions={this::showVault,this::cloud,this::settings};
+        for(int i=0;i<names.length;i++){Button button=Ui.button(this,names[i],i==0,actions[i]);button.setLayoutParams(new LinearLayout.LayoutParams(0,Ui.dp(this,48),1));nav.addView(button);}
+        root.addView(nav);
     }
     private void renderList(){
         if(list==null||entryAdapter==null||!engine.isOpen())return;
@@ -138,7 +166,7 @@ public final class MainActivity extends Activity {
             b.addView(Ui.text(this,"Username / email",12,Ui.MUTED,false));b.addView(Ui.text(this,entry.getString("username"),16,Ui.INK,false));b.addView(Ui.button(this,"Copy username",false,()->copy(entry.optString("username"))));Ui.gap(b,15);TextView password=Ui.text(this,"••••••••••••••••",20,Ui.INK,false);b.addView(password);
             b.addView(Ui.button(this,"Show for 15 seconds",false,()->{password.setText(entry.optString("password"));handler.postDelayed(()->password.setText("••••••••••••••••"),15000);}));b.addView(Ui.button(this,"Copy password",true,()->copy(entry.optString("password"))));Ui.gap(b,15);b.addView(Ui.text(this,entry.getString("notes"),13,Ui.INK,false));AlertDialog d=dialog(entry.getString("title"),b);
             b.addView(Ui.button(this,"Edit login",false,()->{d.dismiss();edit(entry);}));if(!entry.getString("url").isEmpty())b.addView(Ui.button(this,"Open website",false,()->startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(entry.optString("url"))))));
-            boolean deleted=entry.getBoolean("deleted");b.addView(Ui.button(this,deleted?"Restore login":"Move to trash",false,()->task(()->{JSONObject copy=new JSONObject(entry.toString());copy.put("deleted",!deleted);engine.upsert(copy);},()->{d.dismiss();showVault();})));
+            boolean deleted=entry.getBoolean("deleted");b.addView(Ui.button(this,deleted?"Restore login":"Move to trash",false,()->task(()->{JSONObject copy=new JSONObject(entry.toString());copy.put("deleted",!deleted);engine.upsert(copy);},()->{undoEntryId=deleted?null:entry.optString("id");undoUntil=SystemClock.elapsedRealtime()+15000;d.dismiss();showVault();})));
             if(deleted)b.addView(Ui.button(this,"Delete permanently",false,()->new AlertDialog.Builder(this).setTitle("Delete permanently?").setMessage("Remove this login from the vault with no restore option? Older exported backups and unsynced devices may still hold their previous encrypted copy.").setNegativeButton("Cancel",null).setPositiveButton("Delete permanently",(x,w)->task(()->engine.deletePermanently(entry.getString("id")),()->{clearClipboard();d.dismiss();toast("Permanently deleted. Sync your other devices.");showVault();})).show()));
             if(!deleted)for(PasswordHealth.Finding f:PasswordHealth.audit(engine.snapshot().getJSONArray("entries")))if(f.id.equals(entry.getString("id"))){
                 b.addView(Ui.text(this,(f.acknowledged?"Reviewed: ":"Review: ")+String.join("; ",f.reasons),12,Ui.MUTED,false));
@@ -148,14 +176,25 @@ public final class MainActivity extends Activity {
     }
     private void edit(JSONObject original){
         try{
-            JSONObject entry=original==null?VaultEngine.blank():new JSONObject(original.toString());LinearLayout b=Ui.column(this);EditText title=Ui.field(b,"Name",entry.getString("title"),false,200),username=Ui.field(b,"Username / email",entry.getString("username"),false,2000),password=Ui.field(b,"Password",entry.getString("password"),true,4096);
-            b.addView(Ui.button(this,"Generate password · choose rules",false,()->generator(value->password.setText(value))));Ui.gap(b,15);EditText url=Ui.field(b,"Website (https://example.com)",entry.getString("url"),false,2048);
-            b.addView(Ui.text(this,"Folder",12,Ui.MUTED,false));List<String> names=FolderCatalog.choices(engine.snapshot());String current=entry.getString("folder");if(!names.contains(current)&&!current.isEmpty())names.add(current);Spinner folder=new Spinner(this);ArrayAdapter<String> adapter=new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,names);folder.setAdapter(adapter);folder.setSelection(Math.max(0,names.indexOf(current)));b.addView(folder);
-            b.addView(Ui.button(this,"+ New folder",false,()->addFolder(name->{if(!names.contains(name)){names.add(name);adapter.notifyDataSetChanged();}folder.setSelection(names.indexOf(name));})));
-            EditText notes=Ui.field(b,"Private notes",entry.getString("notes"),false,32000);notes.setSingleLine(false);notes.setMinLines(2);notes.setMaxLines(6);CheckBox favorite=new CheckBox(this);favorite.setText("Add to favorites");favorite.setChecked(entry.getBoolean("favorite"));b.addView(favorite);AlertDialog d=dialog(original==null?"Add a new login":"Edit login",b);
-            b.addView(Ui.button(this,"Save login",true,()->{
-                try{if(title.getText().toString().trim().isEmpty())throw new Exception("Give this login a name.");String website=url.getText().toString().trim();if(!website.isEmpty())VaultEngine.host(website);entry.put("title",title.getText().toString().trim()).put("username",username.getText().toString()).put("password",password.getText().toString()).put("url",website).put("folder",FolderCatalog.normalize((String)folder.getSelectedItem())).put("notes",notes.getText().toString()).put("favorite",favorite.isChecked());task(()->engine.upsert(entry),()->{password.setText("");username.setText("");notes.setText("");d.dismiss();showVault();});}catch(Exception e){Ui.error(this,e);}
-            }));
+            JSONObject entry=original==null?VaultEngine.blank():new JSONObject(original.toString());LinearLayout page=Ui.column(this),body=Ui.column(this);int p=Ui.dp(this,20);page.setPadding(p,p,p,p);body.setPadding(0,Ui.dp(this,12),0,Ui.dp(this,16));
+            page.addView(Ui.text(this,original==null?"Add a new login":"Edit login",24,Ui.INK,true));
+            EditText title=Ui.field(body,"Name",entry.getString("title"),false,200),username=Ui.field(body,"Username / email",entry.getString("username"),false,2000),password=Ui.field(body,"Password",entry.getString("password"),true,4096);
+            body.addView(Ui.button(this,"Generate password · choose rules",false,()->generator(value->password.setText(value))));
+            EditText url=Ui.field(body,"Website (https://example.com)",entry.getString("url"),false,2048);
+            LinearLayout optional=Ui.column(this);optional.setVisibility(View.GONE);
+            optional.addView(Ui.text(this,"Folder",12,Ui.MUTED,false));List<String> names=FolderCatalog.choices(engine.snapshot());String current=entry.getString("folder");if(!names.contains(current)&&!current.isEmpty())names.add(current);Spinner folder=new Spinner(this);ArrayAdapter<String> adapter=new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,names);folder.setAdapter(adapter);folder.setSelection(Math.max(0,names.indexOf(current)));optional.addView(folder);
+            optional.addView(Ui.button(this,"+ New folder",false,()->addFolder(name->{if(!names.contains(name)){names.add(name);adapter.notifyDataSetChanged();}folder.setSelection(names.indexOf(name));})));
+            EditText notes=Ui.field(optional,"Private notes",entry.getString("notes"),false,32000);notes.setSingleLine(false);notes.setMinLines(2);notes.setMaxLines(6);CheckBox favorite=new CheckBox(this);favorite.setText("Add to favorites");favorite.setChecked(entry.getBoolean("favorite"));optional.addView(favorite);
+            body.addView(Ui.button(this,"Folder, notes & favorite ▾",false,()->optional.setVisibility(optional.getVisibility()==View.GONE?View.VISIBLE:View.GONE)));body.addView(optional);
+            ScrollView scroll=new ScrollView(this);scroll.setFillViewport(false);scroll.addView(body);page.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
+            LinearLayout footer=Ui.column(this);page.addView(footer);AlertDialog d=new AlertDialog.Builder(this).setView(page).create();dialogs.add(d);d.setOnDismissListener(x->{dialogs.remove(d);password.setText("");username.setText("");notes.setText("");});
+            footer.addView(Ui.button(this,"Save login",true,()->{
+                String name=title.getText().toString().trim(),website=url.getText().toString().trim();
+                if(name.isEmpty()){title.setError("Give this login a name.");title.requestFocus();return;}
+                try{if(!website.isEmpty())VaultEngine.host(website);}catch(Exception invalid){url.setError(invalid.getMessage());url.requestFocus();return;}
+                try{entry.put("title",name).put("username",username.getText().toString()).put("password",password.getText().toString()).put("url",website).put("folder",FolderCatalog.normalize((String)folder.getSelectedItem())).put("notes",notes.getText().toString()).put("favorite",favorite.isChecked());task(()->engine.upsert(entry),()->{d.dismiss();showVault();});}catch(Exception failure){Ui.error(this,failure);}
+            }));footer.addView(Ui.button(this,"Cancel",false,d::dismiss));
+            d.show();d.getWindow().setLayout(-1,-1);d.getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE,WindowManager.LayoutParams.FLAG_SECURE);d.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
         }catch(Exception e){Ui.error(this,e);}
     }
     private void generator(){generator(null);}
@@ -257,23 +296,25 @@ public final class MainActivity extends Activity {
     }
     private void cloud(){
         if(!engine.isOpen()||busy)return;
+        cloudOpen=true;
         final CloudSettingsStore store=new CloudSettingsStore(this);final int stamp=epoch;
         final CloudClient client=new CloudClient(()->{if(!active||stamp!=epoch||!engine.isOpen())throw new IOException("Cloud operation cancelled.");});
         JSONObject saved=null;String vaultId;
         try{vaultId=engine.snapshot().getString("vaultId");saved=store.load(vaultId);}catch(Exception e){
             LinearLayout b=Ui.column(this);b.addView(Ui.text(this,"Saved cloud settings could not be opened. Your local vault is available.",13,Ui.MUTED,false));AlertDialog d=dialog("Encrypted cloud sync",b);
-            b.addView(Ui.button(this,"Forget local cloud settings",false,()->{try{store.forget();d.dismiss();cloud();}catch(Exception error){Ui.error(this,error);}}));client.close();return;
+            b.addView(Ui.button(this,"Forget local cloud settings",false,()->{try{store.forget();d.dismiss();cloud();}catch(Exception error){Ui.error(this,error);}}));d.setOnDismissListener(x->{dialogs.remove(d);cloudOpen=false;nextCloudCheck=0;});client.close();return;
         }
         final JSONObject profile=saved;final String localVaultId=vaultId;LinearLayout b=Ui.column(this);TextView status=Ui.text(this,"Ready. Your vault stays usable without Internet.",13,Ui.MUTED,false);
         AlertDialog d=dialog("Encrypted cloud sync",b);
-        d.setOnDismissListener(x->{dialogs.remove(d);client.close();clearCloudFields(b);worker.execute(()->CloudSettingsStore.clear(profile));});
+        d.setOnDismissListener(x->{dialogs.remove(d);client.close();clearCloudFields(b);cloudOpen=false;nextCloudCheck=0;worker.execute(()->CloudSettingsStore.clear(profile));});
         if(profile!=null){
-            b.addView(Ui.text(this,"Connected to "+profile.optString("email")+". Sync runs only when you press Sync now.",13,Ui.MUTED,false));
+            b.addView(Ui.text(this,"Connected to "+profile.optString("email")+". New logins sync automatically when connected. Unlock to apply incoming changes.",13,Ui.MUTED,false));
             b.addView(Ui.text(this,profile.optString("lastSyncUtc").isEmpty()?"No successful sync yet.":"Last successful sync: "+profile.optString("lastSyncUtc"),12,Ui.MUTED,false));
+            CheckBox auto=check(b,"Sync automatically on this device",profile.optBoolean("autoSync",true));auto.setOnCheckedChangeListener((button,enabled)->cloudTask(status,()->{profile.put("autoSync",enabled);store.save(profile);},()->{status.setText(enabled?"Automatic sync is on.":"Automatic sync is paused on this device.");if(enabled)nextCloudCheck=0;}));
             b.addView(Ui.button(this,"Sync now",true,()->cloudRefresh(client,profile,store,status,signedIn->{int[] conflicts={0};cloudTask(status,()->conflicts[0]=client.sync(engine,profile,store,signedIn),()->{status.setText("Synced successfully. "+conflicts[0]+" conflict copies kept.");renderList();});})));
             b.addView(Ui.button(this,"Cloud account security · 2FA",false,()->cloudRefresh(client,profile,store,status,signedIn->cloudSecurity(client,signedIn,profile,store))));
             b.addView(Ui.button(this,"Copy connection code for your other device",false,()->{try{copy(CloudSnapshot.pairing(profile));status.setText("Connection code copied. Share it only with your own trusted device; clipboard clears in 20 seconds.");}catch(Exception e){Ui.error(this,e);}}));
-            b.addView(Ui.text(this,"Both devices must use the same vault, cloud account and connection code. The code contains your recovery key. Keep an encrypted local backup.",12,Ui.MUTED,false));
+            b.addView(Ui.text(this,"Connect your other device once using this account and connection code. The code contains your recovery key. Keep an encrypted local backup.",12,Ui.MUTED,false));
             b.addView(Ui.button(this,"Disconnect this device",false,()->new AlertDialog.Builder(this).setTitle("Disconnect cloud?").setMessage("Keep your local vault and encrypted cloud backups, and sign out this cloud session? Keep your connection code on another trusted device first.").setNegativeButton("Cancel",null).setPositiveButton("Disconnect",(x,y)->cloudRefresh(client,profile,store,status,signedIn->cloudTask(status,()->client.signOut(signedIn,store),()->{d.dismiss();toast("Cloud session signed out. Previously issued access tokens expire normally. Local vault unchanged.");}))).show()));
             b.addView(Ui.button(this,"Forget local cloud settings (offline)",false,()->new AlertDialog.Builder(this).setTitle("Forget cloud settings?").setMessage("This forgets your recovery key and saved sign-in on this phone. It does not revoke server sessions or remove cloud backups. Keep your code elsewhere first.").setNegativeButton("Cancel",null).setPositiveButton("Forget",(x,y)->cloudTask(status,store::forget,()->{d.dismiss();toast("Local settings forgotten; server session not revoked.");})).show()));
         }else{
@@ -281,7 +322,7 @@ public final class MainActivity extends Activity {
             b.addView(Ui.text(this,"Your offline vault needs no account. The cloud password is separate from your master passphrase.",12,Ui.MUTED,false));
             EditText email=Ui.field(b,"Cloud account email","",false,320),password=Ui.field(b,"Separate cloud password (16+ characters)","",true,1024),code=Ui.field(b,"Other device's cloud connection code (only when joining)","",true,1024);email.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
             EditText confirmation=Ui.field(b,"Email confirmation code (if shown in your email)","",true,10);confirmation.setInputType(InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_VARIATION_PASSWORD);
-            b.addView(Ui.text(this,"First device: create a cloud account, confirm its email, then start a new cloud vault. Second device: first transfer the same vault over Wi-Fi, then sign in with the same cloud account and paste its code.",12,Ui.MUTED,false));
+            b.addView(Ui.text(this,"First device: create and confirm a cloud account, then start a new cloud vault. On another device, use the same account and connection code after importing the same encrypted vault.",12,Ui.MUTED,false));
             b.addView(Ui.button(this,"Create cloud account",false,()->{String secret=password.getText().toString(),address=email.getText().toString().trim();password.setText("");cloudTask(status,()->client.signUp(address,secret),()->status.setText("Confirm the account using your email, then sign in below. Local vault unchanged."));}));
             b.addView(Ui.button(this,"Resend confirmation email",false,()->{String address=email.getText().toString().trim();cloudTask(status,()->client.resendConfirmation(address),()->status.setText("If the account is awaiting confirmation, check your email including Spam. Wait at least 60 seconds before requesting another message."));}));
             b.addView(Ui.button(this,"Confirm email code",false,()->{String digits=confirmation.getText().toString().trim(),address=email.getText().toString().trim();confirmation.setText("");cloudTask(status,()->client.auth.verifyEmail(address,digits),()->status.setText("Email confirmed. Enter your cloud password and sign in below. 2FA is checked separately."));}));
@@ -290,15 +331,36 @@ public final class MainActivity extends Activity {
                 CloudAuth.Session[] session={null};cloudTask(status,()->session[0]=client.signIn(address,secret),()->cloudAssure(client,session[0],null,store,status,false,signedIn->cloudTask(status,()->{
                     if(!active||stamp!=epoch)throw new IOException("Cloud operation cancelled.");
                     JSONObject pairing=existing?CloudSnapshot.pairing(pairingCode,localVaultId,signedIn.owner):null;
-                    JSONObject next=new JSONObject().put("version",1).put("ownerId",signedIn.owner).put("vaultId",localVaultId).put("vaultSlot",pairing==null?UUID.randomUUID().toString():pairing.getString("vaultSlot")).put("deviceSlot",UUID.randomUUID().toString()).put("recoveryKey",pairing==null?CloudSnapshot.newKey():pairing.getString("recoveryKey")).put("refreshToken",signedIn.refresh).put("email",address).put("lastSyncUtc","");
+                    JSONObject next=new JSONObject().put("version",1).put("ownerId",signedIn.owner).put("vaultId",localVaultId).put("vaultSlot",pairing==null?UUID.randomUUID().toString():pairing.getString("vaultSlot")).put("deviceSlot",UUID.randomUUID().toString()).put("recoveryKey",pairing==null?CloudSnapshot.newKey():pairing.getString("recoveryKey")).put("refreshToken",signedIn.refresh).put("email",address).put("lastSyncUtc","").put("autoSync",true);
                     try{store.save(next);}finally{CloudSettingsStore.clear(next);}
                 },()->{d.dismiss();cloud();})));
             }));
         }
         Ui.gap(b,12);b.addView(status);
     }
+    private void joinCloud(String scanned){
+        if(Store.vault(this).exists()){toast("A vault already exists. Unlock and use Sync to connect it.");return;}
+        int stamp=epoch;CloudSettingsStore store=new CloudSettingsStore(this);CloudClient client=new CloudClient(()->{if(!active||stamp!=epoch)throw new IOException("Cloud operation cancelled.");});
+        LinearLayout b=Ui.column(this);b.addView(Ui.text(this,"Sign in with the same cloud account. Scan the connection QR on your own computer, then unlock its encrypted backup with your master passphrase. The passphrase stays on this phone.",13,Ui.MUTED,false));
+        b.addView(Ui.button(this,"Scan cloud connection QR",false,()->startActivityForResult(new Intent(this,ScanQrActivity.class).putExtra("cloud",true),14)));
+        EditText code=Ui.field(b,"Cloud connection code (BVCLOUD1:…)",scanned,false,1024);code.setSingleLine(false);code.setMaxLines(4);
+        EditText email=Ui.field(b,"Cloud account email","",false,320),account=Ui.field(b,"Cloud account password","",true,1024),master=Ui.field(b,"Vault master passphrase","",true,1024);
+        TextView status=Ui.text(this,"The first device must finish its initial sync before this step.",13,Ui.MUTED,false);b.addView(status);AlertDialog d=dialog("Restore encrypted cloud vault",b);
+        d.setOnDismissListener(x->{dialogs.remove(d);client.close();clearCloudFields(b);});
+        b.addView(Ui.button(this,"Sign in & restore",true,()->{
+            String pairingCode=code.getText().toString().trim(),address=email.getText().toString().trim(),secret=account.getText().toString(),passphrase=master.getText().toString();account.setText("");master.setText("");
+            CloudAuth.Session[] signed={null};cloudTask(status,()->signed[0]=client.signIn(address,secret),()->cloudAssure(client,signed[0],null,store,status,false,verified->cloudTask(status,()->{
+                if(Store.vault(this).exists())throw new IOException("A local vault already exists.");JSONObject pairing=CloudSnapshot.pairing(pairingCode,null,verified.owner);
+                byte[] inner=client.firstSnapshot(pairing,verified);
+                try{VaultEngine.importNew(Store.vault(this),inner,passphrase,Store.device(this));engine.open(passphrase);engine.revokeTrust();
+                    JSONObject profile=new JSONObject().put("version",1).put("ownerId",verified.owner).put("vaultId",pairing.getString("vaultId")).put("vaultSlot",pairing.getString("vaultSlot")).put("deviceSlot",UUID.randomUUID().toString()).put("recoveryKey",pairing.getString("recoveryKey")).put("refreshToken",verified.refresh).put("email",address).put("lastSyncUtc","").put("autoSync",true);
+                    try{store.save(profile);}finally{CloudSettingsStore.clear(profile);}
+                }finally{Arrays.fill(inner,(byte)0);}
+            },()->{d.dismiss();showVault();})));
+        }));
+    }
     private void chooseImport(){startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*").addCategory(Intent.CATEGORY_OPENABLE),12);}
-    @Override protected void onActivityResult(int request,int result,Intent intent){super.onActivityResult(request,result,intent);if(request==13){scannedPairing="";if(result==RESULT_OK&&intent!=null){String code=intent.getStringExtra(ScanQrActivity.RESULT_PAIRING);try{new LocalTransfer(code);scannedPairing=code;}catch(Exception e){toast("The scanned code is not a valid Lockvyn pairing code.");}}return;}if(result!=RESULT_OK||intent==null||intent.getData()==null){exportBytes=null;return;}Uri uri=intent.getData();
+    @Override protected void onActivityResult(int request,int result,Intent intent){super.onActivityResult(request,result,intent);if(request==13){scannedPairing="";if(result==RESULT_OK&&intent!=null){String code=intent.getStringExtra(ScanQrActivity.RESULT_PAIRING);try{new LocalTransfer(code);scannedPairing=code;}catch(Exception e){toast("The scanned code is not a valid Lockvyn pairing code.");}}return;}if(request==14){if(result==RESULT_OK&&intent!=null)scannedCloud=intent.getStringExtra(ScanQrActivity.RESULT_PAIRING);return;}if(result!=RESULT_OK||intent==null||intent.getData()==null){exportBytes=null;return;}Uri uri=intent.getData();
         if(request==11&&exportBytes!=null){byte[] bytes=exportBytes;exportBytes=null;task(()->{try(OutputStream out=getContentResolver().openOutputStream(uri,"wt")){if(out==null)throw new Exception("Cannot write the backup.");out.write(bytes);}},()->toast("Encrypted backup saved."));}
         else if(request==12){task(()->{try(InputStream in=getContentResolver().openInputStream(uri)){if(in==null)throw new Exception("Cannot read this file.");pendingImport=VaultEngine.bounded(in);}},()->importPrompt(pendingImport));}
     }
@@ -342,7 +404,8 @@ public final class MainActivity extends Activity {
         b.addView(Ui.button(this,"Cancel transfer",false,d::dismiss));
     }
     private void settings(){
-        LinearLayout b=Ui.column(this);b.addView(Ui.text(this,"Autofill uses Android's built-in framework. The vault is unlocked for each fill request. Only exact HTTPS hosts or apps you explicitly link are eligible.",13,Ui.MUTED,false));Ui.gap(b,12);
+        LinearLayout b=Ui.column(this);b.addView(Ui.text(this,"Autofill setup · 1. Enable Lockvyn below. 2. Return here and refresh the provider status. 3. Tap a login field in a trusted app and unlock to choose an account.",13,Ui.MUTED,false));
+        b.addView(Ui.text(this,"The vault is unlocked for each fill. Only exact HTTPS hosts or apps you explicitly link are eligible.",12,Ui.MUTED,false));Ui.gap(b,12);
         b.addView(Ui.text(this,"Autofill provider status",17,Ui.INK,true));
         Ui.gap(b,8);
         TextView providerStatus=Ui.text(this,AutofillStatus.summary(this),13,Ui.INK,false);

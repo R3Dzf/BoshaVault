@@ -12,12 +12,13 @@
       <Button Content="☆   Favorites" Style="{StaticResource Nav}" Click="FavoriteClick"/>
       <Button Content="♧   Security check" Style="{StaticResource Nav}" Click="HealthClick"/>
       <Button Content="⚡   Password generator" Style="{StaticResource Nav}" Click="GeneratorClick"/>
+      <Button Content="☁   Sync" Style="{StaticResource Nav}" Click="CloudClick"/>
       <Button Content="↔   Devices &amp; backup" Style="{StaticResource Nav}" Click="SyncClick"/>
       <Button Content="♲   Trash" Style="{StaticResource Nav}" Click="TrashClick"/>
       <TextBlock Text="QUICK ACCESS" Foreground="#A39FB4" FontSize="10" FontWeight="Bold" Margin="16,28,0,12"/>
       <Border Background="#FAF9FD" CornerRadius="12" Padding="14"><StackPanel><TextBlock Text="Ctrl + Alt + P" FontWeight="SemiBold" FontSize="13"/><TextBlock Text="Open your vault anywhere" Foreground="{StaticResource Muted}" FontSize="11" Margin="0,5,0,0"/></StackPanel></Border>
      </StackPanel>
-     <StackPanel Grid.Row="3"><Border Background="#EDF8F3" CornerRadius="12" Padding="14" Margin="0,0,0,14"><StackPanel><TextBlock Text="●  Local &amp; encrypted" Foreground="#37866C" FontWeight="SemiBold" FontSize="12"/><TextBlock Text="Your vault stays on your device." FontSize="10" Foreground="#69887E" Margin="0,6,0,0"/></StackPanel></Border><Button Content="⚙   Settings" Style="{StaticResource Nav}" Click="SettingsClick"/><Button Content="Lock vault" Click="LockClick"/></StackPanel>
+     <StackPanel Grid.Row="3"><Border Background="#EDF8F3" CornerRadius="12" Padding="14" Margin="0,0,0,14"><StackPanel><TextBlock Text="●  Local &amp; encrypted" Foreground="#37866C" FontWeight="SemiBold" FontSize="12"/><TextBlock x:Name="CloudStatus" Text="Cloud is optional" TextWrapping="Wrap" FontSize="10" Foreground="#69887E" Margin="0,6,0,0"/></StackPanel></Border><Button Content="⚙   Settings" Style="{StaticResource Nav}" Click="SettingsClick"/><Button Content="Lock vault" Click="LockClick"/></StackPanel>
     </Grid>
    </Border>
    <Grid Grid.Column="1" Margin="30,26,30,20">
@@ -44,16 +45,16 @@
       </StackPanel>
      </StackPanel></ScrollViewer></Border>
     </Grid>
-    <TextBlock Grid.Row="4" x:Name="StatusText" Text="Vault unlocked. Auto-lock after 2 minutes of inactivity." Foreground="{StaticResource Muted}" FontSize="11" Margin="0,14,0,0"/>
+    <Grid Grid.Row="4" Margin="0,14,0,0"><TextBlock x:Name="StatusText" Text="Vault unlocked. Auto-lock after 2 minutes of inactivity." Foreground="{StaticResource Muted}" FontSize="11" VerticalAlignment="Center"/><Button x:Name="UndoButton" Content="Undo trash" Visibility="Collapsed" HorizontalAlignment="Right" Click="UndoClick"/></Grid>
    </Grid>
   </Grid>
   <Grid x:Name="LockView" Background="#F8F7FD"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-   <Border Background="#EDE7FF" Margin="24" CornerRadius="24"><Grid Margin="46"><StackPanel VerticalAlignment="Center"><Border Background="#7762DF" CornerRadius="23" Width="82" Height="82" HorizontalAlignment="Left"><Image Source="Assets/lockvyn-mark.png" Width="64" Height="64" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><TextBlock Text="Your life.&#10;Your passwords.&#10;Your space." FontSize="45" FontWeight="Bold" Margin="0,38,0,0"/><TextBlock Text="A calmer home for your digital life." FontSize="16" Foreground="#8474B7" Margin="0,23,0,0"/><Border Background="#F8F5FF" CornerRadius="12" Padding="18" Margin="0,38,0,0"><TextBlock Text="●  Encrypted on your device&#10;●  Works offline&#10;●  Optional encrypted cloud sync" Foreground="#6F619C" FontSize="13" LineHeight="26"/></Border></StackPanel><TextBlock Text="LOCKVYN  /  1.11.0" VerticalAlignment="Bottom" Foreground="#9C8EC4" FontSize="10"/></Grid></Border>
+   <Border Background="#EDE7FF" Margin="24" CornerRadius="24"><Grid Margin="46"><StackPanel VerticalAlignment="Center"><Border Background="#7762DF" CornerRadius="23" Width="82" Height="82" HorizontalAlignment="Left"><Image Source="Assets/lockvyn-mark.png" Width="64" Height="64" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><TextBlock Text="Your life.&#10;Your passwords.&#10;Your space." FontSize="45" FontWeight="Bold" Margin="0,38,0,0"/><TextBlock Text="A calmer home for your digital life." FontSize="16" Foreground="#8474B7" Margin="0,23,0,0"/><Border Background="#F8F5FF" CornerRadius="12" Padding="18" Margin="0,38,0,0"><TextBlock Text="●  Encrypted on your device&#10;●  Works offline&#10;●  Optional encrypted cloud sync" Foreground="#6F619C" FontSize="13" LineHeight="26"/></Border></StackPanel><TextBlock Text="LOCKVYN  /  1.13.0" VerticalAlignment="Bottom" Foreground="#9C8EC4" FontSize="10"/></Grid></Border>
    <StackPanel Grid.Column="1" Width="360" VerticalAlignment="Center"><TextBlock Text="Lockvyn" FontSize="28" FontWeight="Bold"/><TextBlock x:Name="LockHeading" Text="Welcome back" FontSize="23" FontWeight="SemiBold" Margin="0,34,0,8"/><TextBlock x:Name="LockDescription" Text="Unlock your private space with your master passphrase." FontSize="13" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,0,0,24"/>
     <TextBlock Text="Master passphrase" Foreground="{StaticResource Muted}" FontSize="12" Margin="0,0,0,8"/><PasswordBox x:Name="MasterBox" KeyDown="MasterKeyDown" MaxLength="1024"/>
     <StackPanel x:Name="ConfirmPanel" Visibility="Collapsed"><TextBlock Text="Confirm master passphrase" Foreground="{StaticResource Muted}" FontSize="12" Margin="0,16,0,8"/><PasswordBox x:Name="ConfirmBox" MaxLength="1024"/></StackPanel>
     <TextBlock x:Name="LockError" Foreground="#B65769" TextWrapping="Wrap" FontSize="12" Margin="0,12,0,12"/><Button x:Name="UnlockButton" Content="Unlock vault →" Style="{StaticResource Primary}" Padding="16,14" Click="UnlockClick"/>
-    <Button Content="Import an encrypted vault" Background="Transparent" Margin="0,12,0,0" Click="LockedImportClick"/><Button Content="Check for updates" Click="UpdatesClick" Margin="0,12,0,0"/>
+    <Button Content="Import an encrypted vault" Background="Transparent" Margin="0,12,0,0" Click="LockedImportClick"/><Button Content="Restore from cloud · one-time pairing" Margin="0,12,0,0" Click="LockedCloudClick"/><Button Content="Check for updates" Click="UpdatesClick" Margin="0,12,0,0"/>
     <TextBlock Text="A lost passphrase cannot be reset. Keep an encrypted backup." Foreground="#A29DAF" FontSize="11" TextWrapping="Wrap" Margin="0,24,0,0"/>
    </StackPanel>
   </Grid>

@@ -88,7 +88,11 @@ public sealed class FormDialog : Window
 
         dialog.Label("Website and account");
         var url = dialog.Field("Website (HTTPS)", entry.Url.Length>0 ? entry.Url : suggestedUrl, 2048);
+        var urlError = new TextBlock { Foreground = Brushes.IndianRed, FontSize = 12, TextWrapping = TextWrapping.Wrap };
+        dialog.Body.Children.Add(urlError);
         var title = dialog.Field("Name", entry.Title, 200);
+        var titleError = new TextBlock { Foreground = Brushes.IndianRed, FontSize = 12, TextWrapping = TextWrapping.Wrap };
+        dialog.Body.Children.Add(titleError);
         var username = dialog.Field("Username / email",
             entry.Username.Length>0 ? entry.Username : suggestedUsername);
         string lastAutomaticName = "";
@@ -168,6 +172,7 @@ public sealed class FormDialog : Window
             PrivateClipboard.Copy(password.Password);
             helperStatus.Text="Password copied. Clipboard will be cleared automatically after 20 seconds.";
         };
+        int optionalStart = dialog.Body.Children.Count;
         dialog.Label("Folder — choose one or type a new name");
         var folder = new ComboBox { IsEditable = true, IsTextSearchEnabled = true, MinHeight = 45,
             ItemsSource = (folders ?? FolderCatalog.Defaults).Append(entry.Folder).Where(f => f.Length > 0)
@@ -178,14 +183,25 @@ public sealed class FormDialog : Window
         var favorite = new CheckBox { Content = "Add to favorites", IsChecked = entry.Favorite,
             Margin=new Thickness(0,4,0,5) };
         dialog.Body.Children.Add(favorite);
-        var error = new TextBlock { Foreground = Brushes.IndianRed,
-            TextWrapping = TextWrapping.Wrap, FontSize = 12 };
-        dialog.Body.Children.Add(error);
+        var optional = new StackPanel();
+        while (dialog.Body.Children.Count > optionalStart)
+        {
+            var child = dialog.Body.Children[optionalStart]; dialog.Body.Children.RemoveAt(optionalStart); optional.Children.Add(child);
+        }
+        var optionalError = new TextBlock { Foreground = Brushes.IndianRed, FontSize = 12, TextWrapping = TextWrapping.Wrap };
+        optional.Children.Add(optionalError);
+        var optionalExpander = new Expander { Header = "Folder, notes & favorite", Content = optional,
+            IsExpanded = entry.Notes.Length > 0 || entry.Favorite, Margin = new Thickness(0, 8, 0, 12) };
+        dialog.Body.Children.Add(optionalExpander);
+        url.TextChanged += (_, _) => urlError.Text = "";
+        title.TextChanged += (_, _) => titleError.Text = "";
         dialog.Action("Save login", () => {
+            urlError.Text = ""; titleError.Text = "";
+            string normalized;
+            try { normalized = Normalize(url.Text); }
+            catch (VaultException ex) { urlError.Text = ex.Message; url.Focus(); return; }
+            if (title.Text.Trim().Length == 0) { titleError.Text = "Enter a name or a website to generate a name."; title.Focus(); return; }
             try {
-                string normalized = Normalize(url.Text);
-                if (title.Text.Trim().Length==0)
-                    throw new VaultException("Enter a name or a website to generate a name.");
                 entry.Title = title.Text.Trim();
                 entry.Username = username.Text;
                 entry.Password = password.Password;
@@ -195,7 +211,7 @@ public sealed class FormDialog : Window
                 entry.Favorite=favorite.IsChecked==true;
                 dialog.DialogResult=true;
             }
-            catch(VaultException ex){error.Text=ex.Message;}
+            catch(VaultException ex){optionalError.Text = ex.Message; optionalExpander.IsExpanded = true;}
         }, true);
         dialog.Action("Cancel",()=>dialog.DialogResult=false);
         bool saved=dialog.ShowDialog()==true;

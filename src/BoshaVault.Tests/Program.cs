@@ -22,6 +22,7 @@ try
     if (args.Length > 0 && args[0] == "--ux-fixtures") { await VaultUxTests.Fixtures(args[1]); return; }
     if (args.Length > 0 && args[0] == "--verify-java-ux") { await VaultUxTests.Verify(args[1]); return; }
     if (args.Length > 0 && args[0] == "--cloud-tests") { await CloudAccountTests.Run(); return; }
+    if (args.Length > 0 && args[0] == "--automatic-cloud-tests") { await AutomaticCloudSyncTests.Run(); return; }
     if (args.Length > 0 && args[0] == "--cloud-store-tests") { CloudStoreTests.Run(); return; }
     if (args.Length > 0 && args[0] == "--cloud-live-tests") { await CloudLiveTests.Run(args[1]); return; }
     if (args.Length > 0 && args[0] == "--cloud-mfa-live-tests") { await CloudMfaLiveTests.Run(args[1]); return; }

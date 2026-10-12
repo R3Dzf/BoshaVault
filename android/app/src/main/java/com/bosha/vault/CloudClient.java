@@ -10,6 +10,7 @@ import javax.net.ssl.HttpsURLConnection;
 import org.json.*;
 
 final class CloudClient implements AutoCloseable {
+    static final Object GATE=new Object();
     static final String URL="https://ghmbcfqiomggoxgwghjs.supabase.co/";
     static final String PUBLIC_KEY="sb_publishable__Kb9CeN7Bcx3lxz4VDL1hQ_27hJVAee";
     interface Guard {void check()throws Exception;}
@@ -42,30 +43,94 @@ final class CloudClient implements AutoCloseable {
     CloudAuth.Session signIn(String email,String password)throws Exception{return auth.signIn(email,password);}
     void signUp(String email,String password)throws Exception{auth.signUp(email,password);}
     CloudAuth.Session refresh(JSONObject profile,CloudSettingsStore store)throws Exception{
-        CloudAuth.Session signedIn=auth.refresh(profile.getString("refreshToken"));
-        saveSession(signedIn,profile,store);return signedIn;
+        synchronized(GATE){JSONObject latest=store.load(profile.getString("vaultId"));if(latest==null)throw new Exception("Cloud is disconnected on this device.");
+            CloudAuth.Session signedIn=auth.refresh(latest.getString("refreshToken"));
+            profile.put("refreshToken",signedIn.refresh);latest.put("refreshToken",signedIn.refresh);store.save(latest);CloudSettingsStore.clear(latest);return signedIn;}
     }
     void saveSession(CloudAuth.Session session,JSONObject profile,CloudSettingsStore store)throws Exception{
-        check();if(!session.owner.equals(profile.getString("ownerId")))throw new Exception("Cloud account changed. Reconnect this device.");
-        profile.put("refreshToken",session.refresh);store.save(profile);
+        synchronized(GATE){check();if(!session.owner.equals(profile.getString("ownerId")))throw new Exception("Cloud account changed. Reconnect this device.");
+            JSONObject latest=store.load(profile.getString("vaultId"));if(latest==null)throw new Exception("Cloud is disconnected on this device.");
+            profile.put("refreshToken",session.refresh);latest.put("refreshToken",session.refresh);store.save(latest);CloudSettingsStore.clear(latest);}
     }
     int sync(VaultEngine engine,JSONObject profile,CloudSettingsStore store,CloudAuth.Session signedIn)throws Exception{
-        check();if(!signedIn.owner.equals(profile.getString("ownerId")))throw new Exception("Cloud account changed.");String slot=profile.getString("vaultSlot"),device=profile.getString("deviceSlot");
-        byte[] response=request("GET","rest/v1/opaque_device_snapshots?select=device_slot,ciphertext_base64,ciphertext_sha256&vault_slot=eq."+slot+"&order=updated_at.desc&limit=64",null,signedIn.access,16000000);
-        byte[] key=CloudSnapshot.parseKey(profile.getString("recoveryKey")),local=null,outer=null;List<byte[]> snapshots=new ArrayList<>();
+        return syncAutomatic(engine,null,profile,store,signedIn);
+    }
+    int syncAutomatic(VaultEngine engine,File vault,JSONObject profile,CloudSettingsStore store,CloudAuth.Session session)throws Exception{
+        synchronized(GATE){
+            check();if(!session.owner.equals(profile.getString("ownerId")))throw new Exception("Cloud account changed.");
+            JSONObject latest=store.load(profile.getString("vaultId"));if(latest==null)throw new Exception("Cloud is disconnected on this device.");
+            // Keep a token rotated by another foreground action before writing checkpoints.
+            profile.put("refreshToken",latest.getString("refreshToken"));
+            for(String field:new String[]{"lastUploadedHash","lastOuterHash","downloadedStamp","mergedStamp","keyEpoch","autoSync"})if(latest.has(field))profile.put(field,latest.get(field));
+            String slot=profile.getString("vaultSlot"),device=profile.getString("deviceSlot");byte[] local=null,key=null,outer=null,response=null;
+            List<byte[]> snapshots=new ArrayList<>();int conflicts=0;
+            try{
+                local=engine!=null&&engine.isOpen()?engine.export():VaultEngine.read(vault);
+                JSONObject env=VaultEngine.parse(local);if(!env.getString("vaultId").equals(profile.getString("vaultId")))throw new Exception("Cloud settings do not match this vault.");
+                long epoch=env.getLong("keyEpoch");if(profile.optLong("keyEpoch",0)==0)profile.put("keyEpoch",epoch);
+                if(profile.getLong("keyEpoch")!=epoch)throw new Exception("The master passphrase changed. Reconnect cloud after reconciling your devices.");
+                key=CloudSnapshot.parseKey(profile.getString("recoveryKey"));
+                response=request("GET","rest/v1/opaque_device_snapshots?select=device_slot,ciphertext_sha256&vault_slot=eq."+slot+"&limit=64",null,session.access,65536);
+                JSONArray metadata=StrictJson.array(new String(response,StandardCharsets.UTF_8));Arrays.fill(response,(byte)0);response=null;
+                TreeMap<String,String> others=new TreeMap<>();String ownDigest="";
+                if(metadata.length()>64)throw new Exception("Too many cloud devices.");
+                for(int i=0;i<metadata.length();i++){JSONObject row=metadata.getJSONObject(i);String id=row.getString("device_slot"),hash=row.getString("ciphertext_sha256");if(!VaultEngine.id(id)||!hash.matches("[0-9a-f]{64}"))throw new Exception("Invalid cloud metadata.");if(id.equals(device))ownDigest=hash;else if(others.put(id,hash)!=null)throw new Exception("Duplicate cloud device.");}
+                String stamp=stamp(others);byte[] cached=store.readPending();boolean missing=!profile.optString("downloadedStamp").equals(profile.optString("mergedStamp"))&&cached==null;
+                if(!stamp.equals(profile.optString("downloadedStamp"))||missing){
+                    response=request("GET","rest/v1/opaque_device_snapshots?select=device_slot,ciphertext_base64,ciphertext_sha256&vault_slot=eq."+slot+"&limit=64",null,session.access,16000000);
+                    JSONArray rows=StrictJson.array(new String(response,StandardCharsets.UTF_8));Arrays.fill(response,(byte)0);response=null;
+                    JSONArray pending=new JSONArray();others.clear();if(rows.length()>64)throw new Exception("Too many cloud devices.");
+                    for(int i=0;i<rows.length();i++){
+                        JSONObject row=rows.getJSONObject(i);String id=row.getString("device_slot"),digest=row.getString("ciphertext_sha256"),encoded=row.getString("ciphertext_base64");
+                        if(!VaultEngine.id(id)||!digest.matches("[0-9a-f]{64}")||encoded.length()>2800000)throw new Exception("Invalid cloud backup metadata.");
+                        byte[] blob=Base64.getDecoder().decode(encoded);
+                        try{if(blob.length>CloudSnapshot.MAX_INNER+29||!hex(VaultEngine.sha(blob)).equals(digest))throw new Exception("Cloud backup checksum failed.");
+                            if(!id.equals(device)){if(others.put(id,digest)!=null)throw new Exception("Duplicate cloud device.");byte[] inner=CloudSnapshot.open(blob,key,slot,id);
+                                try{JSONObject remote=VaultEngine.parse(inner);if(!remote.getString("vaultId").equals(profile.getString("vaultId"))||remote.getLong("keyEpoch")!=epoch)throw new Exception("A device changed the vault key. Local data is preserved.");}finally{Arrays.fill(inner,(byte)0);}
+                                pending.put(new JSONObject().put("deviceSlot",id).put("blob",encoded));}
+                        }finally{Arrays.fill(blob,(byte)0);}
+                    }
+                    byte[] staged=pending.toString().getBytes(StandardCharsets.UTF_8);
+                    try{check();store.writePending(staged);profile.put("downloadedStamp",stamp(others));store.save(profile);}finally{Arrays.fill(staged,(byte)0);}
+                }else if(cached!=null&&!profile.optString("downloadedStamp").equals(profile.optString("mergedStamp"))){
+                    JSONArray rows=StrictJson.array(new String(cached,StandardCharsets.UTF_8));if(rows.length()>64)throw new Exception("Too many pending cloud devices.");
+                    for(int i=0;i<rows.length();i++){JSONObject row=rows.getJSONObject(i);String id=row.getString("deviceSlot"),encoded=row.getString("blob");if(!VaultEngine.id(id)||encoded.length()>2800000)throw new Exception("Invalid pending cloud data.");byte[] blob=Base64.getDecoder().decode(encoded);
+                        try{byte[] inner=CloudSnapshot.open(blob,key,slot,id);JSONObject remote=VaultEngine.parse(inner);if(!remote.getString("vaultId").equals(profile.getString("vaultId"))||remote.getLong("keyEpoch")!=epoch)throw new Exception("A device changed the vault key. Local data is preserved.");snapshots.add(inner);}finally{Arrays.fill(blob,(byte)0);}}
+                }
+                if(cached!=null)Arrays.fill(cached,(byte)0);
+                if(engine!=null&&engine.isOpen()&&!profile.optString("downloadedStamp").equals(profile.optString("mergedStamp"))){
+                    if(snapshots.isEmpty()){
+                        byte[] staged=store.readPending();if(staged!=null){try{JSONArray rows=StrictJson.array(new String(staged,StandardCharsets.UTF_8));for(int i=0;i<rows.length();i++){JSONObject row=rows.getJSONObject(i);String id=row.getString("deviceSlot");byte[] blob=Base64.getDecoder().decode(row.getString("blob"));try{snapshots.add(CloudSnapshot.open(blob,key,slot,id));}finally{Arrays.fill(blob,(byte)0);}}}finally{Arrays.fill(staged,(byte)0);}}
+                    }
+                    check();conflicts=engine.mergeCloud(snapshots);Arrays.fill(local,(byte)0);local=engine.export();profile.put("mergedStamp",profile.getString("downloadedStamp"));store.save(profile);store.writePending(null);
+                }
+                String hash=hex(VaultEngine.sha(local));
+                if(!hash.equals(profile.optString("lastUploadedHash"))||ownDigest.isEmpty()||!ownDigest.equals(profile.optString("lastOuterHash"))){
+                    outer=CloudSnapshot.seal(local,key,slot,device);String outerHash=hex(VaultEngine.sha(outer));JSONObject body=new JSONObject().put("owner_id",session.owner).put("vault_slot",slot).put("device_slot",device).put("ciphertext_base64",Base64.getEncoder().encodeToString(outer)).put("ciphertext_sha256",outerHash);
+                    byte[] reply=request("POST","rest/v1/opaque_device_snapshots?on_conflict=owner_id,vault_slot,device_slot",body,session.access,65536);Arrays.fill(reply,(byte)0);
+                    profile.put("lastUploadedHash",hash).put("lastOuterHash",outerHash);
+                }
+                profile.put("lastSyncUtc",Instant.now().toString());store.save(profile);return conflicts;
+            }finally{CloudSettingsStore.clear(latest);if(response!=null)Arrays.fill(response,(byte)0);if(key!=null)Arrays.fill(key,(byte)0);if(local!=null)Arrays.fill(local,(byte)0);if(outer!=null)Arrays.fill(outer,(byte)0);for(byte[] inner:snapshots)Arrays.fill(inner,(byte)0);}
+        }
+    }
+    private static String stamp(SortedMap<String,String> rows)throws Exception{StringBuilder joined=new StringBuilder();for(Map.Entry<String,String> row:rows.entrySet()){if(joined.length()>0)joined.append('\n');joined.append(row.getKey()).append(':').append(row.getValue());}return hex(VaultEngine.sha(joined.toString().getBytes(StandardCharsets.UTF_8)));}
+    byte[] firstSnapshot(JSONObject pairing,CloudAuth.Session session)throws Exception{
+        String slot=pairing.getString("vaultSlot");byte[] key=CloudSnapshot.parseKey(pairing.getString("recoveryKey")),response=null;
         try{
-            JSONArray rows=StrictJson.array(new String(response,StandardCharsets.UTF_8));if(rows.length()>64)throw new Exception("Too many cloud devices.");
-            for(int i=0;i<rows.length();i++){
-                JSONObject row=rows.getJSONObject(i);String encoded=row.getString("ciphertext_base64"),digest=row.getString("ciphertext_sha256"),remote=row.getString("device_slot");
-                if(encoded.length()>2800000||!digest.matches("[0-9a-f]{64}"))throw new Exception("Invalid cloud backup metadata.");
-                byte[] blob=Base64.getDecoder().decode(encoded);if(blob.length>CloudSnapshot.MAX_INNER+29||!MessageDigest.isEqual(hex(VaultEngine.sha(blob)).getBytes(StandardCharsets.US_ASCII),digest.getBytes(StandardCharsets.US_ASCII)))throw new Exception("Cloud backup checksum failed.");
-                snapshots.add(CloudSnapshot.open(blob,key,slot,remote));
-            }
-            check();int conflicts=engine.mergeCloud(snapshots);check();local=engine.export();outer=CloudSnapshot.seal(local,key,slot,device);
-            JSONObject body=new JSONObject().put("owner_id",signedIn.owner).put("vault_slot",slot).put("device_slot",device).put("ciphertext_base64",Base64.getEncoder().encodeToString(outer)).put("ciphertext_sha256",hex(VaultEngine.sha(outer)));
-            byte[] reply=request("POST","rest/v1/opaque_device_snapshots?on_conflict=owner_id,vault_slot,device_slot",body,signedIn.access,65536);Arrays.fill(reply,(byte)0);
-            check();profile.put("lastSyncUtc",Instant.now().toString());store.save(profile);return conflicts;
-        }finally{Arrays.fill(response,(byte)0);Arrays.fill(key,(byte)0);if(local!=null)Arrays.fill(local,(byte)0);if(outer!=null)Arrays.fill(outer,(byte)0);for(byte[] inner:snapshots)Arrays.fill(inner,(byte)0);}
+            response=request("GET","rest/v1/opaque_device_snapshots?select=device_slot,ciphertext_base64,ciphertext_sha256&vault_slot=eq."+slot+"&order=updated_at.desc&limit=64",null,session.access,16000000);
+            JSONArray rows=StrictJson.array(new String(response,StandardCharsets.UTF_8));if(rows.length()==0)throw new Exception("No cloud backup yet. Sync the first device before joining.");
+            if(rows.length()>64)throw new Exception("Too many cloud devices.");
+            JSONObject row=rows.getJSONObject(0);String id=row.getString("device_slot"),hash=row.getString("ciphertext_sha256"),encoded=row.getString("ciphertext_base64");
+            if(!VaultEngine.id(id)||!hash.matches("[0-9a-f]{64}")||encoded.length()>2800000)throw new Exception("Invalid cloud backup metadata.");
+            byte[] blob=Base64.getDecoder().decode(encoded);
+            try{
+                if(blob.length>CloudSnapshot.MAX_INNER+29||!hex(VaultEngine.sha(blob)).equals(hash))throw new Exception("Cloud backup checksum failed.");
+                byte[] inner=CloudSnapshot.open(blob,key,slot,id);
+                if(!VaultEngine.parse(inner).getString("vaultId").equals(pairing.getString("vaultId"))){Arrays.fill(inner,(byte)0);throw new Exception("Cloud vault identity does not match the connection code.");}
+                return inner;
+            }finally{Arrays.fill(blob,(byte)0);}
+        }finally{Arrays.fill(key,(byte)0);if(response!=null)Arrays.fill(response,(byte)0);}
     }
     void signOut(CloudAuth.Session signedIn,CloudSettingsStore store)throws Exception{auth.signOut(signedIn);check();store.forget();}
     private static String hex(byte[] bytes){StringBuilder result=new StringBuilder();for(byte b:bytes)result.append(String.format(Locale.ROOT,"%02x",b&255));return result.toString();}

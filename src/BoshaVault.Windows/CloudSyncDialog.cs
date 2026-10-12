@@ -3,6 +3,7 @@ using System.Net.Http;
 using System.Security.Cryptography;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media.Imaging;
 using BoshaVault.Core;
 
 namespace BoshaVault.Windows;
@@ -73,47 +74,38 @@ internal static class CloudSyncDialog
         void Connected()
         {
             ClearPage();
-            d.Label("Cloud is connected to " + profile!.Email + ". Sync runs only when you press Sync now.");
+            d.Label("Cloud is connected to " + profile!.Email + ". New logins sync automatically while connected; offline changes retry when Internet returns.");
             d.Label(profile.LastSyncUtc.Length == 0 ? "No successful sync yet." : "Last successful sync: " + profile.LastSyncUtc);
-            d.Label("Both devices must use the same vault, cloud account and connection code. Wi-Fi transfer works independently.");
+            d.Label("Connect your second device once with the same account and connection code. Unlock it to apply incoming changes. Wi-Fi transfer still works offline.");
             var code = d.Field("Connection code for your other device", "", 1024, true); code.IsReadOnly = true;
+            var qr = new Image { Width = 260, Height = 260, Visibility = Visibility.Collapsed, Margin = new Thickness(0, 8, 0, 8) }; d.Body.Children.Add(qr);
             d.Label("The code contains your cloud recovery key. Share it only with your own trusted device. Keep an encrypted local backup.");
             d.Body.Children.Add(status);
+            var auto = new CheckBox { Content = "Sync automatically on this device", IsChecked = profile.AutoSync, Margin = new Thickness(0, 8, 0, 8) };
+            auto.Click += (_, _) => { profile.AutoSync = auto.IsChecked == true; store.Save(profile); Status(profile.AutoSync ? "Automatic sync is on. Offline changes retry when connected." : "Automatic sync is paused on this device."); };
+            d.Body.Children.Add(auto);
             Action("Sync now", async () =>
             {
                 var signedIn = await Refresh();
                 var transport = new SupabaseSnapshotTransport(http, new Uri(CloudProject.Url), CloudProject.PublishableKey, _ => Task.FromResult(signedIn.AccessToken));
-                var rows = await transport.ListAsync(profile.VaultSlot, cancellation.Token);
+                var result = await AutomaticCloudSync.RunAsync(transport, profile,
+                    inner => { EnsureCurrent(); int conflicts = vault.MergeCloudSnapshots(inner); changed(); return Task.FromResult((vault.ExportEncrypted(), conflicts)); },
+                    () => { EnsureCurrent(); return Task.FromResult(vault.ExportEncrypted()); },
+                    store.ReadPending, store.WritePending, () => store.Save(profile), cancellation.Token);
                 EnsureCurrent();
-                byte[] key = CloudSnapshotCodec.ParseRecoveryKey(profile.RecoveryKey);
-                var inner = new List<byte[]>();
-                byte[] local = [], outer = [];
-                try
-                {
-                    // Authenticate all inputs before making any local change.
-                    foreach (var row in rows) inner.Add(CloudSnapshotCodec.Open(row.Blob, key, profile.VaultSlot, row.DeviceSlot));
-                    EnsureCurrent();
-                    int conflicts = vault.MergeCloudSnapshots(inner);
-                    changed();
-                    local = vault.ExportEncrypted();
-                    outer = CloudSnapshotCodec.Seal(local, key, profile.VaultSlot, profile.DeviceSlot);
-                    await transport.UploadAsync(profile.OwnerId, profile.VaultSlot, profile.DeviceSlot, outer, cancellation.Token);
-                    EnsureCurrent();
-                    profile.LastSyncUtc = DateTimeOffset.UtcNow.ToString("O"); store.Save(profile);
-                    Status($"Synced successfully. {rows.Count} device backup(s) checked; {conflicts} conflict copies kept.");
-                }
-                finally
-                {
-                    CryptographicOperations.ZeroMemory(key); CryptographicOperations.ZeroMemory(local); CryptographicOperations.ZeroMemory(outer);
-                    foreach (var bytes in inner) CryptographicOperations.ZeroMemory(bytes);
-                }
+                Status($"Cloud is up to date. {result.Conflicts} conflict copies kept.");
             }, true);
-            Action("Show & copy connection code", () => { code.Text = CloudPairing.Encode(profile); copy(code.Text); Status("Code copied. Paste it on your own device. Clipboard clears in 20 seconds."); return Task.CompletedTask; });
+            Action("Show QR & copy connection code", () => {
+                code.Text = CloudPairing.Encode(profile); byte[] png = PairingQr.Render(code.Text);
+                try { using var stream = new MemoryStream(png); var bitmap = new BitmapImage(); bitmap.BeginInit(); bitmap.CacheOption = BitmapCacheOption.OnLoad; bitmap.StreamSource = stream; bitmap.EndInit(); bitmap.Freeze(); qr.Source = bitmap; qr.Visibility = Visibility.Visible; }
+                finally { CryptographicOperations.ZeroMemory(png); }
+                copy(code.Text); Status("Scan this QR only on your own device. The code was copied and clipboard clears in 20 seconds."); return Task.CompletedTask;
+            });
             Action("Cloud account security · 2FA", async () =>
             {
                 var signedIn = await Refresh();
                 CloudMfaDialog.Manage(d, auth, signedIn, profile, store, EnsureCurrent, cancellation.Token);
-                Status("Cloud security settings updated. Sync remains manual.");
+                Status("Cloud security settings updated.");
             });
             Action("Disconnect this device", async () =>
             {
@@ -139,7 +131,7 @@ internal static class CloudSyncDialog
             var password = d.Secret("Cloud account password (separate from your master passphrase)");
             var join = d.Secret("Other device's cloud connection code (only when joining)"); join.MaxLength = 1024;
             var confirmation = d.Secret("Email confirmation code (if shown in your email)"); confirmation.MaxLength = 10;
-            d.Label("On your first device: create a cloud account, confirm its email, then choose Start a new cloud vault. On your second device: first transfer the same vault over Wi-Fi, then sign in with the same cloud account and paste its connection code.");
+            d.Label("On your first device: create and confirm a cloud account, then start a new cloud vault. On a new device without a vault, use Restore from cloud on its lock screen with this account and connection code.");
             d.Body.Children.Add(status);
             Action("Create cloud account", async () =>
             {

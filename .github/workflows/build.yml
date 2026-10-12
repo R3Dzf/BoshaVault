@@ -51,6 +51,7 @@ jobs:
       - name: Test cloud account and atomic merge, then generate synthetic fixtures
         run: |
           dotnet run --project src/BoshaVault.Tests -c Release -- --cloud-tests
+          dotnet run --project src/BoshaVault.Tests -c Release -- --automatic-cloud-tests
           dotnet run --project src/BoshaVault.Tests -c Release -- --ux-tests
           dotnet run --project src/BoshaVault.Tests -c Release -- --fixtures build-deps/cloud-fixtures
           dotnet run --project src/BoshaVault.Tests -c Release -- --ux-fixtures build-deps/ux-fixtures

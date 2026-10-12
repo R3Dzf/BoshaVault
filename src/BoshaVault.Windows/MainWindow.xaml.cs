@@ -37,6 +37,10 @@ public partial class MainWindow : Window
     private bool exiting, resourcesReleased;
     private WindowState previousWindowState = WindowState.Normal;
     private UpdateDialog? updates;
+    private string? undoEntryId; private DateTime undoUntil;
+    private readonly SemaphoreSlim cloudGate = new(1, 1);
+    private bool cloudDialogOpen;
+    private DateTime nextCloudCheck = DateTime.MinValue;
 
     public MainWindow()
     {
@@ -60,7 +64,13 @@ public partial class MainWindow : Window
         {
             if (DateTime.UtcNow >= PrivateClipboard.Expires) PrivateClipboard.Clear();
             if (revealed && DateTime.UtcNow >= revealUntil) Mask();
+            if (UndoButton.Visibility == Visibility.Visible && DateTime.UtcNow > undoUntil) { undoEntryId = null; UndoButton.Visibility = Visibility.Collapsed; }
             if (session != null && (transfer?.IsActive != true || transfer.IsCompleted) && DateTime.UtcNow - lastActivity > TimeSpan.FromMinutes(timeoutMinutes)) LockVault();
+            if (!cloudDialogOpen && DateTime.UtcNow >= nextCloudCheck)
+            {
+                nextCloudCheck = DateTime.UtcNow.AddSeconds(session == null ? 60 : 12);
+                _ = RunCloudSync();
+            }
         };
         timer.Start(); ConfigureUnlock();
     }
@@ -90,6 +100,7 @@ public partial class MainWindow : Window
             session = opened; attempts = 0; MasterBox.Clear(); ConfirmBox.Clear(); LockError.Text = "";
             lastActivity = DateTime.UtcNow; LockView.Visibility = Visibility.Collapsed; VaultView.Visibility = Visibility.Visible;
             filter = "all"; folderFilter = null; SearchBox.Clear(); Refresh(); SearchBox.Focus(); tray?.Update();
+            nextCloudCheck = DateTime.MinValue; _ = RunCloudSync();
         }
         catch (Exception ex) when (ex is VaultException or IOException or UnauthorizedAccessException)
         {
@@ -107,9 +118,55 @@ public partial class MainWindow : Window
         generation++; transfer?.Dispose(); transfer = null;
         foreach (Window child in OwnedWindows.Cast<Window>().ToArray()) child.Close();
         PrivateClipboard.Clear(); Mask();
+        undoEntryId = null; UndoButton.Visibility = Visibility.Collapsed;
         session?.Dispose(); session = null;
         selected = null; EntryList.ItemsSource = null; DetailUsername.Text = ""; DetailNotes.Text = ""; DetailHost.Text = ""; DetailTitle.Text = ""; SearchBox.Clear();
         MasterBox.Clear(); ConfirmBox.Clear(); LockError.Text = ""; ConfigureUnlock();
+    }
+
+    private async Task RunCloudSync()
+    {
+        if (cloudDialogOpen || resourcesReleased || exiting || !File.Exists(vaultPath) || !await cloudGate.WaitAsync(0)) return;
+        CloudProfile? profile = null;
+        try
+        {
+            using var http = new System.Net.Http.HttpClient(new System.Net.Http.HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(25) };
+            byte[] disk = File.ReadAllBytes(vaultPath);
+            Guid vaultId;
+            try { vaultId = Guid.Parse(VaultCodec.Parse(disk).VaultId); }
+            finally { CryptographicOperations.ZeroMemory(disk); }
+            var store = new CloudProfileStore(root);
+            profile = store.Load(vaultId);
+            if (profile is not { AutoSync: true }) return;
+            var auth = new SupabaseCloudAccount(http);
+            var signedIn = await auth.Refresh(profile.RefreshToken);
+            if (cloudDialogOpen) return;
+            if (signedIn.OwnerId != profile.OwnerId) throw new VaultException("Cloud account changed. Reconnect this device.");
+            profile.RefreshToken = signedIn.RefreshToken; store.Save(profile);
+            var factors = await auth.ListFactors(signedIn);
+            if (factors.RequiresChallenge(signedIn))
+            {
+                CloudStatus.Text = "Cloud paused · verify 2FA in Sync";
+                return;
+            }
+            var transport = new SupabaseSnapshotTransport(http, new Uri(CloudProject.Url), CloudProject.PublishableKey, _ => Task.FromResult(signedIn.AccessToken));
+            var opened = session; int stamp = generation;
+            var result = await AutomaticCloudSync.RunAsync(transport, profile,
+                opened == null ? null : inner =>
+                {
+                    if (session != opened || generation != stamp || !opened.IsOpen) throw new OperationCanceledException();
+                    int conflicts = opened.MergeCloudSnapshots(inner); Refresh();
+                    return Task.FromResult((opened.ExportEncrypted(), conflicts));
+                },
+                () => Task.FromResult(session == opened && generation == stamp && opened?.IsOpen == true
+                    ? opened.ExportEncrypted() : File.ReadAllBytes(vaultPath)),
+                store.ReadPending, store.WritePending, () => store.Save(profile));
+            CloudStatus.Text = result.WaitingForUnlock ? "Cloud update ready · unlock to apply" :
+                result.Conflicts > 0 ? $"Cloud synced · {result.Conflicts} conflict copies" : "Cloud synced · up to date";
+        }
+        catch (Exception ex) when (ex is VaultException or IOException or System.Net.Http.HttpRequestException or CryptographicException or UnauthorizedAccessException or OperationCanceledException)
+        { if (profile != null) CloudStatus.Text = ex is VaultException ? ex.Message : "Cloud offline · changes retry automatically"; }
+        finally { profile?.Clear(); cloudGate.Release(); }
     }
 
     private string? folderFilter;
@@ -214,7 +271,64 @@ public partial class MainWindow : Window
     private void DeleteClick(object sender, RoutedEventArgs e)
     {
         if (selected == null || session == null) return;
-        Guard(() => { var copy = selected.Clone(); copy.Deleted = !copy.Deleted; session.Upsert(copy); Refresh(); SetStatus(copy.Deleted ? "Moved to encrypted trash. You can restore it." : "Login restored."); });
+        Guard(() => { var copy = selected.Clone(); copy.Deleted = !copy.Deleted; session.Upsert(copy); undoEntryId = copy.Deleted ? copy.Id : null; undoUntil = DateTime.UtcNow.AddSeconds(15); UndoButton.Visibility = copy.Deleted ? Visibility.Visible : Visibility.Collapsed; nextCloudCheck = DateTime.MinValue; Refresh(); SetStatus(copy.Deleted ? "Moved to encrypted trash. Undo is available for 15 seconds." : "Login restored."); });
+    }
+    private void UndoClick(object sender, RoutedEventArgs e)
+    {
+        if (session == null || undoEntryId == null || DateTime.UtcNow > undoUntil) return;
+        Guard(() => { var entry = session.Data.Entries.FirstOrDefault(x => x.Id == undoEntryId && x.Deleted && !x.Purged); if (entry == null) return; var copy = entry.Clone(); copy.Deleted = false; session.Upsert(copy); undoEntryId = null; UndoButton.Visibility = Visibility.Collapsed; nextCloudCheck = DateTime.MinValue; Refresh(); SetStatus("Login restored."); });
+    }
+    private void LockedCloudClick(object sender, RoutedEventArgs e)
+    {
+        if (busy) return;
+        if (File.Exists(vaultPath)) { LockError.Text = "Unlock this vault and connect it from Sync. A local vault already exists."; return; }
+        var d = new FormDialog(this, "Restore encrypted cloud vault", 510);
+        d.Label("Sign in with the same cloud account and paste the connection code from your own device. Your master passphrase unlocks the encrypted backup on this computer.");
+        var email = d.Field("Cloud account email", "", 320); var account = d.Secret("Cloud account password");
+        var code = d.Secret("Cloud connection code (BVCLOUD1:…)"); var master = d.Secret("Vault master passphrase");
+        var status = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 10, 0, 8) }; d.Body.Children.Add(status);
+        using var cancellation = new CancellationTokenSource();
+        using var http = new System.Net.Http.HttpClient(new System.Net.Http.HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(30) };
+        var auth = new SupabaseCloudAccount(http); bool running = false; int stamp = generation;
+        var restore = d.Action("Sign in & restore", async () =>
+        {
+            if (running) return; running = true;
+            string secret = account.Password, pairingCode = code.Password.Trim(), password = master.Password; account.Clear(); master.Clear();
+            try
+            {
+                if (File.Exists(vaultPath)) throw new VaultException("A local vault already exists.");
+                status.Text = "Signing in and checking encrypted snapshots…";
+                var signed = await auth.SignIn(email.Text.Trim(), secret, cancellation.Token);
+                var factors = await auth.ListFactors(signed, cancellation.Token);
+                if (factors.RequiresChallenge(signed)) signed = CloudMfaDialog.Verify(d, auth, signed, factors.Totp, _ => { },
+                    () => { if (stamp != generation || !d.IsVisible) throw new OperationCanceledException(); }, cancellation.Token);
+                var pairing = CloudPairing.Decode(pairingCode, Guid.Empty, signed.OwnerId);
+                var transport = new SupabaseSnapshotTransport(http, new Uri(CloudProject.Url), CloudProject.PublishableKey, _ => Task.FromResult(signed.AccessToken));
+                var rows = await transport.ListAsync(pairing.VaultSlot, cancellation.Token);
+                if (rows.Count == 0) throw new VaultException("No cloud backup yet. Sync the first device before joining.");
+                byte[] key = CloudSnapshotCodec.ParseRecoveryKey(pairing.RecoveryKey), inner = [];
+                try
+                {
+                    inner = CloudSnapshotCodec.Open(rows[0].Blob, key, pairing.VaultSlot, rows[0].DeviceSlot);
+                    if (VaultCodec.Parse(inner).VaultId != pairing.VaultId.ToString("D")) throw new VaultException("Cloud vault identity does not match the connection code.");
+                    if (stamp != generation || File.Exists(vaultPath)) throw new OperationCanceledException();
+                    var opened = await VaultSession.RestoreCloudNew(vaultPath, inner, password, deviceId);
+                    if (stamp != generation) { opened.Dispose(); throw new OperationCanceledException(); }
+                    session = opened; var profile = new CloudProfile { OwnerId = signed.OwnerId, VaultId = pairing.VaultId, VaultSlot = pairing.VaultSlot,
+                        DeviceSlot = Guid.NewGuid(), RecoveryKey = pairing.RecoveryKey, RefreshToken = signed.RefreshToken, Email = email.Text.Trim() };
+                    try { new CloudProfileStore(root).Save(profile); } finally { profile.Clear(); }
+                    LockView.Visibility = Visibility.Collapsed; VaultView.Visibility = Visibility.Visible; filter = "all"; folderFilter = null; SearchBox.Clear();
+                    MasterBox.Clear(); ConfirmBox.Clear(); lastActivity = DateTime.UtcNow; Refresh(); tray?.Update(); d.Close(); nextCloudCheck = DateTime.MinValue; _ = RunCloudSync();
+                }
+                finally { CryptographicOperations.ZeroMemory(key); CryptographicOperations.ZeroMemory(inner); foreach (var row in rows) CryptographicOperations.ZeroMemory(row.Blob); }
+            }
+            catch (OperationCanceledException) { status.Text = "Cloud restore cancelled. Your local vault is preserved."; }
+            catch (Exception ex) when (ex is VaultException or IOException or System.Net.Http.HttpRequestException or CryptographicException or UnauthorizedAccessException)
+            { status.Text = ex is VaultException ? ex.Message : "Cloud could not be reached or opened. Try again when connected."; }
+            finally { secret = ""; pairingCode = ""; password = ""; running = false; }
+        }, true);
+        d.Action("Cancel", d.Close); d.Closed += (_, _) => { cancellation.Cancel(); code.Clear(); account.Clear(); master.Clear(); };
+        d.ShowDialog();
     }
     private void PermanentDeleteClick(object sender, RoutedEventArgs e)
     {
@@ -262,7 +376,12 @@ public partial class MainWindow : Window
             preferences.Save(preferencesPath);
             SetStatus(preferences.BrowserAutofillEnabled ? "Browser Autofill enabled." : "Browser Autofill disabled.");
         });
-        d.Label("Browser setup: Install the Lockvyn extension in Chrome or Edge (Load unpacked), then run Install-BrowserAutofill.ps1 with its extension ID. Matching HTTPS logins appear near password fields. Every fill requires your approval on Windows. No blind typing.");
+        d.Label("Browser Autofill setup: 1. Open the extension folder below. 2. Load it as an unpacked extension in Chrome or Edge. 3. Run Install-BrowserAutofill.ps1 with the extension ID shown by your browser. Matching HTTPS logins appear near password fields and every fill asks for your approval.");
+        d.Action("Open browser extension folder", () => Guard(() => {
+            string folder = System.IO.Path.Combine(AppContext.BaseDirectory, "browser-extension");
+            if (!Directory.Exists(folder)) throw new VaultException("The extension folder is missing from this installation. Reinstall the complete Windows package.");
+            Process.Start(new ProcessStartInfo("explorer.exe", '"' + folder + '"') { UseShellExecute = true });
+        }), inBody: true);
         d.Label("Auto-lock after inactivity");
         var options = new ComboBox { ItemsSource = new[] { 1, 2, 5, 10 }, SelectedItem = timeoutMinutes, Padding = new(10), Margin = new(0, 0, 0, 18) }; d.Body.Children.Add(options);
         d.Action("Apply auto-lock time", () => Guard(() => { int minutes = (int)options.SelectedItem; preferences.AutoLockMinutes = minutes; preferences.Save(preferencesPath); timeoutMinutes = minutes; SetStatus($"Auto-lock set to {timeoutMinutes} minutes and saved."); }));
@@ -320,9 +439,11 @@ public partial class MainWindow : Window
 
     private readonly object transferLogGate = new();
 
-    private void SyncClick(object sender, RoutedEventArgs e)
+    private async void SyncClick(object sender, RoutedEventArgs e)
     {
         if (session == null) return;
+        cloudDialogOpen = true;
+        await cloudGate.WaitAsync(); cloudGate.Release();
         var d = new FormDialog(this, "Devices & encrypted backup", 610);
         d.Label("Connect your phone on the same private Wi-Fi. Keep this window open until the encrypted transfer finishes.");
         string defaultIp = ""; try { defaultIp = LocalTransferServer.FindPrivateHost(); } catch (Exception ex) when (ex is VaultException or System.Net.Sockets.SocketException) { }
@@ -422,7 +543,21 @@ public partial class MainWindow : Window
             CloudSyncDialog.Show(this, root, opened, () => session == opened && generation == stamp,
                 () => { Refresh(); Touch(); }, Copy);
         });
-        try { d.ShowDialog(); } finally { ClearPairing(); transfer?.Dispose(); transfer = null; }
+        try { d.ShowDialog(); } finally { ClearPairing(); transfer?.Dispose(); transfer = null; cloudDialogOpen = false; nextCloudCheck = DateTime.MinValue; }
+    }
+    private async void CloudClick(object sender, RoutedEventArgs e)
+    {
+        if (session == null || cloudDialogOpen) return;
+        cloudDialogOpen = true;
+        try
+        {
+            await cloudGate.WaitAsync(); cloudGate.Release();
+            if (session == null) return;
+            var opened = session; int stamp = generation;
+            CloudSyncDialog.Show(this, root, opened, () => session == opened && generation == stamp,
+                () => { Refresh(); Touch(); }, Copy);
+        }
+        finally { cloudDialogOpen = false; if (!new CloudProfileStore(root).Exists) CloudStatus.Text = "Cloud is optional"; nextCloudCheck = DateTime.MinValue; }
     }
     private void Export()
     {

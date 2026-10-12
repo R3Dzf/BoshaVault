@@ -145,7 +145,9 @@ public final class VaultEngine implements AutoCloseable {
             if(remoteEnv.getLong("keyEpoch")!=envelope.getLong("keyEpoch"))throw new Exception("A device changed the master passphrase. Merge all devices over Wi-Fi or encrypted backups first. Then disconnect cloud on both, start a new cloud vault on one, and rejoin with its new code. No cloud changes were applied.");
             conflicts+=mergeData(candidate,openBody(remoteEnv,key),device);
         }
-        commit(candidate);return conflicts;
+        long mergedRevision=candidate.getLong("revision");candidate.put("revision",data.getLong("revision"));
+        if(!candidate.toString().equals(data.toString())){candidate.put("revision",mergedRevision);commit(candidate);}
+        return conflicts;
     }
     public synchronized int mergeUsingPassword(byte[] bytes,String incomingPassword)throws Exception{
         ensure();JSONObject remoteEnv=parse(bytes);if(!remoteEnv.getString("vaultId").equals(envelope.getString("vaultId")))throw new Exception("Different vault identity.");byte[] kek=derive(incomingPassword,remoteEnv.getJSONObject("kdf")),remoteKey=null;
