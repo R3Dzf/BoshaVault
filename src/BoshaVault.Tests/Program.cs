@@ -15,7 +15,24 @@ void RejectNow(Action action, string name) { bool rejected = false; try { action
 VaultData Clone(VaultData d) => JsonSerializer.Deserialize<VaultData>(JsonSerializer.Serialize(d, JsonOptions.Strict), JsonOptions.Strict)!;
 try
 {
+    if (args.Length > 0 && args[0] == "--local-transfer-tests") { await LocalTransferTests.Run(); return; }
+    if (args.Length > 0 && args[0] == "--native-lan-host") { await LocalTransferTests.NativeHost(args[1]); return; }
     if (args.Length > 0 && args[0] == "--desktop-tests") { await DesktopTests.Run(); return; }
+    if (args.Length > 0 && args[0] == "--ux-tests") { await VaultUxTests.Run(); return; }
+    if (args.Length > 0 && args[0] == "--ux-fixtures") { await VaultUxTests.Fixtures(args[1]); return; }
+    if (args.Length > 0 && args[0] == "--verify-java-ux") { await VaultUxTests.Verify(args[1]); return; }
+    if (args.Length > 0 && args[0] == "--cloud-tests") { await CloudAccountTests.Run(); return; }
+    if (args.Length > 0 && args[0] == "--automatic-cloud-tests") { await AutomaticCloudSyncTests.Run(); return; }
+    if (args.Length > 0 && args[0] == "--cloud-store-tests") { CloudStoreTests.Run(); return; }
+    if (args.Length > 0 && args[0] == "--cloud-live-tests") { await CloudLiveTests.Run(args[1]); return; }
+    if (args.Length > 0 && args[0] == "--cloud-mfa-live-tests") { await CloudMfaLiveTests.Run(args[1]); return; }
+    if (args.Length > 0 && args[0] == "--verify-java-cloud")
+    {
+        var profile=JsonSerializer.Deserialize<CloudProfile>(File.ReadAllBytes(args[1]+"/cloud-profile.json"),CloudPairing.Json)!;
+        byte[] key=CloudSnapshotCodec.ParseRecoveryKey(profile.RecoveryKey);
+        try {Check(CloudSnapshotCodec.Open(File.ReadAllBytes(args[1]+"/java.cloud"),key,profile.VaultSlot,profile.DeviceSlot).SequenceEqual(File.ReadAllBytes(args[1]+"/dotnet.boshavault")),"Java cloud envelope opens in .NET");}
+        finally {CryptographicOperations.ZeroMemory(key);profile.Clear();}return;
+    }
     if (args.Length > 0 && args[0] == "--activation-client") { Environment.ExitCode = await BoshaVault.Windows.InstanceActivationChannel.RequestOpen(args[1]) ? 0 : 1; return; }
     if (args.Length > 0 && args[0] == "--tls-handshake-tests") { await TlsHandshakeTests.Run(); return; }
     if (args.Length > 0 && args[0] == "--tls-certificate-tests")
@@ -62,6 +79,27 @@ try
         await Task.Delay(300); File.Delete(exchange + "/pairing.txt");
         return;
     }
+    // Global alias groups are explicit local preferences, never silent-fill permission.
+    var googleHosts = new List<DomainAliasGroup> {
+        new() { Name = "Google", Hosts = ["google.com","www.google.com","accounts.google.com"] }
+    };
+    OriginPolicy.ValidateGroups(googleHosts);
+    Check(OriginPolicy.Relation("https://www.google.com","https://accounts.google.com",googleHosts)
+          == OriginPolicy.DomainRelation.TrustedGroup, "approved same-site aliases have priority over related-domain suggestions");
+    Check(OriginPolicy.Relation("https://google.com","https://www.google.com",googleHosts)
+          == OriginPolicy.DomainRelation.Exact, "exact host matching retains priority over alias grouping");
+    Check(OriginPolicy.Relation("https://google.com","https://google.com.attacker.test",googleHosts)
+          == OriginPolicy.DomainRelation.None, "aliases cannot authorize lookalike or parent-domain phishing hosts");
+    RejectNow(() => OriginPolicy.ValidateGroups([new DomainAliasGroup {
+        Name="Cross site", Hosts=["google.com","evil.example"]
+    }]), "cross-site automatic alias groups are rejected");
+    RejectNow(() => OriginPolicy.ValidateGroups([new DomainAliasGroup {
+        Name="Public suffix tenants", Hosts=["alice.github.io","bob.github.io"]
+    }]), "independent private suffix tenants cannot be grouped");
+    RejectNow(() => OriginPolicy.ValidateGroups([
+        new DomainAliasGroup { Name="One", Hosts=["google.com","accounts.google.com"] },
+        new DomainAliasGroup { Name="Two", Hosts=["google.com","www.google.com"] }
+    ]), "overlapping domain groups are rejected");
     // Chrome/Bitwarden CSV imports never expose secrets to logs, and commits are atomic.
     string importFile = temp + "/csv-test.boshavault";
     using (var importSession = await VaultSession.Create(importFile, password, devA))
@@ -307,6 +345,15 @@ try
         MergeEngine.Merge(ra, rb, devA);
         File.WriteAllText(folder + "/merge-expected.json", JsonSerializer.Serialize(ra, JsonOptions.Strict));
         File.WriteAllText(folder + "/merge-base.json", JsonSerializer.Serialize(source, JsonOptions.Strict));
+        var cloudProfile = new CloudProfile { OwnerId=Guid.NewGuid(),VaultId=Guid.Parse(f.Data.VaultId),
+            VaultSlot=Guid.NewGuid(),DeviceSlot=Guid.NewGuid(),RecoveryKey=CloudSnapshotCodec.NewRecoveryKey(),
+            RefreshToken="synthetic-refresh-token-for-fixture",Email="synthetic@example.invalid" };
+        byte[] recovery=CloudSnapshotCodec.ParseRecoveryKey(cloudProfile.RecoveryKey);
+        try {
+            File.WriteAllBytes(folder+"/dotnet.cloud",CloudSnapshotCodec.Seal(f.ExportEncrypted(),recovery,cloudProfile.VaultSlot,cloudProfile.DeviceSlot));
+            File.WriteAllText(folder+"/cloud-pairing.txt",CloudPairing.Encode(cloudProfile));
+            File.WriteAllText(folder+"/cloud-profile.json",JsonSerializer.Serialize(cloudProfile,CloudPairing.Json));
+        } finally {CryptographicOperations.ZeroMemory(recovery);cloudProfile.Clear();}
     }
     if (args.Length > 0 && args[0] == "--verify-java")
     {

@@ -4,5 +4,6 @@
     <ProjectReference Include="../BoshaVault.Core/BoshaVault.Core.csproj" />
     <Compile Include="../BoshaVault.Windows/DesktopPreferences.cs" Link="Desktop/DesktopPreferences.cs" />
     <Compile Include="../BoshaVault.Windows/InstanceActivationChannel.cs" Link="Desktop/InstanceActivationChannel.cs" />
+    <Compile Include="../BoshaVault.Windows/CloudProfileStore.cs" Link="Desktop/CloudProfileStore.cs" />
   </ItemGroup>
 </Project>

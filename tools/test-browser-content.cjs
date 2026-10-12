@@ -41,6 +41,14 @@ class HTMLFormElement extends FakeElement {
   }
   getAttribute(){return null;}
 }
+function findDeep(element,predicate) {
+  if(predicate(element))return element;
+  for(const child of element.children || []) {
+    const found=findDeep(child,predicate);
+    if(found)return found;
+  }
+  return null;
+}
 const username=new HTMLInputElement("email");
 username.name="email";username.autocomplete="username";
 const password=new HTMLInputElement("password");
@@ -61,7 +69,11 @@ const document={
 };
 const window={innerWidth:800,innerHeight:650,addEventListener:()=>{}};
 window.top=window;
-const chrome={runtime:{
+let runtimeListener=null,storageListener=null;
+const chrome={storage:{
+  local:{get(_defaults,callback){callback({quietMode:false});},set(){}},
+  onChanged:{addListener(callback){storageListener=callback;}}
+},runtime:{
   async sendMessage(req){
     if(req.op==="list")return {status:"ok",accounts:[{
       id:"fd6f16bf-f0cf-4b5a-b087-e3f998931a8a",title:"GitHub",username:"demo@example.com"
@@ -69,7 +81,7 @@ const chrome={runtime:{
     if(req.op==="fill"){nativeFills++;return {status:"filled",username:"demo@example.com",password:"SyntheticOnlyPassword123!"};}
     return {status:"unavailable"};
   },
-  onMessage:{addListener(){}}
+  onMessage:{addListener(callback){runtimeListener=callback;}}
 }};
 const env={
   window,location,document,chrome,URL,HTMLInputElement,HTMLFormElement,
@@ -86,9 +98,24 @@ vm.runInNewContext(fs.readFileSync("browser-extension/content.js","utf8"),env);
   assert.ok(shadow,"Suggestion UI must use isolated Shadow DOM");
   const panel=shadow.children.find(x=>x.className==="panel");
   assert.ok(panel,"Popup panel exists");
-  const accountButton=panel.children.find(x=>x.tagName==="BUTTON" &&
+  const accountButton=findDeep(panel,x=>x.tagName==="BUTTON" &&
     x.textContent?.includes("demo@example.com"));
-  assert.ok(accountButton,"Matched account appears in dropdown");
+  assert.ok(accountButton,"Matched account appears in the nested suggestions list");
+  const filter=findDeep(panel,x=>x.tagName==="INPUT" && x.className==="account-search");
+  assert.ok(filter,"Saved-account search field exists");
+  filter.value="not-a-matching-email";
+  filter.events.input();
+  assert.equal(accountButton.style.display,"none","Search hides nonmatching accounts");
+  filter.value="demo@example";
+  filter.events.input();
+  assert.equal(accountButton.style.display,"block","Search finds matching accounts locally");
+  const moreButton=panel.children.find(x=>x.tagName==="BUTTON" && x.textContent?.startsWith("More options"));
+  const advanced=panel.children.find(x=>x.tagName==="DIV" && x.style.display==="none" &&
+    x.children?.some(child=>child.tagName==="BUTTON"));
+  assert.ok(moreButton&&advanced,"secondary password actions remain collapsed by default");
+  moreButton.events.click({stopPropagation(){}});
+  assert.equal(advanced.style.display,"block","advanced actions open on explicit user request");
+
   // Browser retargets pointerdown inside CLOSED ShadowRoot to the host.
   // A past bug hid the popup on pointerdown before the click action ran.
   handlers.pointerdown({target:popup});
@@ -99,5 +126,16 @@ vm.runInNewContext(fs.readFileSync("browser-extension/content.js","utf8"),env);
   assert.equal(nativeFills,1,"Account click must reach credential request");
   assert.equal(username.value,"demo@example.com");
   assert.equal(password.value,"SyntheticOnlyPassword123!");
-  console.log("PASS browser suggestion renders, survives Shadow DOM pointerdown, and fills username/password");
+  // Silent operation is opt-in: no automatic dropdown, but an explicit
+  // toolbar request still works without reading/storing any vault secret.
+  storageListener({quietMode:{newValue:true}},"local");
+  handlers.focusin({target:password});
+  await new Promise(resolve=>setTimeout(resolve,145));
+  assert.equal(popup,null,"Quiet Mode must not create a suggestion dropdown on focus");
+  let reply;
+  runtimeListener({op:"showSuggestions"},null,value=>reply=value);
+  assert.equal(reply.status,"ok","User-requested suggestion is still allowed in Quiet Mode");
+  await new Promise(resolve=>setTimeout(resolve,145));
+  assert.ok(popup,"Manual request should open the private suggestion panel");
+  console.log("PASS browser suggestions, closed Shadow DOM click, fill and explicit Quiet Mode");
 })().catch(e=>{console.error(e);process.exitCode=1;});

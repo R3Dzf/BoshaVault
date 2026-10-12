@@ -4,6 +4,12 @@ using System.Globalization;
 
 namespace BoshaVault.Core;
 
+public sealed class DomainAliasGroup
+{
+    public string Name { get; set; } = "";
+    public List<string> Hosts { get; set; } = [];
+}
+
 public static class OriginPolicy
 {
     // Exact HTTPS hostname; no suffix, title, lookalike, or substring matching.
@@ -31,7 +37,7 @@ public static class OriginPolicy
         }
         catch (VaultException) { return false; }
     }
-    public enum DomainRelation { None, Exact, Related }
+    public enum DomainRelation { None, Exact, TrustedGroup, Related }
 
     // The pinned offline PSL includes PRIVATE rules, e.g. github.io; two
     // independent tenants must NEVER be grouped by naïve last-two-label logic.
@@ -64,12 +70,61 @@ public static class OriginPolicy
         }
         catch { return null; }
     }
-    public static DomainRelation Relation(string storedUrl,string requestedUrl)
+    // A user-created group is an explicit, local preference; it never permits
+    // silent credential disclosure. Only hosts sharing one registrable domain
+    // can be grouped. In particular, github.io tenants must remain separate.
+    public static void ValidateGroups(IReadOnlyList<DomainAliasGroup>? groups)
+    {
+        if(groups == null || groups.Count > 24)throw new VaultException("Too many domain groups.");
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach(var group in groups)
+        {
+            if(group == null || string.IsNullOrWhiteSpace(group.Name) ||
+               group.Name.Length > 60 || group.Name.Any(char.IsControl) ||
+               group.Hosts == null || group.Hosts.Count is < 2 or > 16)
+                throw new VaultException("Each group needs a name and 2–16 valid HTTPS hosts.");
+            if(!names.Add(group.Name.Trim()))throw new VaultException("Duplicate domain group name.");
+            string? baseDomain = null;
+            foreach(var raw in group.Hosts)
+            {
+                if(raw == null || raw.Length is < 4 or > 253 || raw.Contains('/') ||
+                   raw.Contains(':') || raw.Contains('*') || raw.Contains('?') ||
+                   !string.Equals(raw,raw.Trim(),StringComparison.Ordinal))
+                    throw new VaultException("Enter hostnames only, like accounts.google.com.");
+                var host = ExactHost("https://" + raw);
+                if(!string.Equals(host,raw,StringComparison.Ordinal))
+                    throw new VaultException("Use lowercase canonical domain names (IDN in punycode).");
+                var domain = RegistrableDomain(host);
+                if(domain == null || (baseDomain != null && baseDomain != domain))
+                    throw new VaultException("Domain groups must belong to one verified registrable domain.");
+                baseDomain = domain;
+                if(!seen.Add(host))
+                    throw new VaultException("One hostname cannot belong to multiple groups.");
+            }
+        }
+    }
+    private static bool IsInSameGroup(string saved,string requested,IReadOnlyList<DomainAliasGroup>? groups)
+    {
+        if(groups == null || groups.Count == 0)return false;
+        // Fail closed even when a corrupted preference slips through: aliases
+        // must share the pinned PSL registrable domain before any group lookup.
+        var a=RegistrableDomain(saved);
+        var b=RegistrableDomain(requested);
+        if(a==null || !string.Equals(a,b,StringComparison.Ordinal))return false;
+        return groups.Any(g=>g.Hosts != null &&
+            g.Hosts.Contains(saved,StringComparer.Ordinal) &&
+            g.Hosts.Contains(requested,StringComparer.Ordinal));
+    }
+
+    public static DomainRelation Relation(string storedUrl,string requestedUrl,
+        IReadOnlyList<DomainAliasGroup>? groups = null)
     {
         try
         {
             string saved=ExactHost(storedUrl),requested=ExactHost(requestedUrl);
             if(Matches(storedUrl,requestedUrl))return DomainRelation.Exact;
+            if(IsInSameGroup(saved,requested,groups))return DomainRelation.TrustedGroup;
             string? a=RegistrableDomain(saved),b=RegistrableDomain(requested);
             if(a!=null && b!=null && string.Equals(a,b,StringComparison.Ordinal))
                 return DomainRelation.Related;

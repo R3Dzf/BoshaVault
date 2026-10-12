@@ -10,7 +10,7 @@ const sender={
   url:host+"/login",tab:{id:101,url:host+"/login"}
 };
 
-function setup({changed=false,tabOrigin=host}={}) {
+function setup({changed=false,stale=false,tabOrigin=host}={}) {
   let handler, nativeCalls=0,frames=0;
   const chrome={
     runtime:{
@@ -19,13 +19,16 @@ function setup({changed=false,tabOrigin=host}={}) {
       async sendNativeMessage(name,message){
         nativeCalls++;
         assert.equal(name,"com.boshavault.desktop");
+        if(message.op==="list")return {status:"ok",accounts:[{
+          id:entryId,username:"synthetic-user@example.invalid",website:"github.com"
+        }]};
         return message.op==="update" ? {status:"updated"} :
           {status:"filled",username:"fakeuser",password:"fake-password-to-protect"};
       }
     },
     webNavigation:{async getFrame(){
       frames++;
-      return {documentId:changed&&frames>1?"document-2":"document-1",
+      return {documentId:(stale||(changed&&frames>1))?"document-2":"document-1",
         url:tabOrigin+"/login"};
     }},
     tabs:{async get(){return {url:tabOrigin+"/login"};}}
@@ -46,6 +49,22 @@ function setup({changed=false,tabOrigin=host}={}) {
   let reply=await scenario.request({op:"fill",entryId});
   assert.equal(reply.status,"filled","same document may receive user-approved fill");
   assert.equal(scenario.nativeCalls(),1);
+
+  scenario=setup();
+  reply=await scenario.request({op:"list"});
+  assert.equal(reply.status,"ok","live document may list account metadata");
+  assert.equal(reply.accounts.length,1,"live document receives a synthetic account");
+
+  scenario=setup({stale:true});
+  reply=await scenario.request({op:"list"});
+  assert.equal(reply.status,"denied","already stale document cannot enumerate usernames");
+  assert.equal(scenario.nativeCalls(),0,"already stale document never reaches Native Messaging");
+
+  scenario=setup({changed:true});
+  reply=await scenario.request({op:"list"});
+  assert.equal(reply.status,"denied","navigation during a native list request cannot receive usernames");
+  assert.equal(reply.accounts,undefined,"navigation must not expose account metadata");
+  assert.equal(scenario.nativeCalls(),1,"navigation after the first identity check may have already sent the native request");
 
   scenario=setup({changed:true});
   reply=await scenario.request({op:"fill",entryId});

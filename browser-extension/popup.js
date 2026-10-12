@@ -3,6 +3,36 @@ const site=document.getElementById("site");
 const status=document.getElementById("status");
 const show=document.getElementById("show");
 const save=document.getElementById("save");
+const quiet=document.getElementById("quiet");
+const blockPasskeys=document.getElementById("blockPasskeys");
+chrome.storage.local.get({blockConditionalPasskeys:false},prefs=>{
+  blockPasskeys.checked=prefs?.blockConditionalPasskeys===true;
+});
+blockPasskeys.addEventListener("change",()=>{
+  const enabled=blockPasskeys.checked;
+  blockPasskeys.disabled=true;
+  chrome.storage.local.set({blockConditionalPasskeys:enabled},()=>{
+    blockPasskeys.disabled=false;
+    if(chrome.runtime.lastError){
+      blockPasskeys.checked=!enabled;
+      status.textContent="Could not save setting: "+chrome.runtime.lastError.message;
+      return;
+    }
+    status.textContent=enabled
+      ? "Auto Passkey suppression is enabled for supported HTTPS sites. Refresh any other open login tabs."
+      : "Normal Chrome Passkey requests are restored. Refresh other open login tabs if needed.";
+  });
+});
+chrome.storage.local.get({quietMode:false},prefs=>{
+  quiet.checked=prefs?.quietMode===true;
+});
+quiet.addEventListener("change",()=>{
+  chrome.storage.local.set({quietMode:quiet.checked},()=>{
+    status.textContent=quiet.checked
+      ? "Quiet Mode on. Open the extension menu and choose Show saved logins when needed."
+      : "Automatic suggestions enabled on HTTPS login fields.";
+  });
+});
 async function activeTab() {
   const tabs=await chrome.tabs.query({active:true,currentWindow:true});
   const tab=tabs?.[0];
@@ -28,9 +58,9 @@ async function ask(command) {
     }else if(reply?.status==="no-fields"){
       status.textContent="No recognizable login input here. Click a username or password field, or use Save this website.";
     }else if(reply?.status==="started"){
-      status.textContent="Review the prefilled login form in BoshaVault Windows.";
+      status.textContent="Review the prefilled login form in Lockvyn Windows.";
     }else{
-      status.textContent=reply?.message||"BoshaVault did not respond.";
+      status.textContent=reply?.message||"Lockvyn did not respond.";
     }
   }catch{
     status.textContent="Reload the HTTPS page and retry. Ensure the extension is enabled for this site.";

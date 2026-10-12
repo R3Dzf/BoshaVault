@@ -1,0 +1,122 @@
+name: Release Lockvyn Windows
+
+on:
+  push:
+    tags: ['windows-v*']
+    branches: ['release/windows-v*']
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish the verified release (false creates a draft)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lockvyn-windows-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require successful acceptance on this exact source commit
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const result = await github.rest.actions.listWorkflowRuns({
+              ...context.repo, workflow_id: 'build.yml', head_sha: context.sha, per_page: 100
+            });
+            const passed = result.data.workflow_runs.find(r => r.head_sha === context.sha && r.conclusion === 'success');
+            if (!passed) throw new Error('Run Build Lockvyn successfully on this exact commit before releasing.');
+            core.info(`Verified acceptance: ${passed.html_url}`);
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Validate release version and restore pinned dependencies
+        shell: pwsh
+        run: |
+          $version=([xml](Get-Content src/BoshaVault.Windows/BoshaVault.Windows.csproj -Raw)).Project.PropertyGroup.Version
+          if ('${{ github.event_name }}' -eq 'push' -and '${{ github.ref_name }}' -notin "windows-v$version","release/windows-v$version") { throw 'Release ref must match Windows Version.' }
+          "LOCKVYN_VERSION=$version" | Add-Content $env:GITHUB_ENV
+          dotnet restore src/BoshaVault.Windows --locked-mode
+          if ($LASTEXITCODE) { throw 'Pinned dependency restore failed.' }
+      - name: Build pinned real-release verification tool before publish mutates runtime restore assets
+        shell: pwsh
+        run: |
+          dotnet restore tools/Lockvyn.UpdateChecks --locked-mode
+          if ($LASTEXITCODE) { throw 'Pinned update-check dependencies failed to restore.' }
+          dotnet build tools/Lockvyn.UpdateChecks -c Release --no-restore
+          if ($LASTEXITCODE) { throw 'Update-check tool failed to build.' }
+      - name: Prepare Windows package
+        shell: pwsh
+        run: ./tools/Prepare-WindowsPackage.ps1
+      - name: Download published baseline and generate real release deltas
+        shell: pwsh
+        env:
+          VPK_TOKEN: ${{ github.token }}
+        run: ./tools/Package-Windows.ps1 -Repository '${{ github.repository }}'
+      - name: Verify real published-baseline delta before public release
+        shell: pwsh
+        run: |
+          # Validate the actual old official package -> new package delta, rather
+          # than only the synthetic 9.0.0 -> 9.0.1 acceptance fixture.
+          $feedPath='dist/velopack/releases.win.json'
+          $index=Get-Content $feedPath -Raw | ConvertFrom-Json
+          $assets=@($index.Assets)
+          $current=[version]$env:LOCKVYN_VERSION
+          $previous=@($assets | Where-Object {
+            $_.PackageId -eq 'Lockvyn' -and $_.Type -eq 'Full' -and
+            [version]$_.Version -lt $current
+          } | Sort-Object { [version]$_.Version } -Descending)
+          if (!$previous.Count) {
+            Write-Host 'No prior Windows release; first-release full-package validation applies.'
+          } else {
+            $candidate=$previous[0]
+            $delta=@($assets | Where-Object {
+              $_.PackageId -eq 'Lockvyn' -and $_.Type -eq 'Delta' -and
+              [version]$_.Version -eq $current
+            })
+            if ($delta.Count -ne 1) { throw 'Exactly one delta is required for the target version.' }
+            $oldPackage=Join-Path 'dist/velopack' $candidate.FileName
+            $targetPackage=Join-Path 'dist/velopack' ("Lockvyn-$env:LOCKVYN_VERSION-full.nupkg")
+            if (!(Test-Path $oldPackage) -or !(Test-Path $targetPackage)) {
+              throw 'Real old or new package is missing; refusing to publish an untested delta.'
+            }
+            $testRoot=Join-Path $env:RUNNER_TEMP ('release-delta-'+[guid]::NewGuid().ToString('N'))
+            dotnet tools/Lockvyn.UpdateChecks/bin/Release/net10.0/Lockvyn.UpdateChecks.dll --published-release-delta 'dist/velopack' $testRoot $oldPackage
+            if ($LASTEXITCODE) { throw 'Real release delta reconstruction failed. Nothing was published.' }
+            Write-Host "Verified real Windows delta: $($candidate.Version) -> $env:LOCKVYN_VERSION"
+          }
+      - name: Upload installer, complete package, differences and update feed
+        shell: pwsh
+        env:
+          VPK_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+          PUBLISH_RELEASE: ${{ github.event_name == 'push' || inputs.publish }}
+        run: |
+          $tag="windows-v$env:LOCKVYN_VERSION"
+          $arguments=@('vpk','upload','github','--repoUrl','https://github.com/${{ github.repository }}','--channel','win','--outputDir','dist/velopack','--tag',$tag,'--targetCommitish','${{ github.sha }}','--releaseName',"Lockvyn $env:LOCKVYN_VERSION")
+          if ($env:PUBLISH_RELEASE -eq 'true') { $arguments+='--publish' }
+          dotnet @arguments
+          if ($LASTEXITCODE) { throw 'GitHub release upload failed.' }
+          ./tools/Publish-WindowsChecksums.ps1 -Version $env:LOCKVYN_VERSION -Repository '${{ github.repository }}'
+          $notes="docs/releases/Lockvyn-$env:LOCKVYN_VERSION.md"
+          if (!(Test-Path $notes)) { throw 'Customer release instructions are missing.' }
+          gh release edit $tag --repo '${{ github.repository }}' --notes-file $notes
+          if ($LASTEXITCODE) { throw 'Release instruction upload failed.' }
+        # gh uses the same short-lived workflow token; no updater token is shipped to clients.
+      - name: Retain release files
+        uses: actions/upload-artifact@v4
+        with:
+          name: Lockvyn-Windows-release
+          path: dist/velopack/*
+          if-no-files-found: error
+          retention-days: 14

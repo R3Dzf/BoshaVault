@@ -1,6 +1,7 @@
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using BoshaVault.Core;
 
 namespace BoshaVault.Windows;
 
@@ -10,7 +11,13 @@ public sealed class DesktopPreferences
     public int AutoLockMinutes { get; set; } = 2;
     public bool TrayTipShown { get; set; }
     public bool BrowserAutofillEnabled { get; set; } = true;
-    private static readonly JsonSerializerOptions Options = new() { UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow, MaxDepth = 4 };
+    // Off only when the user explicitly chooses "Don't notify me again".
+    // Manual update checks remain available in Settings.
+    public bool UpdateNotificationsEnabled { get; set; } = true;
+    public PasswordOptions Generator { get; set; } = new();
+    // Public hostnames only (no credentials). Stored locally, outside the encrypted vault.
+    public List<DomainAliasGroup> DomainGroups { get; set; } = [];
+    private static readonly JsonSerializerOptions Options = new() { UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow, MaxDepth = 8 };
     public static bool ValidTimeout(int minutes) => minutes is 1 or 2 or 5 or 10;
 
     public static DesktopPreferences Load(string path)
@@ -18,9 +25,14 @@ public sealed class DesktopPreferences
         try
         {
             using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-            if (stream.Length > 2048) return new();
+            if (stream.Length > 131072) return new();
             var preferences = JsonSerializer.Deserialize<DesktopPreferences>(stream, Options);
-            return preferences is { Version: 1 } && ValidTimeout(preferences.AutoLockMinutes) ? preferences : new();
+            if (preferences is not { Version: 1 } || !ValidTimeout(preferences.AutoLockMinutes)) return new();
+            try { PasswordGenerator.Validate(preferences.Generator); }
+            catch (Exception ex) when (ex is VaultException or NullReferenceException) { preferences.Generator = new(); }
+            try { OriginPolicy.ValidateGroups(preferences.DomainGroups); }
+            catch (VaultException) { preferences.DomainGroups = []; }
+            return preferences;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { return new(); }
     }
@@ -28,6 +40,8 @@ public sealed class DesktopPreferences
     public void Save(string path)
     {
         if (Version != 1 || !ValidTimeout(AutoLockMinutes)) throw new ArgumentException("Invalid desktop preferences.");
+        PasswordGenerator.Validate(Generator);
+        OriginPolicy.ValidateGroups(DomainGroups);
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
         string temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try

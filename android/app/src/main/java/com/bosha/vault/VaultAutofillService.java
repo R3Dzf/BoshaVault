@@ -55,7 +55,7 @@ public final class VaultAutofillService extends AutofillService {
             if(target.user!=null)ids.add(target.user);
             if(target.password!=null)ids.add(target.password);
             RemoteViews label=new RemoteViews(getPackageName(),android.R.layout.simple_list_item_1);
-            label.setTextViewText(android.R.id.text1,"Fill with BoshaVault");
+            label.setTextViewText(android.R.id.text1,"Fill with Lockvyn");
             if(cancel.isCanceled()){return;}
             callback.onSuccess(new FillResponse.Builder()
                     .setAuthentication(ids.toArray(new AutofillId[0]),pending.getIntentSender(),label)

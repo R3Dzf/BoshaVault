@@ -1,10 +1,10 @@
-# Configure stable Android signing for BoshaVault
+# Configure stable Android signing for Lockvyn
 # Run on a trusted Windows machine, NOT on a shared or malware-infected PC.
 # This script never uploads the signing file to the repository.
 [CmdletBinding()]
 param(
-    [string]$KeystorePath = (Join-Path $env:USERPROFILE 'BoshaVault-Signing\BoshaVault-release.p12'),
-    [string]$Alias = 'boshavault-release',
+    [string]$KeystorePath = (Join-Path $env:USERPROFILE 'Lockvyn-Signing\Lockvyn-release.p12'),
+    [string]$Alias = 'lockvyn-release',
     [switch]$UseExisting
 )
 $ErrorActionPreference = 'Stop'
@@ -12,7 +12,7 @@ $repo = 'R3Dzf/BoshaVault'
 if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
     throw 'GitHub CLI (gh) is required. Install GitHub CLI and run gh auth login.'
 }
-if (-not (Get-Command keytool -ErrorAction SilentlyContinue)) {
+if (-not $UseExisting -and -not (Get-Command keytool -ErrorAction SilentlyContinue)) {
     throw 'Java JDK keytool is required. Install a current supported JDK first.'
 }
 & gh auth status | Out-Null
@@ -31,7 +31,7 @@ if (Test-Path -LiteralPath $KeystorePath) {
     New-Item -ItemType Directory -Path (Split-Path -Parent $KeystorePath) -Force | Out-Null
     Write-Host "Creating long-term signing certificate: $KeystorePath"
     Write-Host 'Choose a strong password at the keytool prompts; store it offline.'
-    & keytool -genkeypair -alias $Alias -keyalg RSA -keysize 4096 -validity 10000 -storetype PKCS12 -keystore $KeystorePath -dname 'CN=BoshaVault Android Release, O=BoshaVault, C=EG'
+    & keytool -genkeypair -alias $Alias -keyalg RSA -keysize 4096 -validity 10000 -storetype PKCS12 -keystore $KeystorePath -dname 'CN=Lockvyn Android Release, O=Lockvyn, C=EG'
     if ($LASTEXITCODE -ne 0) { throw 'keytool failed to create signing key.' }
 }
 # Restrict the local file permissions to the Windows account.
@@ -87,4 +87,4 @@ try {
 Write-Host 'Configured 3 Actions signing secrets (values were not printed).'
 Write-Host 'Back up the .p12 and password OFFLINE. If lost, future APK updates cannot use this identity.'
 Write-Host 'Existing installations signed by a DIFFERENT key cannot be updated in place.'
-Write-Host "To build: gh workflow run build.yml -R $repo --ref main -f signed_release=true"
+Write-Host 'Use release/android-v<versionName> at a tested source commit to publish the canonical Lockvyn Android app.'

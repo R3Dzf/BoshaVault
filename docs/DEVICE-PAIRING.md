@@ -1,0 +1,11 @@
+# Secure first-time device pairing (work in progress)
+
+Design target: **Add device** on the already connected, unlocked computer; **Connect to my PC** on Android whether a local vault exists or not. A two-minute QR contains the *session ID, public ECDH key and expiry only*. No `BVCLOUD1:` recovery code, refresh token or password appears in the QR.
+
+Protocol: both devices sign into **the same** Supabase account and satisfy any enrolled MFA. A disposable owner-scoped RLS-protected pairing row relays the Android ephemeral public key and subsequently the authenticated AES-256-GCM ciphertext. Both devices independently derive an ECDH P-256 shared secret and show the same six-digit short authentication string (SAS). The person must compare the number **on both screens** and approve on Windows before a recovery key is transferred. SAS mismatches, missing confirmation, expiry, cancelled sessions or offline failures must abort without changing either vault.
+
+The encrypted response contains the existing `BVCLOUD1:` cloud pairing information, authenticated to session ID and both public keys as AEAD additional data. A new phone uses its **local** master passphrase to decrypt the uploaded encrypted vault. An already-provisioned phone joins only if its vault ID and cloud owner match; a different vault is never overwritten. Successful completion enables existing auto-sync without exposing account tokens or unencrypted vaults to Supabase.
+
+**Important:** This branch is being developed. A cryptographic codec or DB migration alone is NOT a working pairing UI. Until both clients and end-to-end acceptance tests pass, keep the original one-time pairing as an explicitly labelled advanced fallback. Never place the permanent recovery code in logs, URLs, screenshots, telemetry or bug reports.
+
+Trust assumptions: comparison of SAS on the two screens is required to detect a man-in-the-middle, even for a compromised signaling server or a stolen account session. The owner still has to review and authorize access; account login alone does not authorize releasing a vault key. Expired rows must not be reusable and old sessions must not yield a recovery key. Separate sessions are required for every new device. Revoking future synchronization does not erase ciphertext or keys held by a previously trusted device.

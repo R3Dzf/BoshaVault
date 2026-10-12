@@ -7,6 +7,18 @@
   const pwSelector = 'input[type="password"],input[autocomplete="current-password"],input[autocomplete="new-password"]';
   let frame=null, shadow=null, panel=null, focus=null, sequence=0, draft=null, origin=location.origin;
   let savedMatches=[];
+  // Only a local UI preference is stored by the extension. Never persist
+  // usernames, passwords, unlock state, recovery material or native replies.
+  let quietMode=false;
+  chrome.storage?.local?.get?.({quietMode:false},prefs=>{
+    quietMode=prefs?.quietMode===true;
+    if(quietMode)hide();
+  });
+  chrome.storage?.onChanged?.addListener?.((changes,area)=>{
+    if(area!=="local" || !changes.quietMode)return;
+    quietMode=changes.quietMode.newValue===true;
+    if(quietMode)hide();
+  });
 
   function visible(input) {
     if (!(input instanceof HTMLInputElement) || !input.isConnected ||
@@ -62,7 +74,8 @@
     frame.style.cssText="position:fixed;z-index:2147483646;width:310px;max-width:calc(100vw - 16px);pointer-events:auto;";
     shadow=frame.attachShadow({mode:"closed"});
     const style=document.createElement("style");
-    style.textContent=".panel{box-sizing:border-box;width:100%;background:#fff;color:#242335;border:1px solid #dcd5f9;border-radius:12px;box-shadow:0 9px 26px #18122a3b;padding:10px;max-height:min(420px,76vh);overflow-y:auto;overscroll-behavior:contain;font:13px system-ui,sans-serif}.top{font-weight:700;padding:5px;color:#7762df}.sub{font-size:11px;color:#777;overflow-wrap:anywhere;padding:0 6px 7px}button{display:block;text-align:left;width:100%;background:#f5f3ff;color:#32276c;border:0;border-radius:8px;padding:10px;margin:5px 0;cursor:pointer;font:13px system-ui,sans-serif}button:hover{background:#e8e0ff}button.primary{color:#fff;background:#7762df}button.primary:hover{background:#6250c1}.msg{padding:9px;line-height:1.4;white-space:pre-wrap}";
+    style.textContent=".panel{box-sizing:border-box;width:100%;background:#fff;color:#242335;border:1px solid #e1e5ef;border-radius:14px;box-shadow:0 6px 18px #171b2e1f;padding:10px;max-height:min(390px,70vh);overflow-y:auto;scrollbar-width:thin;scrollbar-color:#b9abea transparent;overscroll-behavior:contain;font:13px system-ui,sans-serif}.top{font-weight:700;padding:5px;color:#6558d9}.sub{font-size:11px;color:#777;overflow-wrap:anywhere;padding:0 6px 7px}button{display:block;text-align:left;width:100%;background:#efedff;color:#32276c;border:0;border-radius:8px;padding:10px;margin:5px 0;cursor:pointer;font:13px system-ui,sans-serif}button:hover{background:#e8e0ff}button.primary{color:#fff;background:#6558d9}button.primary:hover{background:#6250c1}.msg{padding:9px;line-height:1.4;white-space:pre-wrap}";
+    style.textContent += ".panel::-webkit-scrollbar{width:6px}.panel::-webkit-scrollbar-track{background:transparent}.panel::-webkit-scrollbar-thumb{background:#b9abea;border-radius:10px}.account-search{box-sizing:border-box;width:100%;height:39px;background:#faf9ff;color:#242335;border:1px solid #d8d2ed;border-radius:9px;padding:8px 11px;font:13px system-ui,sans-serif;outline:none}.account-search:focus{border-color:#6558d9}.section{font-size:11px;color:#70698a;padding:9px 6px 3px;font-weight:600}";
     panel=document.createElement("div");
     panel.className="panel";
     shadow.append(style,panel);
@@ -85,13 +98,14 @@
     div.textContent=text;
     panel.append(div);
   }
-  function button(text,action,primary=false) {
+  function button(text,action,primary=false,container=panel) {
     const el=document.createElement("button");
     el.type="button";el.textContent=text;
     if(primary)el.className="primary";
     el.addEventListener("pointerdown",e=>e.preventDefault());
     el.addEventListener("click",e=>{e.stopPropagation();action();});
-    panel.append(el);
+    container.append(el);
+    return el;
   }
   function message(text) {if(!panel)return;panel.replaceChildren();line(text);}
   function assign(input,value) {
@@ -115,13 +129,13 @@
   function title(ctx) {
     setup();
     panel.replaceChildren();
-    line("🔐 BoshaVault","top");
+    line("🔐 Lockvyn","top");
     line(location.hostname,"sub");
     position(ctx.anchor);
   }
   async function fill(ctx,id) {
     const at=origin;
-    message("Confirm this login in the BoshaVault Windows window…");
+    message("Approve the small Lockvyn confirmation, without reopening the full vault…");
     try {
       const answer=await chrome.runtime.sendMessage({op:"fill",entryId:id});
       if(at!==location.origin || focus?.anchor!==ctx.anchor ||
@@ -131,21 +145,21 @@
       if(ctx.user?.isConnected) assign(ctx.user,answer.username);
       if(ctx.pass?.isConnected) {
         if(!assign(ctx.pass,answer.password)){
-          message("Site password field rejected the password. Use BoshaVault's Copy password as a fallback.");
+          message("Site password field rejected the password. Use Lockvyn's Copy password as a fallback.");
           return;
         }
         hide();
       }else {
         message("Username filled. Continue to the password step and select the same account again.");
       }
-    } catch {message("BoshaVault did not respond. Please retry.");}
+    } catch {message("Lockvyn did not respond. Please retry.");}
   }
   function generate(ctx,length,symbols) {
     if (!visible(ctx.pass) || !safeFormDestination(ctx.form)) {hide();return;}
     const allowed=ctx.pass.maxLength>=0?ctx.pass.maxLength:64;
     const actual=Math.min(length,allowed);
     if(actual<16) {
-      message("This page limits passwords to fewer than 16 characters. BoshaVault won't generate a weak password.");
+      message("This page limits passwords to fewer than 16 characters. Lockvyn won't generate a weak password.");
       return;
     }
     // Only the deliberate button click creates a secret.
@@ -162,7 +176,7 @@
       " Complete signup on the website separately.");
     const username=(ctx.user?.value||"").trim();
     line("Username/email: "+(username || "Not found here — enter it in Windows before saving."),"sub");
-    button("Save username + password in BoshaVault",()=>save(ctx),true);
+    button("Save username + password in Lockvyn",()=>save(ctx),true);
     for(const entry of savedMatches.filter(e=>!e.related).slice(0,5)) {
       if(typeof entry.id!=="string" || typeof entry.username!=="string")continue;
       button("Update saved password · "+entry.username,()=>updatePassword(ctx,entry.id));
@@ -176,7 +190,7 @@
     }
     const sentOrigin=location.origin;
     const username=(ctx.user?.value||"").trim();
-    message("Review the saved account and new password change in BoshaVault Windows…");
+    message("Review the saved account and new password change in Lockvyn Windows…");
     try {
       const answer=await chrome.runtime.sendMessage({
         op:"update",entryId:id,username,password:draft.password
@@ -194,11 +208,11 @@
   }
   async function save(ctx) {
     if(!liveDraft(ctx)){message("The form changed. Focus the password field again to regenerate.");return;}
-    if (!safeFormDestination(ctx.form)){message("This form submits to a different site. BoshaVault will not save it.");return;}
+    if (!safeFormDestination(ctx.form)){message("This form submits to a different site. Lockvyn will not save it.");return;}
     if(location.origin!==origin || !ctx.pass.isConnected){hide();return;}
     const username=(ctx.user?.value||"").trim();
     const password=draft.password;
-    message("Review the website and username in BoshaVault Windows, then choose Save encrypted login.");
+    message("Review the website and username in Lockvyn Windows, then choose Save encrypted login.");
     try {
       // Username and generated password leave the content script ONLY at this
       // explicit Save click. No background password-field reading or storage.
@@ -206,49 +220,105 @@
       if(location.origin!==origin || !ctx.pass.isConnected){hide();return;}
       if(answer?.status==="saved"){
         draft=null;
-        message("Saved encrypted in BoshaVault. Submit the signup form on this website when ready.");
+        message("Saved encrypted in Lockvyn. Submit the signup form on this website when ready.");
       }else if(answer?.status==="locked"){
-        message("Unlock BoshaVault on Windows, then focus this field and click Save again.");
+        message("Unlock Lockvyn on Windows, then focus this field and click Save again.");
       }else{
         message(answer?.message || "Not saved. The password is still in the form — do not leave this page until you save it.");
       }
-    } catch {message("Could not save. Keep this page open and retry after starting BoshaVault.");}
+    } catch {message("Could not save. Keep this page open and retry after starting Lockvyn.");}
   }
   function render(ctx,reply) {
-    if(!(ctx.pass?.isConnected || ctx.user?.isConnected) || !focus || focus.anchor!==ctx.anchor || location.origin!==origin)return;
+    if(!(ctx.pass?.isConnected || ctx.user?.isConnected) ||
+       !focus || focus.anchor!==ctx.anchor || location.origin!==origin)return;
     if(ctx.pass && liveDraft(ctx)){showDraft(ctx,false);return;}
     title(ctx);
     if(typeof reply?.warning==="string" && reply.warning.length>0)
       line("⚠️ "+reply.warning);
-    savedMatches=reply?.status==="ok" && Array.isArray(reply.accounts) ? reply.accounts.slice(0,10) : [];
+    savedMatches=reply?.status==="ok" && Array.isArray(reply.accounts)
+      ? reply.accounts.slice(0,50) : [];
+    const more=document.createElement("div");
+    more.style.display="none";
+    let extraCount=0;
     if(reply?.status==="ok" && Array.isArray(reply.accounts)) {
-      for(const account of reply.accounts.slice(0,20)){
-        if(!account || typeof account.id!=="string" || typeof account.username!=="string")continue;
-        const exact = account.related !== true;
-        const savedHost = typeof account.website === "string" ? account.website : "";
-        const hint = exact ? "✓ Exact match" : "↗ Related domain · Review before filling";
-        button(hint+" · "+(account.title||"Saved login")+" · "+account.username+
-          (exact?"":" · saved: "+savedHost),()=>fill(ctx,account.id),exact);
-      }
-      if(reply.accounts.some(x=>x?.related===true)){
-        line("Related accounts are from another subdomain of this site's registrable domain. " +
-          "Only fill after checking both URLs in the Windows confirmation.","sub");
-      }
-      if(reply.accounts.length)line("Creating a different account?","sub");
-      else line("No saved accounts for this HTTPS host. Try saving this website, or check the saved website address.","sub");
-    } else if(reply?.status==="locked"){
-      button("Unlock BoshaVault on Windows",async()=>{
-        message("Unlock in BoshaVault, then focus the password field again.");
+      const accounts=reply.accounts.filter(a=>a && typeof a.id==="string" &&
+        typeof a.username==="string").slice(0,50);
+      if(accounts.length) {
+        const search=document.createElement("input");
+        search.type="search";search.className="account-search";
+        search.placeholder="Search email or account…";
+        search.setAttribute("aria-label","Search saved login accounts");
+        panel.append(search);
+        const entries=document.createElement("div");
+        panel.append(entries);
+        const noResults=document.createElement("div");
+        noResults.className="sub";noResults.textContent="No matching saved account.";
+        noResults.style.display="none";panel.append(noResults);
+        const normalizedEmail=(ctx.user?.value||"").trim().toLocaleLowerCase();
+        accounts.sort((a,b)=>{
+          const score=x=>x.username.toLocaleLowerCase()===normalizedEmail && normalizedEmail ? -1 :
+            x.related!==true ? 0 : x.groupMatched===true ? 1 : 2;
+          return score(a)-score(b);
+        });
+        const rows=[];
+        let lastSection="";
+        for(const account of accounts){
+          const section=account.related!==true ? "Exact website" :
+            account.groupMatched===true ? "Your trusted domain group" : "Related website · review before filling";
+          if(section!==lastSection){
+            const heading=document.createElement("div");heading.className="section";
+            heading.textContent=section;entries.append(heading);
+            rows.push({element:heading,key:"",isHeading:true});
+            lastSection=section;
+          }
+          const savedHost=typeof account.website==="string"?account.website:"";
+          const exact=account.related!==true;
+          const entryLabel=(account.title||"Saved login")+" · "+account.username+
+            (exact?"":" · "+savedHost);
+          const el=button(entryLabel,()=>fill(ctx,account.id),exact,entries);
+          rows.push({element:el,key:(account.username+" "+(account.title||"")+" "+savedHost).toLocaleLowerCase()});
+        }
+        search.addEventListener("input",()=>{
+          const q=search.value.toLocaleLowerCase().trim();
+          let count=0;
+          for(const row of rows){
+            if(row.isHeading)continue;
+            const show=row.key.includes(q);row.element.style.display=show?"block":"none";
+            if(show)count++;
+          }
+          // Hide an entire empty section after a filter has been applied.
+          let heading=null,shown=0;
+          for(const row of [...rows,{isHeading:true,element:null}]){
+            if(row.isHeading){
+              if(heading)heading.style.display=shown?"block":"none";
+              heading=row.element;shown=0;
+            }else if(row.element.style.display!=="none")shown++;
+          }
+          noResults.style.display=count?"none":"block";
+        });
+      }else line("No saved login matched this website.","sub");
+    } else if(reply?.status==="locked") {
+      button("Unlock Lockvyn",async()=>{
+        message("Unlock your vault, then select the account here.");
         await chrome.runtime.sendMessage({op:"open"}).catch(()=>{});
-      });
+      },true);
     } else if(reply?.status==="unavailable"){
-      line("Windows vault is disconnected. Generating still works, but saving needs BoshaVault running.");
+      line("Lockvyn on Windows is not connected.","sub");
     }
-    button("Save current website in BoshaVault",()=>capture(ctx),!ctx.pass);
+    button("Save current website",()=>capture(ctx),false,more);extraCount++;
     if(ctx.pass) {
-      button("Generate strong password · 24 characters",()=>generate(ctx,24,true),true);
-      button("Generate extra-long password · 32 characters",()=>generate(ctx,32,true));
-      button("Generate without symbols · 24 characters",()=>generate(ctx,24,false));
+      button("Generate strong password",()=>generate(ctx,24,true),!savedMatches.length,
+        savedMatches.length?more:panel);
+      if(savedMatches.length)extraCount++;
+      button("Generate 32-character password",()=>generate(ctx,32,true),false,more);
+      button("Generate without symbols",()=>generate(ctx,24,false),false,more);
+      extraCount+=2;
+    }
+    if(extraCount){
+      button("More options ▾",()=>{
+        more.style.display=more.style.display==="none"?"block":"none";
+      });
+      panel.append(more);
     }
     position(ctx.anchor);
   }
@@ -256,12 +326,12 @@
     if(!safeFormDestination(ctx.form)) {message("This page form targets another origin. Saving is blocked.");return;}
     const previousOrigin=origin;
     const username=(ctx.user?.isConnected?ctx.user.value:"").trim();
-    message("BoshaVault Windows will open a prefilled login form. Review the exact site before saving.");
+    message("Lockvyn Windows will open a prefilled login form. Review the exact site before saving.");
     try {
       const reply=await chrome.runtime.sendMessage({op:"capture",username});
       if(location.origin!==previousOrigin || !ctx.anchor.isConnected){hide();return;}
-      message(reply?.message || "Finish adding the login in BoshaVault Windows.");
-    }catch {message("Could not connect to BoshaVault Windows. Check that it is open and unlocked.");}
+      message(reply?.message || "Finish adding the login in Lockvyn Windows.");
+    }catch {message("Could not connect to Lockvyn Windows. Check that it is open and unlocked.");}
   }
   let debounce;
   function showForInput(input) {
@@ -280,7 +350,7 @@
   }
   document.addEventListener("focusin",event=>{
     if(frame && (event.target===frame || frame.contains(event.target)))return;
-    showForInput(event.target);
+    if(!quietMode)showForInput(event.target);
   },true);
   chrome.runtime.onMessage.addListener((message,_sender,reply)=>{
     if(message?.op==="showSuggestions"){

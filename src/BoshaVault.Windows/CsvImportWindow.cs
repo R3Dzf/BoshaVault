@@ -21,8 +21,8 @@ public partial class MainWindow
             SelectedIndex = 0, Margin = new Thickness(0, 6, 0, 12), Padding = new Thickness(10)
         };
         formatDialog.Body.Children.Add(source);
-        formatDialog.Label("Before importing: export a verified encrypted BoshaVault backup. After a successful import, remove the plaintext CSV through your normal file-management process and review any other copies or backups. Deleting a CSV cannot guarantee secure erasure on an SSD.");
-        formatDialog.Action("Choose CSV and preview", () => formatDialog.DialogResult = true, true);
+        formatDialog.Label("Before importing: export a verified encrypted Lockvyn backup. After a successful import, remove the plaintext CSV through your normal file-management process and review any other copies or backups. Deleting a CSV cannot guarantee secure erasure on an SSD.");
+        formatDialog.Action("Choose CSV and review", () => formatDialog.DialogResult = true, true);
         if (formatDialog.ShowDialog() != true) return;
 
         var open = new OpenFileDialog {
@@ -47,7 +47,7 @@ public partial class MainWindow
         {
             MessageBox.Show(owner, ex is VaultException ? ex.Message :
                 "Cannot read the CSV file. The vault has not been modified.",
-                "BoshaVault import", MessageBoxButton.OK, MessageBoxImage.Warning);
+                "Lockvyn import", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
         finally { if (contents.Length != 0) CryptographicOperations.ZeroMemory(contents); }
@@ -58,7 +58,7 @@ public partial class MainWindow
             preview.Label($"CSV records: {plan.SourceRows}. Ready: {plan.Entries.Count}. " +
                 $"Skipped duplicates: {plan.SkippedDuplicate}. Unsupported/insecure: {plan.SkippedUnsafe}. " +
                 $"Non-login records: {plan.SkippedNonLogin}.");
-            preview.Label("No passwords will be displayed in this preview. Entries are added atomically, preserving your existing logins and encrypted file. HTTPS hostnames must match exactly for Autofill.");
+            preview.Label("No passwords will be displayed in this review. Entries are added atomically, preserving your existing logins and encrypted file. HTTPS hostnames must match exactly for Autofill.");
             foreach (var entry in plan.Entries.Take(20))
             {
                 preview.Label(entry.Title + " · " + OriginPolicy.ExactHost(entry.Url) +
@@ -90,7 +90,7 @@ public partial class MainWindow
             if (preview.ShowDialog() != true || !approved) return;
             if (generation != stamp || session != active || !active.IsOpen)
             {
-                MessageBox.Show(owner, "Vault locked during import. Unlock and retry.", "BoshaVault");
+                MessageBox.Show(owner, "Vault locked during import. Unlock and retry.", "Lockvyn");
                 return;
             }
             try
@@ -101,13 +101,13 @@ public partial class MainWindow
                 SetStatus($"Imported {imported} encrypted logins. The plaintext CSV remains on disk until you remove it.");
                 MessageBox.Show(owner, $"Imported {imported} encrypted logins.\n\n" +
                     "Important: The original plaintext CSV has NOT been deleted. Handle it safely and verify the imported accounts.",
-                    "BoshaVault import completed", MessageBoxButton.OK, MessageBoxImage.Information);
+                    "Lockvyn import completed", MessageBoxButton.OK, MessageBoxImage.Information);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or VaultException)
             {
                 MessageBox.Show(owner, ex is VaultException ? ex.Message :
                     "Import could not be completed; no partial import was committed.",
-                    "BoshaVault import failed", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    "Lockvyn import failed", MessageBoxButton.OK, MessageBoxImage.Warning);
             }
         }
     }

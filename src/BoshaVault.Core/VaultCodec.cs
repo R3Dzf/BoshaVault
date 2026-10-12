@@ -96,18 +96,28 @@ public static class VaultCodec
             using var doc = JsonDocument.Parse(plain, new() { MaxDepth = 16 });
             JsonOptions.NoDuplicates(doc.RootElement);
             var data = JsonSerializer.Deserialize<VaultData>(plain, JsonOptions.Strict) ?? throw new VaultException("Invalid vault contents.");
+            if (!doc.RootElement.TryGetProperty("schema", out _) ||
+                (data.Schema == 2 && (!doc.RootElement.TryGetProperty("folders", out _) ||
+                    doc.RootElement.GetProperty("entries").EnumerateArray().Any(entry =>
+                        !entry.TryGetProperty("purged", out _) || !entry.TryGetProperty("reviewAcknowledgement", out _)))))
+                throw new VaultException("Missing vault properties.");
             ValidateData(data, e.VaultId);
+            if (data.Schema == 1) FolderCatalog.Upgrade(data);
             return data;
         }
-        catch (Exception ex) when (ex is JsonException or ArgumentException or NullReferenceException)
+        catch (Exception ex) when (ex is JsonException or ArgumentException or NullReferenceException or KeyNotFoundException or InvalidOperationException)
         { throw new VaultException("Invalid vault contents.", ex); }
         finally { CryptographicOperations.ZeroMemory(plain); }
     }
 
     public static void ValidateData(VaultData data, string vaultId)
     {
-        if (data.Schema != 1 || data.VaultId != vaultId || data.Revision < 0 || data.Entries == null || data.Entries.Count > MaxEntries || data.TrustedApps == null || data.TrustedApps.Count > 200)
+        if (data.Schema is not (1 or 2) || data.VaultId != vaultId || data.Revision < 0 || data.Entries == null || data.Entries.Count > MaxEntries || data.TrustedApps == null || data.TrustedApps.Count > 200)
             throw new VaultException("Invalid vault contents.");
+        if (data.Folders == null || data.Folders.Count > FolderCatalog.MaxFolders ||
+            data.Folders.Distinct(StringComparer.OrdinalIgnoreCase).Count() != data.Folders.Count ||
+            data.Folders.Any(f => f == null || FolderCatalog.Normalize(f) != f))
+            throw new VaultException("Invalid folder catalog.");
         var ids = new HashSet<string>(StringComparer.Ordinal);
         foreach (var e in data.Entries)
         {
@@ -118,6 +128,14 @@ public static class VaultCodec
             if (e.Title == null || e.Title.Length is 0 or > 200 || e.Username == null || e.Username.Length > 2000 || e.Password == null || e.Password.Length > 4096 || e.Url == null || e.Url.Length > 2048 || e.Notes == null || e.Notes.Length > 32000 || e.Folder == null || e.Folder.Length > 100)
                 throw new VaultException("Invalid entry fields.");
             if (e.Url.Length > 0) OriginPolicy.ExactHost(e.Url);
+            if (e.ReviewAcknowledgement == null || (e.ReviewAcknowledgement.Length != 0 &&
+                !System.Text.RegularExpressions.Regex.IsMatch(e.ReviewAcknowledgement, "^[a-f0-9]{64}$")))
+                throw new VaultException("Invalid review acknowledgement.");
+            if (data.Schema == 1 && (e.Purged || e.ReviewAcknowledgement.Length > 0))
+                throw new VaultException("New vault features require schema 2.");
+            if (e.Purged && (!e.Deleted || e.Title != "Deleted login" || e.Username.Length != 0 ||
+                e.Password.Length != 0 || e.Url.Length != 0 || e.Notes.Length != 0 || e.Folder.Length != 0 ||
+                e.Favorite || e.ReviewAcknowledgement.Length != 0)) throw new VaultException("Invalid permanent deletion marker.");
         }
         foreach (var app in data.TrustedApps)
             if (app == null || app.Package == null || app.Package.Length is < 3 or > 200 || app.Certificate == null || !System.Text.RegularExpressions.Regex.IsMatch(app.Certificate, "^[a-f0-9]{64}$") || app.EntryIds == null || app.EntryIds.Count > MaxEntries || app.EntryIds.Any(x => !IsId(x)))

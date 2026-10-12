@@ -9,7 +9,7 @@ namespace BoshaVault.Core;
 /// <summary>
 /// Optional transport for already E2EE-encrypted snapshots. Never accepts
 /// plaintext vault records or recovery keys. Authentication is supplied by
-/// a separate Supabase Auth session that has not yet been wired into the UI.
+/// a separate Supabase Auth session supplied by the opt-in cloud dialog.
 /// </summary>
 public sealed class SupabaseSnapshotTransport(HttpClient http, Uri projectUrl,
     string publishableKey, Func<CancellationToken,Task<string>> userAccessToken)
@@ -23,6 +23,32 @@ public sealed class SupabaseSnapshotTransport(HttpClient http, Uri projectUrl,
         [JsonPropertyName("ciphertext_sha256")] public string CiphertextSha256 { get; set; } = "";
     }
     public sealed record RemoteEncryptedSnapshot(Guid DeviceSlot,byte[] Blob);
+    public sealed record RemoteSnapshotMetadata(Guid DeviceSlot,string Digest);
+
+    public async Task<IReadOnlyList<RemoteSnapshotMetadata>> ListMetadataAsync(Guid vaultSlot, CancellationToken ct = default)
+    {
+        if (vaultSlot == Guid.Empty) throw new VaultException("Invalid cloud vault identifier.");
+        using var req = await MakeRequest(HttpMethod.Get, "rest/v1/opaque_device_snapshots?select=device_slot,ciphertext_sha256&vault_slot=eq." + vaultSlot.ToString("D") + "&order=device_slot&limit=64", ct);
+        using var res = await http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+        if (!res.IsSuccessStatusCode) throw new VaultException("Cloud sync needs sign-in or could not be reached. Open Sync to check your account.");
+        byte[] bytes = await SupabaseCloudAccount.ReadBounded(res.Content, 65536, ct);
+        try
+        {
+            using var json = JsonDocument.Parse(bytes, new JsonDocumentOptions { MaxDepth = 4 });
+            JsonOptions.NoDuplicates(json.RootElement);
+            if (json.RootElement.ValueKind != JsonValueKind.Array || json.RootElement.GetArrayLength() > 64) throw new VaultException("Invalid sync metadata.");
+            var result = new List<RemoteSnapshotMetadata>(); var ids = new HashSet<Guid>();
+            foreach (var row in json.RootElement.EnumerateArray())
+            {
+                Guid id = row.GetProperty("device_slot").GetGuid(); string digest = row.GetProperty("ciphertext_sha256").GetString() ?? "";
+                if (id == Guid.Empty || !ids.Add(id) || digest.Length != 64 || digest.Any(c => !char.IsAsciiHexDigit(c))) throw new VaultException("Invalid sync metadata.");
+                result.Add(new(id, digest.ToLowerInvariant()));
+            }
+            return result;
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException or FormatException) { throw new VaultException("Invalid sync metadata.", ex); }
+        finally { CryptographicOperations.ZeroMemory(bytes); }
+    }
 
     private Uri BaseUri
     {
@@ -83,7 +109,7 @@ public sealed class SupabaseSnapshotTransport(HttpClient http, Uri projectUrl,
         using var req=await MakeRequest(HttpMethod.Get,uri,ct);
         using var res=await http.SendAsync(req,HttpCompletionOption.ResponseHeadersRead,ct);
         if(!res.IsSuccessStatusCode)throw new VaultException("Encrypted cloud download rejected by Supabase.");
-        byte[] content=await res.Content.ReadAsByteArrayAsync(ct);
+        byte[] content=await SupabaseCloudAccount.ReadBounded(res.Content,16_000_000,ct);
         try
         {
             if(content.Length>16_000_000)throw new VaultException("Too many cloud snapshots; refusing unbounded response.");
@@ -108,7 +134,7 @@ public sealed class SupabaseSnapshotTransport(HttpClient http, Uri projectUrl,
             }
             return results;
         }
-        catch (Exception ex) when (ex is JsonException or FormatException or KeyNotFoundException)
+        catch (Exception ex) when (ex is JsonException or FormatException or KeyNotFoundException or InvalidOperationException)
         {
             throw new VaultException("Invalid cloud transport response.",ex);
         }

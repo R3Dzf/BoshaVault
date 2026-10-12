@@ -53,7 +53,7 @@ public final class VaultEngine implements AutoCloseable {
         Cipher c=Cipher.getInstance("AES/GCM/NoPadding");c.init(Cipher.DECRYPT_MODE,new SecretKeySpec(k,"AES"),new GCMParameterSpec(128,nonce));c.updateAAD(aad.getBytes(StandardCharsets.UTF_8));
         try{return c.doFinal(combined);}catch(AEADBadTagException e){throw new Exception("Incorrect passphrase or damaged / modified vault.");}
     }
-    private static JSONObject parse(byte[] bytes)throws Exception{
+    static JSONObject parse(byte[] bytes)throws Exception{
         if(bytes.length<100||bytes.length>MAX_BYTES)throw new Exception("Invalid vault file size.");
         JSONObject e=StrictJson.object(utf8(bytes));StrictJson.keys(e,"format","version","vaultId","keyEpoch","kdf","wrap","payload");
         if(!e.getString("format").equals("BoshaVault")||StrictJson.number(e,"version")!=1||!id(e.getString("vaultId")))throw new Exception("Unsupported vault format.");
@@ -73,20 +73,23 @@ public final class VaultEngine implements AutoCloseable {
     }
     private static JSONObject openBody(JSONObject e,byte[] k)throws Exception{
         byte[] plain=decrypt(k,e.getJSONObject("payload"),bodyAad(e));
-        try{JSONObject d=StrictJson.object(utf8(plain));validateData(d,e.getString("vaultId"));return d;}finally{Arrays.fill(plain,(byte)0);}
+        try{JSONObject d=StrictJson.object(utf8(plain));validateData(d,e.getString("vaultId"));if(d.getLong("schema")==1)FolderCatalog.upgrade(d);return d;}finally{Arrays.fill(plain,(byte)0);}
     }
     private static void validateData(JSONObject d,String vaultId)throws Exception{
-        StrictJson.keys(d,"schema","vaultId","revision","entries","trustedApps");
-        if(StrictJson.number(d,"schema")!=1||!d.getString("vaultId").equals(vaultId)||StrictJson.number(d,"revision")<0)throw new Exception("Invalid vault contents.");
+        long schema=StrictJson.number(d,"schema");
+        if(schema==1)StrictJson.keys(d,"schema","vaultId","revision","entries","trustedApps");else StrictJson.keys(d,"schema","vaultId","revision","entries","trustedApps","folders");
+        if((schema!=1&&schema!=2)||!d.getString("vaultId").equals(vaultId)||StrictJson.number(d,"revision")<0)throw new Exception("Invalid vault contents.");
         JSONArray entries=d.getJSONArray("entries"),apps=d.getJSONArray("trustedApps");if(entries.length()>10000||apps.length()>200)throw new Exception("Vault limit exceeded.");
+        if(schema==2){JSONArray folders=d.getJSONArray("folders");if(folders.length()>FolderCatalog.MAX_FOLDERS)throw new Exception("Folder limit exceeded.");Set<String> names=new TreeSet<>(String.CASE_INSENSITIVE_ORDER);for(int i=0;i<folders.length();i++){String f=folders.getString(i);if(!FolderCatalog.normalize(f).equals(f)||!names.add(f))throw new Exception("Invalid folder catalog.");}}
         Set<String> ids=new HashSet<>();
         for(int i=0;i<entries.length();i++){
-            JSONObject x=entries.getJSONObject(i);StrictJson.keys(x,"id","title","username","password","url","notes","folder","favorite","deleted","updatedUtc","clock");
+            JSONObject x=entries.getJSONObject(i);if(schema==1)StrictJson.keys(x,"id","title","username","password","url","notes","folder","favorite","deleted","updatedUtc","clock");else StrictJson.keys(x,"id","title","username","password","url","notes","folder","favorite","deleted","purged","reviewAcknowledgement","updatedUtc","clock");
             if(!id(x.getString("id"))||!ids.add(x.getString("id")))throw new Exception("Invalid entry identity.");
             String[] fields={"title","username","password","url","notes","folder"};int[] sizes={200,2000,4096,2048,32000,100};
             for(int j=0;j<fields.length;j++)if(x.getString(fields[j]).length()>sizes[j])throw new Exception("Entry field too large.");
             if(x.getString("title").length()==0)throw new Exception("Entry needs a name.");
             if(!(x.get("favorite") instanceof Boolean)||!(x.get("deleted") instanceof Boolean))throw new Exception("Invalid boolean field.");
+            if(schema==2){if(!(x.get("purged")instanceof Boolean))throw new Exception("Invalid permanent deletion marker.");String ack=x.getString("reviewAcknowledgement");if(!ack.isEmpty()&&!ack.matches("[a-f0-9]{64}"))throw new Exception("Invalid review acknowledgement.");if(x.getBoolean("purged")&&(!x.getBoolean("deleted")||!x.getString("title").equals("Deleted login")||!x.getString("username").isEmpty()||!x.getString("password").isEmpty()||!x.getString("url").isEmpty()||!x.getString("notes").isEmpty()||!x.getString("folder").isEmpty()||x.getBoolean("favorite")||!ack.isEmpty()))throw new Exception("Invalid permanent deletion marker.");}
             Instant.parse(x.getString("updatedUtc"));if(x.getString("url").length()>0)host(x.getString("url"));
             JSONObject clocks=x.getJSONObject("clock");if(clocks.length()<1||clocks.length()>64)throw new Exception("Invalid revision clock.");
             for(Iterator<String> it=clocks.keys();it.hasNext();){String n=it.next();long v=StrictJson.number(clocks,n);if(!id(n)||v<1||v>1000000000L)throw new Exception("Invalid revision clock.");}
@@ -97,7 +100,7 @@ public final class VaultEngine implements AutoCloseable {
         newPassword(password);if(path.exists())throw new Exception("A vault already exists.");
         String vaultId=UUID.randomUUID().toString();JSONObject h=new JSONObject().put("name","argon2id").put("memoryKiB",65536).put("iterations",3).put("parallelism",4).put("salt",b64(random(16)));
         JSONObject env=new JSONObject().put("format","BoshaVault").put("version",1).put("vaultId",vaultId).put("keyEpoch",1).put("kdf",h);byte[] secret=random(32),kek=derive(password,h);
-        try{env.put("wrap",encrypt(kek,secret,wrapAad(env)));JSONObject body=new JSONObject().put("schema",1).put("vaultId",vaultId).put("revision",0).put("entries",new JSONArray()).put("trustedApps",new JSONArray());byte[] out=seal(env,body,secret);write(out,null,false);key=secret;envelope=env;data=body;hash=sha(out);}
+        try{env.put("wrap",encrypt(kek,secret,wrapAad(env)));JSONObject body=new JSONObject().put("schema",2).put("vaultId",vaultId).put("revision",0).put("entries",new JSONArray()).put("trustedApps",new JSONArray()).put("folders",new JSONArray(Arrays.asList(FolderCatalog.DEFAULTS)));byte[] out=seal(env,body,secret);write(out,null,false);key=secret;envelope=env;data=body;hash=sha(out);}
         catch(Exception e){Arrays.fill(secret,(byte)0);throw e;}finally{Arrays.fill(kek,(byte)0);}
     }
     public synchronized void open(String password)throws Exception{
@@ -108,11 +111,25 @@ public final class VaultEngine implements AutoCloseable {
     public synchronized void openWithKey(byte[] secret)throws Exception{byte[] bytes=read(path);JSONObject e=parse(bytes),body=openBody(e,secret);close();key=secret.clone();envelope=e;data=body;hash=sha(bytes);}
     public synchronized byte[] biometricKey()throws Exception{ensure();return key.clone();}
     public synchronized JSONObject snapshot()throws Exception{ensure();return new JSONObject(data.toString());}
-    public static JSONObject blank()throws Exception{return new JSONObject().put("id",UUID.randomUUID().toString()).put("title","").put("username","").put("password","").put("url","").put("notes","").put("folder","Personal").put("favorite",false).put("deleted",false).put("updatedUtc",Instant.now().toString()).put("clock",new JSONObject());}
+    public static JSONObject blank()throws Exception{return new JSONObject().put("id",UUID.randomUUID().toString()).put("title","").put("username","").put("password","").put("url","").put("notes","").put("folder","Personal").put("favorite",false).put("deleted",false).put("purged",false).put("reviewAcknowledgement","").put("updatedUtc",Instant.now().toString()).put("clock",new JSONObject());}
     public synchronized void upsert(JSONObject entry)throws Exception{
         ensure();JSONObject candidate=new JSONObject(data.toString()),copy=new JSONObject(entry.toString());JSONArray list=candidate.getJSONArray("entries"),next=new JSONArray();JSONObject clocks=new JSONObject();
-        for(int i=0;i<list.length();i++){JSONObject x=list.getJSONObject(i);if(x.getString("id").equals(copy.getString("id")))clocks=new JSONObject(x.getJSONObject("clock").toString());else next.put(x);}
+        if(copy.optBoolean("purged",false))throw new Exception("A permanently deleted login cannot be restored.");
+        String folder=copy.getString("folder").trim();if(folder.isEmpty())folder="Personal";copy.put("folder",FolderCatalog.normalize(folder));FolderCatalog.add(candidate,copy.getString("folder"));
+        JSONArray folderNames=candidate.getJSONArray("folders");for(int i=0;i<folderNames.length();i++)if(folderNames.getString(i).equalsIgnoreCase(copy.getString("folder"))){copy.put("folder",folderNames.getString(i));break;}
+        for(int i=0;i<list.length();i++){JSONObject x=list.getJSONObject(i);if(x.getString("id").equals(copy.getString("id"))){if(x.optBoolean("purged",false))throw new Exception("A permanently deleted login cannot be restored.");clocks=new JSONObject(x.getJSONObject("clock").toString());if(!x.getString("password").equals(copy.getString("password"))||!x.getString("username").equals(copy.getString("username")))copy.put("reviewAcknowledgement","");}else next.put(x);}
         tick(clocks,device);copy.put("clock",clocks).put("updatedUtc",Instant.now().toString());next.put(copy);candidate.put("entries",next).put("revision",candidate.getLong("revision")+1);commit(candidate);
+    }
+    public synchronized void addFolder(String name)throws Exception{ensure();JSONObject candidate=new JSONObject(data.toString());FolderCatalog.add(candidate,name);candidate.put("revision",candidate.getLong("revision")+1);commit(candidate);}
+    public synchronized void acknowledgeReview(String id)throws Exception{
+        ensure();JSONArray entries=data.getJSONArray("entries");for(PasswordHealth.Finding finding:PasswordHealth.audit(entries))if(finding.id.equals(id)){for(int i=0;i<entries.length();i++){JSONObject entry=entries.getJSONObject(i);if(entry.getString("id").equals(id)){JSONObject copy=new JSONObject(entry.toString());copy.put("reviewAcknowledgement",finding.fingerprint);upsert(copy);return;}}}throw new Exception("This login has no current review warnings.");
+    }
+    public synchronized void deletePermanently(String id)throws Exception{
+        ensure();JSONObject candidate=new JSONObject(data.toString());JSONArray entries=candidate.getJSONArray("entries");JSONObject entry=null;
+        for(int i=0;i<entries.length();i++)if(entries.getJSONObject(i).getString("id").equals(id))entry=entries.getJSONObject(i);
+        if(entry==null||!entry.getBoolean("deleted")||entry.getBoolean("purged"))throw new Exception("Only a login in Trash can be permanently deleted.");
+        entry.put("title","Deleted login").put("favorite",false).put("purged",true);for(String field:new String[]{"username","password","url","notes","folder","reviewAcknowledgement"})entry.put(field,"");
+        tick(entry.getJSONObject("clock"),device);entry.put("updatedUtc",Instant.now().toString());candidate.put("revision",candidate.getLong("revision")+1);commit(candidate,false);Files.deleteIfExists(new File(path+".previous").toPath());
     }
     public synchronized int merge(byte[] bytes)throws Exception{
         ensure();JSONObject remoteEnv=parse(bytes);if(!remoteEnv.getString("vaultId").equals(envelope.getString("vaultId")))throw new Exception("This file belongs to a different vault.");
@@ -120,6 +137,18 @@ public final class VaultEngine implements AutoCloseable {
         JSONObject remote=openBody(remoteEnv,key),candidate=new JSONObject(data.toString());int conflicts=mergeData(candidate,remote,device);commit(candidate);return conflicts;
     }
     public synchronized boolean needsPassphrase(byte[] bytes)throws Exception{ensure();return parse(bytes).getLong("keyEpoch")!=envelope.getLong("keyEpoch");}
+    public synchronized int mergeCloud(List<byte[]> snapshots)throws Exception{
+        ensure();if(snapshots.size()>64)throw new Exception("Too many cloud devices.");if(snapshots.isEmpty())return 0;
+        JSONObject candidate=new JSONObject(data.toString());int conflicts=0;
+        for(byte[] bytes:snapshots){JSONObject remoteEnv=parse(bytes);
+            if(!remoteEnv.getString("vaultId").equals(envelope.getString("vaultId")))throw new Exception("Cloud backup belongs to a different vault.");
+            if(remoteEnv.getLong("keyEpoch")!=envelope.getLong("keyEpoch"))throw new Exception("A device changed the master passphrase. Merge all devices over Wi-Fi or encrypted backups first. Then disconnect cloud on both, start a new cloud vault on one, and rejoin with its new code. No cloud changes were applied.");
+            conflicts+=mergeData(candidate,openBody(remoteEnv,key),device);
+        }
+        long mergedRevision=candidate.getLong("revision");candidate.put("revision",data.getLong("revision"));
+        if(!candidate.toString().equals(data.toString())){candidate.put("revision",mergedRevision);commit(candidate);}
+        return conflicts;
+    }
     public synchronized int mergeUsingPassword(byte[] bytes,String incomingPassword)throws Exception{
         ensure();JSONObject remoteEnv=parse(bytes);if(!remoteEnv.getString("vaultId").equals(envelope.getString("vaultId")))throw new Exception("Different vault identity.");byte[] kek=derive(incomingPassword,remoteEnv.getJSONObject("kdf")),remoteKey=null;
         try{remoteKey=decrypt(kek,remoteEnv.getJSONObject("wrap"),wrapAad(remoteEnv));JSONObject remote=openBody(remoteEnv,remoteKey),candidate=new JSONObject(data.toString());if(remoteEnv.getLong("keyEpoch")==envelope.getLong("keyEpoch")&&!MessageDigest.isEqual(key,remoteKey))throw new Exception("Both devices rotated independently. Recover their backups separately.");int conflicts=mergeData(candidate,remote,device);
@@ -148,7 +177,13 @@ public final class VaultEngine implements AutoCloseable {
         finally{Files.deleteIfExists(staged.toPath());Files.deleteIfExists(new File(staged+".lock").toPath());}
     }
     private static void newPassword(String p)throws Exception{if(p.length()<16||p.getBytes(StandardCharsets.UTF_8).length>1024)throw new Exception("Use a master passphrase with at least 16 characters.");}
-    private synchronized void commit(JSONObject candidate)throws Exception{byte[] bytes=seal(envelope,candidate,key);write(bytes,hash,true);data=candidate;hash=sha(bytes);}
+    private synchronized void commit(JSONObject candidate)throws Exception{commit(candidate,true);}
+    private synchronized void commit(JSONObject candidate,boolean previous)throws Exception{
+        candidate.put("schema",2);Set<String> purged=new HashSet<>();JSONArray entries=candidate.getJSONArray("entries");for(int i=0;i<entries.length();i++)if(entries.getJSONObject(i).getBoolean("purged"))purged.add(entries.getJSONObject(i).getString("id"));
+        Set<String> alreadyPurged=new HashSet<>();JSONArray oldEntries=data.getJSONArray("entries");for(int i=0;i<oldEntries.length();i++)if(oldEntries.getJSONObject(i).getBoolean("purged"))alreadyPurged.add(oldEntries.getJSONObject(i).getString("id"));boolean newPurge=!alreadyPurged.containsAll(purged);
+        JSONArray apps=candidate.getJSONArray("trustedApps");for(int i=0;i<apps.length();i++){JSONObject app=apps.getJSONObject(i);JSONArray ids=app.getJSONArray("entryIds"),kept=new JSONArray();for(int j=0;j<ids.length();j++)if(!purged.contains(ids.getString(j)))kept.put(ids.getString(j));app.put("entryIds",kept);}
+        byte[] bytes=seal(envelope,candidate,key);write(bytes,hash,previous&&!newPurge);data=candidate;hash=sha(bytes);if(newPurge)Files.deleteIfExists(new File(path+".previous").toPath());
+    }
     private static byte[] seal(JSONObject env,JSONObject body,byte[] secret)throws Exception{
         validateData(body,env.getString("vaultId"));byte[] plain=body.toString().getBytes(StandardCharsets.UTF_8);
         try{env.put("payload",encrypt(secret,plain,bodyAad(env)));byte[] bytes=env.toString().getBytes(StandardCharsets.UTF_8);if(bytes.length>MAX_BYTES)throw new Exception("Vault is too large.");return bytes;}finally{Arrays.fill(plain,(byte)0);}
@@ -171,26 +206,27 @@ public final class VaultEngine implements AutoCloseable {
     public static String hex(byte[] b){StringBuilder s=new StringBuilder();for(byte x:b)s.append(String.format(Locale.ROOT,"%02x",x&255));return s.toString();}
     private void ensure()throws Exception{if(key==null)throw new Exception("Vault is locked.");}
     public synchronized void close(){if(key!=null)Arrays.fill(key,(byte)0);key=null;data=null;envelope=null;hash=null;}
-    public static String generate(int length,boolean symbols)throws Exception{
-        if(length<16||length>128)throw new Exception("Use 16–128 characters.");String[] groups=symbols?new String[]{"abcdefghijkmnopqrstuvwxyz","ABCDEFGHJKLMNPQRSTUVWXYZ","23456789","!@#$%&*+-=?_"}:new String[]{"abcdefghijkmnopqrstuvwxyz","ABCDEFGHJKLMNPQRSTUVWXYZ","23456789"};String alphabet=String.join("",groups);char[] out=new char[length];
-        for(int i=0;i<groups.length;i++)out[i]=groups[i].charAt(RNG.nextInt(groups[i].length()));for(int i=groups.length;i<length;i++)out[i]=alphabet.charAt(RNG.nextInt(alphabet.length()));for(int i=length-1;i>0;i--){int j=RNG.nextInt(i+1);char c=out[i];out[i]=out[j];out[j]=c;}return new String(out);
-    }
+    public static String generate(int length,boolean symbols)throws Exception{PasswordOptions options=new PasswordOptions();options.length=length;options.symbols=symbols;return options.generate();}
     static int compare(JSONObject a,JSONObject b)throws Exception{boolean gt=false,lt=false;Set<String> keys=union(a,b);for(String k:keys){long x=a.optLong(k,0),y=b.optLong(k,0);gt|=x>y;lt|=x<y;}return gt&&lt?2:gt?1:lt?-1:0;}
     private static Set<String> union(JSONObject a,JSONObject b){Set<String>s=new TreeSet<>();a.keys().forEachRemaining(s::add);b.keys().forEachRemaining(s::add);return s;}
     private static void tick(JSONObject c,String device)throws Exception{c.put(device,c.optLong(device,0)+1);if(c.length()>64||c.getLong(device)>1000000000L)throw new Exception("Device revision limit reached.");}
     private static String vector(JSONObject c)throws Exception{List<String> fields=new ArrayList<>();for(String k:union(c,new JSONObject()))fields.add(k+":"+c.getLong(k));return String.join(";",fields);}
-    private static boolean same(JSONObject a,JSONObject b)throws Exception{for(String k:new String[]{"title","username","password","url","notes","folder","favorite","deleted"})if(!a.get(k).equals(b.get(k)))return false;return true;}
+    private static boolean same(JSONObject a,JSONObject b)throws Exception{for(String k:new String[]{"title","username","password","url","notes","folder","favorite","deleted","purged","reviewAcknowledgement"})if(!a.get(k).equals(b.get(k)))return false;return true;}
     public static int mergeData(JSONObject local,JSONObject remote,String device)throws Exception{
-        if(!local.getString("vaultId").equals(remote.getString("vaultId")))throw new Exception("Different vault identity.");LinkedHashMap<String,JSONObject> map=new LinkedHashMap<>();JSONArray a=local.getJSONArray("entries"),b=remote.getJSONArray("entries");for(int i=0;i<a.length();i++){JSONObject x=a.getJSONObject(i);map.put(x.getString("id"),new JSONObject(x.toString()));}int conflicts=0;
+        if(!local.getString("vaultId").equals(remote.getString("vaultId")))throw new Exception("Different vault identity.");FolderCatalog.upgrade(local);FolderCatalog.upgrade(remote);LinkedHashMap<String,JSONObject> map=new LinkedHashMap<>();JSONArray a=local.getJSONArray("entries"),b=remote.getJSONArray("entries");for(int i=0;i<a.length();i++){JSONObject x=a.getJSONObject(i);map.put(x.getString("id"),new JSONObject(x.toString()));}int conflicts=0;
         for(int i=0;i<b.length();i++){
             JSONObject incoming=b.getJSONObject(i),current=map.get(incoming.getString("id"));if(current==null){map.put(incoming.getString("id"),new JSONObject(incoming.toString()));continue;}
-            JSONObject ca=current.getJSONObject("clock"),cb=incoming.getJSONObject("clock");int r=compare(ca,cb);if(r==1)continue;if(r==-1){map.put(incoming.getString("id"),new JSONObject(incoming.toString()));continue;}boolean equal=same(current,incoming);if(r==0){if(!equal)throw new Exception("Conflicting content with an identical revision clock.");continue;}
+            JSONObject ca=current.getJSONObject("clock"),cb=incoming.getJSONObject("clock");int r=compare(ca,cb);
+            if(current.getBoolean("purged")||incoming.getBoolean("purged")){
+                if(r==0&&!same(current,incoming))throw new Exception("Conflicting content with an identical revision clock.");JSONObject tombstone=new JSONObject((current.getBoolean("purged")?current:incoming).toString()),joinedPurge=new JSONObject();for(String k:union(ca,cb))joinedPurge.put(k,Math.max(ca.optLong(k,0),cb.optLong(k,0)));if(compare(tombstone.getJSONObject("clock"),joinedPurge)!=0)tick(joinedPurge,device);tombstone.put("clock",joinedPurge);map.put(current.getString("id"),tombstone);continue;
+            }
+            if(r==1)continue;if(r==-1){map.put(incoming.getString("id"),new JSONObject(incoming.toString()));continue;}boolean equal=same(current,incoming);if(r==0){if(!equal)throw new Exception("Conflicting content with an identical revision clock.");continue;}
             JSONObject joined=new JSONObject();for(String k:union(ca,cb))joined.put(k,Math.max(ca.optLong(k,0),cb.optLong(k,0)));tick(joined,device);
             if(equal){current.put("clock",joined);continue;}
             String[] vectors={vector(ca),vector(cb)};Arrays.sort(vectors);String h=hex(sha((current.getString("id")+"|"+String.join("|",vectors)).getBytes(StandardCharsets.UTF_8))).substring(0,32);String conflict=h.substring(0,8)+"-"+h.substring(8,12)+"-"+h.substring(12,16)+"-"+h.substring(16,20)+"-"+h.substring(20);
             boolean deletion=incoming.getBoolean("deleted")&&!current.getBoolean("deleted");JSONObject primary=new JSONObject((deletion?incoming:current).toString()),alternate=new JSONObject((deletion?current:incoming).toString());primary.put("clock",joined);map.put(current.getString("id"),primary);
             String title=alternate.getString("title");alternate.put("id",conflict).put("title",title.substring(0,Math.min(180,title.length()))+" (conflict)").put("clock",new JSONObject(joined.toString()));if(!map.containsKey(conflict)){map.put(conflict,alternate);conflicts++;}
         }
-        if(map.size()>10000)throw new Exception("Merged vault exceeds the entry limit.");JSONArray result=new JSONArray();for(JSONObject x:map.values())result.put(x);local.put("entries",result).put("revision",Math.max(local.getLong("revision"),remote.getLong("revision"))+1);return conflicts;
+        if(map.size()>10000)throw new Exception("Merged vault exceeds the entry limit.");JSONArray result=new JSONArray();for(JSONObject x:map.values())result.put(x);local.put("entries",result).put("revision",Math.max(local.getLong("revision"),remote.getLong("revision"))+1);JSONArray folders=remote.getJSONArray("folders");for(int i=0;i<folders.length();i++)FolderCatalog.add(local,folders.getString(i));FolderCatalog.upgrade(local);return conflicts;
     }
 }

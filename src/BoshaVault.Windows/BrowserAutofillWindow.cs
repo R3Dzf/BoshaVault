@@ -15,7 +15,7 @@ public partial class MainWindow
             if (exiting || resourcesReleased) return new() { Status = "unavailable" };
             string host = BrowserAutofillProtocol.Validate(request);
             if (!preferences.BrowserAutofillEnabled)
-                return new() { Status = "denied", Message = "Browser Autofill is disabled in BoshaVault settings." };
+                return new() { Status = "denied", Message = "Browser Autofill is disabled in Lockvyn settings." };
             if (request.Op == "open")
             {
                 BringToFront();
@@ -23,12 +23,13 @@ public partial class MainWindow
             }
             var activeSession = session;
             if (activeSession == null || !activeSession.IsOpen)
-                return new() { Status = "locked", Message = "Unlock BoshaVault on Windows first." };
+                return new() { Status = "locked", Message = "Unlock Lockvyn on Windows first." };
             if (request.Op == "capture")
             {
                 int captureStamp=generation;
                 BringToFront();
-                var captured=FormDialog.Edit(this,null,"https://"+host+"/",request.Username);
+                var captured=FormDialog.Edit(this,null,"https://"+host+"/",request.Username,
+                    FolderCatalog.Choices(activeSession.Data), preferences.Generator, SaveGeneratorDefaults);
                 if(captured==null)
                     return new(){Status="denied",Message="Saving a new login was canceled."};
                 if(generation!=captureStamp || session!=activeSession || !activeSession.IsOpen ||
@@ -37,7 +38,7 @@ public partial class MainWindow
                 if(activeSession.Data.Entries.Any(e=>!e.Deleted && e.Url.Length>0 &&
                     e.Username.Equals(captured.Username,StringComparison.OrdinalIgnoreCase) &&
                     OriginPolicy.Matches(e.Url,captured.Url)))
-                    return new(){Status="denied",Message="That account already exists; edit it in BoshaVault."};
+                    return new(){Status="denied",Message="That account already exists; edit it in Lockvyn."};
                 activeSession.Upsert(captured);
                 selected=captured;
                 Refresh();
@@ -63,8 +64,8 @@ public partial class MainWindow
                     "\n\nA new generated password will replace the existing saved password. "+
                     "Make sure you have changed the password on the real website. "+
                     "The previous encrypted file backup may contain the old password.\n\n"+
-                    "BoshaVault will not submit any form or verify that the site accepted the change.",
-                    "BoshaVault · Confirm password update",
+                    "Lockvyn will not submit any form or verify that the site accepted the change.",
+                    "Lockvyn · Confirm password update",
                     MessageBoxButton.YesNo,MessageBoxImage.Warning,MessageBoxResult.No)
                     ==MessageBoxResult.Yes;
                 if(!accepted || generation!=updateStamp || session!=activeSession || !activeSession.IsOpen)
@@ -136,17 +137,18 @@ public partial class MainWindow
                 selected = item;
                 Refresh();
                 lastActivity = DateTime.UtcNow;
-                return new() { Status = "saved", Message = "Saved to your encrypted BoshaVault vault. Complete signup on the website separately." };
+                return new() { Status = "saved", Message = "Saved to your encrypted Lockvyn vault. Complete signup on the website separately." };
             }
             // Exact matches are always first. Related eTLD+1 accounts are
             // SUGGESTIONS only, never silently filled or used for updates.
             var matches = activeSession.Data.Entries
                 .Where(e => !e.Deleted && e.Password.Length != 0 && e.Url.Length > 0)
-                .Select(e => (Entry:e, Relation:OriginPolicy.Relation(e.Url,request.Origin)))
+                .Select(e => (Entry:e, Relation:OriginPolicy.Relation(e.Url,request.Origin,preferences.DomainGroups)))
                 .Where(x => x.Relation != OriginPolicy.DomainRelation.None)
-                .OrderBy(x => x.Relation == OriginPolicy.DomainRelation.Exact ? 0 : 1)
+                .OrderBy(x => x.Relation == OriginPolicy.DomainRelation.Exact ? 0 :
+                    x.Relation == OriginPolicy.DomainRelation.TrustedGroup ? 1 : 2)
                 .ThenBy(x => x.Entry.Title,StringComparer.OrdinalIgnoreCase)
-                .Take(20).ToArray();
+                .Take(50).ToArray();
             if (request.Op == "list")
             {
                 var hosts=activeSession.Data.Entries.Where(e=>!e.Deleted && e.Url.Length>0)
@@ -163,7 +165,8 @@ public partial class MainWindow
                     Accounts=matches.Select(x=>new BrowserAccount {
                         Id=x.Entry.Id,Title=x.Entry.Title,Username=x.Entry.Username,
                         Website=OriginPolicy.ExactHost(x.Entry.Url),
-                        Related=x.Relation==OriginPolicy.DomainRelation.Related
+                        Related=x.Relation!=OriginPolicy.DomainRelation.Exact,
+                        GroupMatched=x.Relation==OriginPolicy.DomainRelation.TrustedGroup
                     }).ToList()
                 };
             }
@@ -171,29 +174,18 @@ public partial class MainWindow
             if(match.Entry == null)
                 return new() { Status="denied",Message="No safe website match for this account." };
             var target=match.Entry;
-            bool related=match.Relation==OriginPolicy.DomainRelation.Related;
+            bool related=match.Relation!=OriginPolicy.DomainRelation.Exact;
             string savedHost=OriginPolicy.ExactHost(target.Url);
 
-            // Foreground notice must name the destination and account.
+            // No longer restore the entire main vault in front of the browser.
+            // A compact always-on-top approval still requires a deliberate click
+            // before returning one password to the same live browser document.
             int stamp = generation;
-            BringToFront();
-            bool allowed = MessageBox.Show(this,
-                (related ? "RELATED DOMAIN — EXTRA CAUTION\n\n" :
-                    "Allow this one-time fill?\n\n") +
-                "CURRENT browser site: https://" + host +
-                "\nSAVED login website: https://" + savedHost +
-                "\nSaved login: " + target.Title +
-                "\nUsername: " + target.Username +
-                (related ? "\n\nThe saved and requested hosts are DIFFERENT but share a registrable domain. " +
-                    "Only click Yes if you independently trust BOTH sites and expect to use this login there. " +
-                    "Review the browser address bar carefully; this may disclose your password to the current site." :
-                    "\n\nOnly approve if you are currently signing in at this website.") +
-                "\n\nThis fills only after your explicit approval.",
-                "BoshaVault · Confirm browser Autofill", MessageBoxButton.YesNo,
-                MessageBoxImage.Question, MessageBoxResult.No) == MessageBoxResult.Yes;
+            bool allowed = BrowserFillApprovalDialog.Confirm(
+                host, savedHost, target.Title, target.Username, related);
             if (!allowed || generation != stamp || session != activeSession || !activeSession.IsOpen)
                 return new() { Status = "denied", Message = "Browser fill canceled." };
-            var verified=OriginPolicy.Relation(target.Url,request.Origin);
+            var verified=OriginPolicy.Relation(target.Url,request.Origin,preferences.DomainGroups);
             if(verified==OriginPolicy.DomainRelation.None ||
                verified!=match.Relation)
                 return new(){Status="denied",Message="Domain trust relationship changed."};
@@ -202,7 +194,7 @@ public partial class MainWindow
         }
         catch (Exception ex) when (ex is VaultException or InvalidOperationException or ArgumentException or System.IO.IOException)
         {
-            return new() { Status = "denied", Message = "BoshaVault refused an unsafe browser request." };
+            return new() { Status = "denied", Message = "Lockvyn refused an unsafe browser request." };
         }
     }
 }

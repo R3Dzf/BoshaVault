@@ -17,7 +17,7 @@ The APK on each normal push is a **temporary-test-key** build, not an updateable
 **Existing installations:** Android permits APK updates without data loss only when the app package and signing identity are compatible. A new release keystore **cannot** replace an installed preview with a different certificate. The original old signing private key cannot be extracted from an APK. If unavailable, first export an encrypted backup, verify restoration using a test copy, and keep your master passphrase. Do not uninstall or clear data before this.
 
 ### Windows — separate publisher signing
-The Windows EXE produced by GitHub Actions is currently **unsigned**. An Android .p12 is not an Authenticode publisher certificate. A Windows build signed with a self-created certificate is *not* automatically trusted by Windows or SmartScreen. For a publisher-verified Windows executable, supply a valid code-signing identity from a trusted provider and integrate a protected signing step. Do not disable Microsoft Defender to install an unsigned preview.
+The Windows EXE produced by GitHub Actions is currently **unsigned**. An Android .p12 is not an Authenticode publisher certificate. A Windows build signed with a self-created certificate is *not* automatically trusted by Windows or SmartScreen. For a publisher-verified Windows executable, supply a valid code-signing identity from a trusted provider and integrate a protected signing step. Do not disable Microsoft Defender to install an unsigned build.
 
 ### Conditions before calling this production-ready
 - Test fingerprint enrollment, enable, unlock, cancel and enrollment change on real phones.

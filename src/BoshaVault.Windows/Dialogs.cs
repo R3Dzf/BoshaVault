@@ -1,6 +1,10 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Interop;
+using System.Windows.Shell;
+using System.Windows.Input;
+using System.Runtime.InteropServices;
 using BoshaVault.Core;
 
 namespace BoshaVault.Windows;
@@ -8,6 +12,7 @@ namespace BoshaVault.Windows;
 /// <summary>Screen-sized dialog with a permanently visible action bar.</summary>
 public sealed class FormDialog : Window
 {
+    [DllImport("user32.dll")] private static extern bool SetWindowDisplayAffinity(nint hwnd, uint affinity);
     public readonly StackPanel Body = new() { Margin = new Thickness(20, 16, 20, 12) };
     private readonly StackPanel footer = new() { Orientation = Orientation.Vertical,
         Margin = new Thickness(20, 5, 20, 15) };
@@ -17,26 +22,65 @@ public sealed class FormDialog : Window
         Title = title;
         Width = Math.Min(width, Math.Max(350, SystemParameters.WorkArea.Width - 40));
         Height = Math.Max(320, Math.Min(685, SystemParameters.WorkArea.Height - 70));
-        WindowStartupLocation = WindowStartupLocation.CenterScreen;
-        ResizeMode = ResizeMode.CanResizeWithGrip;
-        MinWidth = 350;
-        MinHeight = 300;
-        Background = new SolidColorBrush(Color.FromRgb(248, 247, 253));
+        WindowStartupLocation = WindowStartupLocation.CenterOwner;
+        ResizeMode = ResizeMode.CanResize;
+        WindowStyle = WindowStyle.None;
+        ShowInTaskbar = false;
+        MinWidth = 350; MinHeight = 300;
+        Background = Brushes.White;
+        WindowChrome.SetWindowChrome(this, new WindowChrome {
+            CaptionHeight = 0,
+            ResizeBorderThickness = new Thickness(7),
+            GlassFrameThickness = new Thickness(0),
+            CornerRadius = new CornerRadius(16),
+            UseAeroCaptionButtons = false
+        });
+        var frame = new Border {
+            Background = new SolidColorBrush(Color.FromRgb(247, 248, 252)),
+            BorderBrush = new SolidColorBrush(Color.FromRgb(225, 229, 239)),
+            BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(16)
+        };
+        var shell = new DockPanel();
+        frame.Child = shell;
+        var header = new Grid { Height = 62, Background = Brushes.Transparent,
+            Margin = new Thickness(19, 6, 18, 0) };
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.Children.Add(new TextBlock { Text = title, FontSize = 19, FontWeight = FontWeights.SemiBold,
+            VerticalAlignment = VerticalAlignment.Center, Foreground = new SolidColorBrush(Color.FromRgb(23, 27, 46)),
+            TextTrimming = TextTrimming.CharacterEllipsis });
+        var close = new Button { Content = "✕", FontSize = 13, Width = 36, Height = 36,
+            Padding = new Thickness(0), ToolTip = "Close this window" };
+        close.Click += (_, _) => Close();
+        Grid.SetColumn(close, 1); header.Children.Add(close);
+        header.MouseLeftButtonDown += (_, e) =>
+        {
+            if (e.ChangedButton == MouseButton.Left) DragMove();
+        };
+        DockPanel.SetDock(header, Dock.Top);
+        shell.Children.Add(header);
         var layout = new DockPanel();
-        var footerHost = new Border { Child = footer, Background = Brushes.White,
-            BorderBrush = new SolidColorBrush(Color.FromRgb(231, 228, 239)),
-            BorderThickness = new Thickness(0, 1, 0, 0) };
+        shell.Children.Add(layout);
+        var footerHost = new Border {
+            Child = footer, Background = Brushes.White,
+            BorderBrush = new SolidColorBrush(Color.FromRgb(225, 229, 239)),
+            BorderThickness = new Thickness(0, 1, 0, 0),
+            CornerRadius = new CornerRadius(0, 0, 15, 15)
+        };
         DockPanel.SetDock(footerHost, Dock.Bottom);
         layout.Children.Add(footerHost);
-        var scroller = new ScrollViewer { Content = Body,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+        var scroller = new ScrollViewer {
+            Content = Body, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
+        };
         layout.Children.Add(scroller);
-        Content = layout;
-        Body.Children.Add(new TextBlock { Text = title, FontSize = 21, FontWeight = FontWeights.Bold,
-            TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 12) });
-        PreviewKeyDown += (_, _) => (owner as MainWindow)?.Touch();
-        PreviewMouseDown += (_, _) => (owner as MainWindow)?.Touch();
+        Content = frame;
+        Window interactionOwner = owner;
+        while (interactionOwner.Owner != null) interactionOwner = interactionOwner.Owner;
+        var main = interactionOwner as MainWindow;
+        PreviewKeyDown += (_, _) => main?.Touch();
+        PreviewMouseDown += (_, _) => main?.Touch();
+        SourceInitialized += (_, _) => SetWindowDisplayAffinity(new WindowInteropHelper(this).Handle, 0x11); // Best-effort Windows capture exclusion, including MFA QR/key dialogs.
     }
     public TextBox Field(string label, string initial = "", int max = 2000, bool multi = false)
     {
@@ -64,23 +108,28 @@ public sealed class FormDialog : Window
     public void Label(string text) => Body.Children.Add(new TextBlock { Text = text,
         Foreground = Brushes.Gray, FontSize = 12,
         Margin = new Thickness(0, 3, 0, 5), TextWrapping = TextWrapping.Wrap });
-    public Button Action(string text, Action click, bool primary = false)
+    public Button Action(string text, Action click, bool primary = false, bool inBody = false)
     {
         var button = new Button { Content = text, Margin = new Thickness(0, 5, 0, 0),
             MinHeight = 37, Padding = new Thickness(10, 7, 10, 7) };
         if (primary) button.Style = (Style)FindResource("Primary");
         button.Click += (_, _) => click();
-        footer.Children.Add(button); return button;
+        if (inBody) Body.Children.Add(button); else footer.Children.Add(button); return button;
     }
     public static VaultEntry? Edit(Window owner, VaultEntry? original,
-        string suggestedUrl = "", string suggestedUsername = "")
+        string suggestedUrl = "", string suggestedUsername = "", IEnumerable<string>? folders = null,
+        PasswordOptions? generatorOptions = null, Action<PasswordOptions>? saveGeneratorDefaults = null)
     {
         var dialog = new FormDialog(owner, original == null ? "Add a new login" : "Edit login", 495);
         var entry = original?.Clone() ?? new VaultEntry();
 
         dialog.Label("Website and account");
         var url = dialog.Field("Website (HTTPS)", entry.Url.Length>0 ? entry.Url : suggestedUrl, 2048);
+        var urlError = new TextBlock { Foreground = Brushes.IndianRed, FontSize = 12, TextWrapping = TextWrapping.Wrap };
+        dialog.Body.Children.Add(urlError);
         var title = dialog.Field("Name", entry.Title, 200);
+        var titleError = new TextBlock { Foreground = Brushes.IndianRed, FontSize = 12, TextWrapping = TextWrapping.Wrap };
+        dialog.Body.Children.Add(titleError);
         var username = dialog.Field("Username / email",
             entry.Username.Length>0 ? entry.Username : suggestedUsername);
         string lastAutomaticName = "";
@@ -119,11 +168,11 @@ public sealed class FormDialog : Window
                 string normalized = Normalize(clipboard);
                 if(normalized.Length>0){url.Text=normalized;SuggestName();}
                 else MessageBox.Show(dialog,"Clipboard does not contain an HTTPS website.",
-                    "BoshaVault",MessageBoxButton.OK,MessageBoxImage.Information);
+                    "Lockvyn",MessageBoxButton.OK,MessageBoxImage.Information);
             }
             catch(Exception ex) when(ex is VaultException or System.Runtime.InteropServices.ExternalException)
             { MessageBox.Show(dialog,"Clipboard does not contain a usable HTTPS website URL.",
-                "BoshaVault",MessageBoxButton.OK,MessageBoxImage.Warning); }
+                "Lockvyn",MessageBoxButton.OK,MessageBoxImage.Warning); }
         };
         siteButtons.Children.Add(pasteSite);
         dialog.Body.Children.Add(siteButtons);
@@ -147,41 +196,59 @@ public sealed class FormDialog : Window
         var helperStatus = new TextBlock { FontSize=11,
             Foreground=Brushes.Gray,TextWrapping=TextWrapping.Wrap,
             Margin=new Thickness(0,0,0,7),
-            Text="Generate a unique 24-character password, then Copy if needed (clipboard clears after 20 seconds)." };
+            Text="Choose length and character rules with Generate password. Clipboard clears after 20 seconds." };
         dialog.Body.Children.Add(helperStatus);
+        var currentGeneratorRules = generatorOptions?.Clone() ?? new PasswordOptions();
         generate.Click += (_, _) => {
-            password.Password=PasswordGenerator.Generate();
-            helperStatus.Text="New strong password generated. Copy or save it to the encrypted vault.";
+            string? generated = PasswordGeneratorDialog.Show(dialog, currentGeneratorRules, saveGeneratorDefaults == null ? null : options => { saveGeneratorDefaults(options); currentGeneratorRules = options.Clone(); },
+                PrivateClipboard.Copy, true);
+            if (generated != null) { password.Password = generated; helperStatus.Text = "New password ready. Save the login to keep it."; }
         };
         copy.Click += (_, _) => {
             if(password.Password.Length==0){helperStatus.Text="Enter or generate a password first.";return;}
             PrivateClipboard.Copy(password.Password);
             helperStatus.Text="Password copied. Clipboard will be cleared automatically after 20 seconds.";
         };
-        var folder = dialog.Field("Folder", entry.Folder, 100);
+        int optionalStart = dialog.Body.Children.Count;
+        dialog.Label("Folder — choose one or type a new name");
+        var folder = new ComboBox { IsEditable = true, IsTextSearchEnabled = true, MinHeight = 45,
+            ItemsSource = (folders ?? FolderCatalog.Defaults).Append(entry.Folder).Where(f => f.Length > 0)
+                .Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).ToList(),
+            Text = entry.Folder.Length == 0 ? "Personal" : entry.Folder, Margin = new(0, 0, 0, 8) };
+        dialog.Body.Children.Add(folder);
         var notes = dialog.Field("Private notes", entry.Notes, 32000, true);
         var favorite = new CheckBox { Content = "Add to favorites", IsChecked = entry.Favorite,
             Margin=new Thickness(0,4,0,5) };
         dialog.Body.Children.Add(favorite);
-        var error = new TextBlock { Foreground = Brushes.IndianRed,
-            TextWrapping = TextWrapping.Wrap, FontSize = 12 };
-        dialog.Body.Children.Add(error);
+        var optional = new StackPanel();
+        while (dialog.Body.Children.Count > optionalStart)
+        {
+            var child = dialog.Body.Children[optionalStart]; dialog.Body.Children.RemoveAt(optionalStart); optional.Children.Add(child);
+        }
+        var optionalError = new TextBlock { Foreground = Brushes.IndianRed, FontSize = 12, TextWrapping = TextWrapping.Wrap };
+        optional.Children.Add(optionalError);
+        var optionalExpander = new Expander { Header = "Folder, notes & favorite", Content = optional,
+            IsExpanded = entry.Notes.Length > 0 || entry.Favorite, Margin = new Thickness(0, 8, 0, 12) };
+        dialog.Body.Children.Add(optionalExpander);
+        url.TextChanged += (_, _) => urlError.Text = "";
+        title.TextChanged += (_, _) => titleError.Text = "";
         dialog.Action("Save login", () => {
+            urlError.Text = ""; titleError.Text = "";
+            string normalized;
+            try { normalized = Normalize(url.Text); }
+            catch (VaultException ex) { urlError.Text = ex.Message; url.Focus(); return; }
+            if (title.Text.Trim().Length == 0) { titleError.Text = "Enter a name or a website to generate a name."; title.Focus(); return; }
             try {
-                string normalized = Normalize(url.Text);
-                if (title.Text.Trim().Length==0)
-                    throw new VaultException("Enter a name or a website to generate a name.");
                 entry.Title = title.Text.Trim();
                 entry.Username = username.Text;
                 entry.Password = password.Password;
                 entry.Url = normalized;
-                entry.Folder=folder.Text.Trim();
+                entry.Folder=FolderCatalog.Normalize(folder.Text);
                 entry.Notes=notes.Text;
                 entry.Favorite=favorite.IsChecked==true;
-                entry.Deleted=false;
                 dialog.DialogResult=true;
             }
-            catch(VaultException ex){error.Text=ex.Message;}
+            catch(VaultException ex){optionalError.Text = ex.Message; optionalExpander.IsExpanded = true;}
         }, true);
         dialog.Action("Cancel",()=>dialog.DialogResult=false);
         bool saved=dialog.ShowDialog()==true;

@@ -1,70 +1,112 @@
-# Install the BoshaVault native-messaging host for an unpacked browser extension.
-# Run with the extension ID shown by chrome://extensions or edge://extensions.
+# Local user-approved Lockvyn Native Messaging setup for Chromium browsers.
+# -Browser All only registers the bridge for detected Chrome, Edge, Chromium.
+# It never installs extensions, edits browser profiles or creates force-install policies.
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory=$true)]
-    [ValidateSet('Chrome','Edge')][string]$Browser,
-    [Parameter(Mandatory=$true)]
-    [ValidatePattern('^[a-p]{32}$')][string]$ExtensionId,
+    [ValidateSet('Chrome','Edge','Chromium','All')][string]$Browser = 'All',
+    [ValidatePattern('^(?:[a-p]{32})?$')][string]$ExtensionId = '',
+    [switch]$RepairOnly,
     [string]$AppFolder
 )
 $ErrorActionPreference = 'Stop'
-# PowerShell 5.1 may evaluate a parameter's default `$PSScriptRoot`
-# before the script path is populated; resolve it in the script body.
-if ([string]::IsNullOrWhiteSpace($AppFolder)) {
-    $executingScript = $PSCommandPath
-    if ([string]::IsNullOrWhiteSpace($executingScript)) {
-        $executingScript = $MyInvocation.MyCommand.Path
-    }
-    if ([string]::IsNullOrWhiteSpace($executingScript)) {
-        throw 'Cannot locate the installer script. Pass -AppFolder with the extracted BoshaVault Windows directory.'
-    }
-    $AppFolder = Split-Path -Parent $executingScript
+if (-not $RepairOnly -and [string]::IsNullOrWhiteSpace($ExtensionId)) {
+    throw 'Enter a 32-letter browser extension ID for first-time setup; -RepairOnly is for existing approvals.'
 }
 if ([string]::IsNullOrWhiteSpace($AppFolder)) {
-    throw 'AppFolder cannot be empty. Extract the complete BoshaVault-Windows-x64 ZIP.'
+    $scriptPath = $PSCommandPath
+    if ([string]::IsNullOrWhiteSpace($scriptPath)) { $scriptPath = $MyInvocation.MyCommand.Path }
+    if ([string]::IsNullOrWhiteSpace($scriptPath)) { throw 'Cannot locate app; pass -AppFolder.' }
+    $AppFolder = Split-Path -Parent $scriptPath
 }
 $AppFolder = (Resolve-Path -LiteralPath $AppFolder -ErrorAction Stop).ProviderPath
-$binary = Join-Path $AppFolder 'BoshaVault.NativeHost.exe'
-$desktop = Join-Path $AppFolder 'BoshaVault.exe'
-if (!(Test-Path -LiteralPath $binary -PathType Leaf) -or !(Test-Path -LiteralPath $desktop -PathType Leaf)) {
-    throw 'Extract the complete BoshaVault-Windows-x64 ZIP first, then run this script from that folder.'
+$binary = Join-Path $AppFolder 'Lockvyn.NativeHost.exe'
+if (!(Test-Path -LiteralPath $binary -PathType Leaf)) {
+    $binary = Join-Path $AppFolder 'BoshaVault.NativeHost.exe'
+}
+$desktop = Join-Path $AppFolder 'Lockvyn.exe'
+if (!(Test-Path -LiteralPath $desktop -PathType Leaf)) {
+    $desktop = Join-Path $AppFolder 'BoshaVault.exe'
+}
+if (!(Test-Path -LiteralPath $binary -PathType Leaf) -or
+    !(Test-Path -LiteralPath $desktop -PathType Leaf)) {
+    throw 'Install or extract the complete Lockvyn Windows package before browser setup.'
 }
 if (!(Test-Path -LiteralPath (Join-Path $AppFolder 'browser-extension\manifest.json') -PathType Leaf)) {
-    throw 'The browser-extension folder is missing; extract the complete ZIP.'
+    throw 'Missing browser-extension folder. Install the complete Windows package.'
 }
 $directory = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'BoshaVault\NativeMessaging'
-New-Item -ItemType Directory -Force -Path $directory | Out-Null
 $file = Join-Path $directory 'com.boshavault.desktop.json'
-$origin = "chrome-extension://$ExtensionId/"
-$allowed = @()
-if (Test-Path -LiteralPath $file) {
-    $previous = Get-Content -LiteralPath $file -Raw | ConvertFrom-Json
-    if ($previous.name -eq 'com.boshavault.desktop') {
-        $allowed = @($previous.allowed_origins | Where-Object { $_ -match '^chrome-extension://[a-p]{32}/$' })
+$browsers = @{
+    Chrome = @{
+        Data = (Join-Path $env:LOCALAPPDATA 'Google\Chrome\User Data')
+        Registry = 'HKCU:\Software\Google\Chrome\NativeMessagingHosts'
+    }
+    Edge = @{
+        Data = (Join-Path $env:LOCALAPPDATA 'Microsoft\Edge\User Data')
+        Registry = 'HKCU:\Software\Microsoft\Edge\NativeMessagingHosts'
+    }
+    Chromium = @{
+        Data = (Join-Path $env:LOCALAPPDATA 'Chromium\User Data')
+        Registry = 'HKCU:\Software\Chromium\NativeMessagingHosts'
     }
 }
-$allowed = @($allowed + $origin | Sort-Object -Unique)
-@{
-    name='com.boshavault.desktop'
-    description='BoshaVault Windows locally approved password fills'
-    path=(Resolve-Path -LiteralPath $binary).Path
-    type='stdio'
-    allowed_origins=$allowed
-} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $file -Encoding UTF8
-# PowerShell 5.1 Set-Content -Encoding UTF8 emits a BOM. Chromium's JSON
-# manifest parser expects UTF-8; write BOM-free UTF-8 explicitly.
-$json = Get-Content -LiteralPath $file -Raw
-[IO.File]::WriteAllText($file,$json,(New-Object System.Text.UTF8Encoding($false)))
-$base = if ($Browser -eq 'Chrome') {
-    'HKCU:\Software\Google\Chrome\NativeMessagingHosts'
-} else {
-    'HKCU:\Software\Microsoft\Edge\NativeMessagingHosts'
+$approved = @()
+if (Test-Path -LiteralPath $file -PathType Leaf) {
+    $previous = Get-Content -LiteralPath $file -Raw | ConvertFrom-Json
+    if ($previous.name -ne 'com.boshavault.desktop' -or $previous.type -ne 'stdio') {
+        throw 'The existing host manifest is not a valid Lockvyn registration.'
+    }
+    foreach ($origin in @($previous.allowed_origins)) {
+        if (-not ($origin -is [string]) -or $origin -notmatch '^chrome-extension://[a-p]{32}/$') {
+            throw 'The existing host manifest contains an invalid extension origin.'
+        }
+        $approved += $origin
+    }
 }
-$key = Join-Path $base 'com.boshavault.desktop'
-New-Item -Path $key -Force | Out-Null
-Set-Item -Path $key -Value $file
-Write-Host "Registered BoshaVault in $Browser." -ForegroundColor Green
-Write-Host "Allowed extension: $ExtensionId"
-Write-Host "Keep this extracted app folder at its current path. Restart $Browser now."
-Write-Host "No administrator permissions needed; your passwords stay encrypted in your local vault."
+if ($RepairOnly) {
+    $existingRegistration = $false
+    foreach ($candidate in $browsers.Keys) {
+        $key = Join-Path $browsers[$candidate].Registry 'com.boshavault.desktop'
+        if (Test-Path -LiteralPath $key) {
+            $value = (Get-Item -LiteralPath $key).GetValue('')
+            if ($value -eq $file) { $existingRegistration = $true }
+        }
+    }
+    if (-not $existingRegistration) {
+        throw 'No previous user-approved Lockvyn browser host registration exists.'
+    }
+} else {
+    $approved += "chrome-extension://$ExtensionId/"
+}
+$approved = @($approved | Sort-Object -Unique)
+if ($approved.Count -eq 0) { throw 'No previously approved browser extension IDs were found.' }
+$targets = if ($Browser -eq 'All') {
+    @($browsers.Keys | Where-Object {
+        Test-Path -LiteralPath $browsers[$_].Data -PathType Container
+    })
+} else { @($Browser) }
+$manifest = @{
+    name = 'com.boshavault.desktop'
+    description = 'Lockvyn Windows locally approved password fills'
+    path = (Resolve-Path -LiteralPath $binary).ProviderPath
+    type = 'stdio'
+    allowed_origins = $approved
+} | ConvertTo-Json -Depth 5
+New-Item -ItemType Directory -Force -Path $directory | Out-Null
+[IO.File]::WriteAllText($file,$manifest,(New-Object Text.UTF8Encoding($false)))
+$registered = @()
+foreach ($browserName in $targets) {
+    $key = Join-Path $browsers[$browserName].Registry 'com.boshavault.desktop'
+    if ($RepairOnly) {
+        if (!(Test-Path -LiteralPath $key)) { continue }
+        if ((Get-Item -LiteralPath $key).GetValue('') -ne $file) { continue }
+    }
+    New-Item -Path $key -Force | Out-Null
+    Set-Item -Path $key -Value $file
+    $registered += $browserName
+}
+Write-Host "Lockvyn host: $($registered -join ', ')" -ForegroundColor Green
+Write-Host "Approved extension IDs: $($approved.Count)"
+Write-Host 'Each browser profile still requires user-approved extension installation once.'
+Write-Host 'Future Lockvyn updates repair the approved local host path automatically.'
+Write-Host 'Browser profiles, extension install policies and toolbar configuration were not modified.'

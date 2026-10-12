@@ -22,21 +22,24 @@ public partial class App : Application
         if (!created)
         {
             if (!background && !InstanceActivationChannel.RequestOpen(pipe, pid => AllowSetForegroundWindow(pid)).GetAwaiter().GetResult())
-                MessageBox.Show("BoshaVault is already running. Use its tray icon or Ctrl + Alt + P. If you are updating an older version, close that version first.", "BoshaVault");
+                MessageBox.Show("Lockvyn is already running. Use its tray icon or Ctrl + Alt + P. If you are updating an older version, close that version first.", "Lockvyn");
             Shutdown(); return;
         }
         DispatcherUnhandledException += (_, args) =>
-        { MessageBox.Show("The action could not be completed. Your encrypted file is preserved. Reopen the vault and retry.", "BoshaVault"); args.Handled = true; };
+        { MessageBox.Show("The action could not be completed. Your encrypted file is preserved. Reopen the vault and retry.", "Lockvyn"); args.Handled = true; };
         base.OnStartup(e);
         try
         {
             var window = new MainWindow(); MainWindow = window;
             activation = new InstanceActivationChannel(pipe, () => { if (!Dispatcher.HasShutdownStarted) Dispatcher.BeginInvoke(() => window.BringToFront()); });
+            // Repair only an already-approved native messaging registration after
+            // a new Velopack installation path. No profile installs or policy changes.
+            BrowserNativeHostRepair.TryRepair(AppContext.BaseDirectory);
             autofill = new BrowserAutofillServer(Dispatcher, window.HandleBrowserAutofill);
             window.InitializeLaunch(background);
         }
         catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
-        { MessageBox.Show("BoshaVault could not start. Check access to your user data folder and reopen the app.", "BoshaVault"); Shutdown(); }
+        { MessageBox.Show("Lockvyn could not start. Check access to your user data folder and reopen the app.", "Lockvyn"); Shutdown(); }
     }
     protected override void OnSessionEnding(SessionEndingCancelEventArgs e)
     { (MainWindow as MainWindow)?.PrepareToExit(); base.OnSessionEnding(e); }

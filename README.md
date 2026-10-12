@@ -14,8 +14,8 @@ Keep your credentials organized, encrypted, and within reach — without making 
 ![Android](https://img.shields.io/badge/Android-9%2B-14866D)
 [![MIT License](https://img.shields.io/badge/License-MIT-6558D9)](LICENSE)
 
-**[Download for Windows](https://github.com/R3Dzf/BoshaVault/releases/tag/windows-v1.20.0)** &nbsp;·&nbsp;
-**[Download for Android](https://github.com/R3Dzf/BoshaVault/releases/tag/android-v1.14.0)** &nbsp;·&nbsp;
+**[Download for Windows](https://github.com/R3Dzf/BoshaVault/releases/tag/windows-v1.21.0)** &nbsp;·&nbsp;
+**[Download for Android](https://github.com/R3Dzf/BoshaVault/releases/tag/android-v1.14.1)** &nbsp;·&nbsp;
 **[Security](docs/SECURITY.md)**
 
 </div>
@@ -37,9 +37,10 @@ The **Calm Pro** interface focuses on what matters: your vault, connected device
 | Encrypted export, restore & conflict-aware merge | ✓ | ✓ |
 | Optional end-to-end encrypted cloud synchronization | ✓ | ✓ |
 | Offline private Wi-Fi transfer | Host | Client |
-| Autofill | Chrome / Edge extension preview | Android Autofill |
+| Autofill | Chrome / Edge extension (approval required) | Android Autofill |
 | Quick access | System tray & keyboard shortcut | Biometric unlock |
 | Smaller incremental app updates when compatible | ✓ | ✓ |
+| Trusted domain groups for browser suggestions | ✓ | — |
 
 <details>
 <summary><strong>More about synchronization and device pairing</strong></summary>
@@ -58,19 +59,20 @@ The **Calm Pro** interface focuses on what matters: your vault, connected device
 
 ### Windows
 
-1. Open **[Download for Windows](https://github.com/R3Dzf/BoshaVault/releases/tag/windows-v1.20.0)** and download `Lockvyn-win-Setup.exe`.
+1. Open **[Download for Windows](https://github.com/R3Dzf/BoshaVault/releases/tag/windows-v1.21.0)** and download `Lockvyn-win-Setup.exe`.
 2. Install and launch Lockvyn, then create a vault with a strong master passphrase.
 3. Add your first login. Use **Sync & Devices** only if you want cloud sync or device pairing.
 4. Future updates can be checked and applied inside the app. The updater shows the expected download size, including a smaller Delta package when available.
+5. Under **Settings → Manage trusted domain groups**, add related hostnames such as `google.com` and `accounts.google.com` to suggest the same saved account across those subdomains. Every fill still requires approval.
 
 > **Windows installer note:** Desktop release packages are checksum-verified, but do not yet carry an Authenticode publisher signature. Always download from this repository; do not disable antivirus protection to install.
 
 ### Android
 
-1. Open **[Download for Android](https://github.com/R3Dzf/BoshaVault/releases/tag/android-v1.14.0)** and choose `Lockvyn-Android.apk`, or check for updates within your existing installation.
+1. Open **[Download for Android](https://github.com/R3Dzf/BoshaVault/releases/tag/android-v1.14.1)** and choose `Lockvyn-Android.apk`, or check for updates within your existing installation.
 2. Install the signed APK **over the existing app** when updating; do not uninstall your vault.
 3. Create or unlock your vault, then use **Vault**, **Sync**, **Backup**, or **Settings**.
-4. Optional: enable Android Autofill and biometric unlock in Settings.
+4. Optional: enable Android Autofill and biometric unlock in Settings. The Autofill control updates its label from the real system setting and can disable Lockvyn as a provider.
 
 Android may ask you to approve installation from this source. Keep Play Protect enabled and investigate any malware warning rather than blindly overriding it.
 
@@ -127,17 +129,17 @@ git clone https://github.com/R3Dzf/BoshaVault.git
 cd BoshaVault
 ```
 
-The currently published application source is tracked by its corresponding release branches. For a reproducible build, check out the release branch you intend to test and follow its [build guide](https://github.com/R3Dzf/BoshaVault/blob/release/windows-v1.20.0/docs/GITHUB-BUILD.md). Do not publish APKs with temporary signing keys as upgrades to the official Android app.
+The `main` branch tracks the latest Windows and Android source. Published releases remain pinned to their matching tags and release branches. For reproducible builds, check out the matching release ref and follow its [build guide](https://github.com/R3Dzf/BoshaVault/blob/release/windows-v1.21.0/docs/GITHUB-BUILD.md). Do not publish APKs with temporary signing keys as upgrades to the official Android app.
 
 **Useful documentation**
 
 - [Security model & limitations](docs/SECURITY.md)
-- [Cloud account setup and 2FA](https://github.com/R3Dzf/BoshaVault/blob/release/android-v1.14.0/docs/CLOUD-ACCOUNT-SETUP.md)
-- [Device pairing and its current limitations](https://github.com/R3Dzf/BoshaVault/blob/release/android-v1.14.0/docs/DEVICE-PAIRING.md)
-- [Browser Autofill setup, Quiet Mode & profile support](https://github.com/R3Dzf/BoshaVault/blob/release/windows-v1.20.0/docs/BROWSER-AUTOFILL.md)
-- [Windows updates](https://github.com/R3Dzf/BoshaVault/blob/release/windows-v1.20.0/docs/WINDOWS-UPDATES.md)
-- [Android updates](https://github.com/R3Dzf/BoshaVault/blob/release/android-v1.14.0/docs/ANDROID-UPDATES.md)
-- [Calm Pro design direction](https://github.com/R3Dzf/BoshaVault/blob/release/windows-v1.20.0/docs/CALM-PRO-UI.md)
+- [Cloud account setup and 2FA](https://github.com/R3Dzf/BoshaVault/blob/release/android-v1.14.1/docs/CLOUD-ACCOUNT-SETUP.md)
+- [Device pairing and its current limitations](https://github.com/R3Dzf/BoshaVault/blob/release/android-v1.14.1/docs/DEVICE-PAIRING.md)
+- [Browser Autofill setup, Quiet Mode & profile support](https://github.com/R3Dzf/BoshaVault/blob/release/windows-v1.21.0/docs/BROWSER-AUTOFILL.md)
+- [Windows updates](https://github.com/R3Dzf/BoshaVault/blob/release/windows-v1.21.0/docs/WINDOWS-UPDATES.md)
+- [Android updates](https://github.com/R3Dzf/BoshaVault/blob/release/android-v1.14.1/docs/ANDROID-UPDATES.md)
+- [Calm Pro design direction](https://github.com/R3Dzf/BoshaVault/blob/release/windows-v1.21.0/docs/CALM-PRO-UI.md)
 
 ## Project status
 

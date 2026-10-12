@@ -1,0 +1,51 @@
+name: Verify and add a published Windows delta
+on:
+  push:
+    branches: ['maintenance/windows-delta-v*']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: lockvyn-windows-release
+  cancel-in-progress: false
+jobs:
+  delta:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require an accepted published application and tooling-only maintenance
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const version = fs.readFileSync('src/BoshaVault.Windows/BoshaVault.Windows.csproj','utf8').match(/<Version>([^<]+)<\/Version>/)[1];
+            if (context.eventName === 'push' && context.ref !== `refs/heads/maintenance/windows-delta-v${version}`) throw new Error('Maintenance ref must match the Windows version.');
+            const release = (await github.rest.repos.getReleaseByTag({...context.repo,tag:`windows-v${version}`})).data;
+            if (release.draft || release.prerelease || !/^[a-f0-9]{40}$/.test(release.target_commitish)) throw new Error('An exact-source stable release is required.');
+            const runs = await github.rest.actions.listWorkflowRuns({...context.repo,workflow_id:'build.yml',head_sha:release.target_commitish,per_page:100});
+            if (!runs.data.workflow_runs.some(r=>r.head_sha===release.target_commitish&&r.conclusion==='success')) throw new Error('The published application has not passed acceptance.');
+            const diff = (await github.rest.repos.compareCommitsWithBasehead({...context.repo,basehead:`${release.target_commitish}...${context.sha}`})).data;
+            const allowed = new Set(['tools/Package-Windows.ps1','tools/Repair-WindowsDelta.ps1','tools/Lockvyn.UpdateChecks/Program.cs','.github/workflows/windows-release-delta.yml','docs/WINDOWS-UPDATES.md']);
+            if (!diff.files || diff.files.some(f=>!allowed.has(f.filename))) throw new Error('Maintenance may change only delta tooling/docs; never the published application.');
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build the pinned real-release acceptance checker
+        shell: pwsh
+        run: |
+          dotnet restore tools/Lockvyn.UpdateChecks --locked-mode
+          if ($LASTEXITCODE) { throw 'Pinned restore failed.' }
+          dotnet build tools/Lockvyn.UpdateChecks -c Release --no-restore
+          if ($LASTEXITCODE) { throw 'Acceptance checker build failed.' }
+      - name: Generate, apply and verify the actual delta before publishing
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VPK_TOKEN: ${{ github.token }}
+        run: |
+          $version=([xml](Get-Content src/BoshaVault.Windows/BoshaVault.Windows.csproj -Raw)).Project.PropertyGroup.Version
+          ./tools/Repair-WindowsDelta.ps1 -Version $version -Repository '${{ github.repository }}'

@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.Net.Http;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Windows;
@@ -12,6 +13,8 @@ using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using BoshaVault.Core;
 using Microsoft.Win32;
+using Velopack;
+using Velopack.Sources;
 
 namespace BoshaVault.Windows;
 
@@ -36,10 +39,23 @@ public partial class MainWindow : Window
     private readonly string preferencesPath;
     private bool exiting, resourcesReleased;
     private WindowState previousWindowState = WindowState.Normal;
+    private UpdateDialog? updates;
+    private DateTime nextUpdateCheckUtc = DateTime.UtcNow.AddSeconds(18);
+    private bool updateCheckBusy, updatePromptVisible;
+    private string? pendingUpdateVersion, alertedUpdateVersion;
+    private string? undoEntryId; private DateTime undoUntil;
+    private readonly SemaphoreSlim cloudGate = new(1, 1);
+    private bool cloudDialogOpen;
+    private DateTime nextCloudCheck = DateTime.MinValue;
+    private SupabaseCloudAccount.Session? cachedCloudSession;
+    private DateTime cachedCloudUntil;
 
     public MainWindow()
     {
         InitializeComponent();
+        var builtVersion = typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "unknown";
+        InstalledVersionLabel.Text = "LOCKVYN  /  v" + builtVersion;
+        SidebarVersionLabel.Text = "v" + builtVersion;
         Directory.CreateDirectory(root); vaultPath = System.IO.Path.Combine(root, "vault.boshavault");
         preferencesPath = System.IO.Path.Combine(root, "desktop.json"); preferences = DesktopPreferences.Load(preferencesPath); timeoutMinutes = preferences.AutoLockMinutes;
         string devicePath = System.IO.Path.Combine(root, "device.id");
@@ -50,16 +66,34 @@ public partial class MainWindow : Window
         PreviewKeyDown += (_, _) => lastActivity = DateTime.UtcNow;
         PreviewMouseDown += (_, _) => lastActivity = DateTime.UtcNow;
         foreach (var input in new UIElement[] { SearchBox, EntryList }) input.MouseWheel += (_, _) => lastActivity = DateTime.UtcNow;
+        EntryList.PreviewMouseWheel += SlowVaultWheel;
         SystemEvents.SessionSwitch += OnSessionSwitch; SystemEvents.PowerModeChanged += OnPowerModeChanged;
         Closing += OnClosing;
         Closed += (_, _) => { ReleaseDesktopResources(); Application.Current.Shutdown(); };
-        StateChanged += (_, _) => { if (WindowState != WindowState.Minimized) previousWindowState = WindowState; };
+        StateChanged += (_, _) =>
+        {
+            if (WindowState != WindowState.Minimized) previousWindowState = WindowState;
+            TryShowUpdateNotice();
+        };
+        Activated += (_, _) => TryShowUpdateNotice();
         timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         timer.Tick += (_, _) =>
         {
             if (DateTime.UtcNow >= PrivateClipboard.Expires) PrivateClipboard.Clear();
             if (revealed && DateTime.UtcNow >= revealUntil) Mask();
-            if (session != null && transfer?.IsActive != true && DateTime.UtcNow - lastActivity > TimeSpan.FromMinutes(timeoutMinutes)) LockVault();
+            if (UndoButton.Visibility == Visibility.Visible && DateTime.UtcNow > undoUntil) { undoEntryId = null; UndoButton.Visibility = Visibility.Collapsed; }
+            if (session != null && (transfer?.IsActive != true || transfer.IsCompleted) && DateTime.UtcNow - lastActivity > TimeSpan.FromMinutes(timeoutMinutes)) LockVault();
+            if (preferences.UpdateNotificationsEnabled && !updateCheckBusy &&
+                !exiting && DateTime.UtcNow >= nextUpdateCheckUtc)
+            {
+                nextUpdateCheckUtc = DateTime.UtcNow.AddHours(1);
+                _ = CheckUpdateAnnouncement();
+            }
+            if (!cloudDialogOpen && DateTime.UtcNow >= nextCloudCheck)
+            {
+                nextCloudCheck = DateTime.UtcNow.AddSeconds(session == null ? 60 : 12);
+                _ = RunCloudSync();
+            }
         };
         timer.Start(); ConfigureUnlock();
     }
@@ -88,7 +122,8 @@ public partial class MainWindow : Window
             if (token != generation) { opened.Dispose(); if (!resourcesReleased && !exiting) ConfigureUnlock(); return; }
             session = opened; attempts = 0; MasterBox.Clear(); ConfirmBox.Clear(); LockError.Text = "";
             lastActivity = DateTime.UtcNow; LockView.Visibility = Visibility.Collapsed; VaultView.Visibility = Visibility.Visible;
-            filter = "all"; SearchBox.Clear(); Refresh(); SearchBox.Focus(); tray?.Update();
+            filter = "all"; folderFilter = null; SearchBox.Clear(); Refresh(); SearchBox.Focus(); tray?.Update();
+            nextCloudCheck = DateTime.MinValue; _ = RunCloudSync();
         }
         catch (Exception ex) when (ex is VaultException or IOException or UnauthorizedAccessException)
         {
@@ -106,22 +141,147 @@ public partial class MainWindow : Window
         generation++; transfer?.Dispose(); transfer = null;
         foreach (Window child in OwnedWindows.Cast<Window>().ToArray()) child.Close();
         PrivateClipboard.Clear(); Mask();
+        undoEntryId = null; UndoButton.Visibility = Visibility.Collapsed;
         session?.Dispose(); session = null;
         selected = null; EntryList.ItemsSource = null; DetailUsername.Text = ""; DetailNotes.Text = ""; DetailHost.Text = ""; DetailTitle.Text = ""; SearchBox.Clear();
         MasterBox.Clear(); ConfirmBox.Clear(); LockError.Text = ""; ConfigureUnlock();
     }
 
+    private async Task RunCloudSync()
+    {
+        if (cloudDialogOpen || resourcesReleased || exiting || !File.Exists(vaultPath) || !await cloudGate.WaitAsync(0)) return;
+        CloudProfile? profile = null;
+        try
+        {
+            using var http = new System.Net.Http.HttpClient(new System.Net.Http.HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(25) };
+            byte[] disk = File.ReadAllBytes(vaultPath);
+            Guid vaultId;
+            try { vaultId = Guid.Parse(VaultCodec.Parse(disk).VaultId); }
+            finally { CryptographicOperations.ZeroMemory(disk); }
+            var store = new CloudProfileStore(root);
+            profile = store.Load(vaultId);
+            if (profile == null) { CloudStatus.Text = "Cloud not connected · open Sync"; cachedCloudSession = null; return; }
+            if (!profile.AutoSync) { CloudStatus.Text = "Cloud paused on this computer"; cachedCloudSession = null; return; }
+            var auth = new SupabaseCloudAccount(http);
+            var signedIn = cachedCloudSession;
+            if (signedIn == null || cachedCloudUntil < DateTime.UtcNow || signedIn.OwnerId != profile.OwnerId)
+            {
+                signedIn = await auth.Refresh(profile.RefreshToken);
+                if (signedIn.OwnerId != profile.OwnerId) throw new VaultException("Cloud account changed. Reconnect this device.");
+                profile.RefreshToken = signedIn.RefreshToken; store.Save(profile);
+                if (cloudDialogOpen) return; // Persist refresh rotation before the manual dialog loads it.
+                var factors = await auth.ListFactors(signedIn);
+                if (factors.RequiresChallenge(signedIn))
+                {
+                    cachedCloudSession = null; CloudStatus.Text = "Cloud paused · verify 2FA in Sync";
+                    return;
+                }
+                cachedCloudSession = signedIn; cachedCloudUntil = DateTime.UtcNow.AddSeconds(45);
+            }
+            var transport = new SupabaseSnapshotTransport(http, new Uri(CloudProject.Url), CloudProject.PublishableKey, _ => Task.FromResult(signedIn.AccessToken));
+            var opened = session; int stamp = generation;
+            var result = await AutomaticCloudSync.RunAsync(transport, profile,
+                opened == null ? null : inner =>
+                {
+                    if (session != opened || generation != stamp || !opened.IsOpen) throw new OperationCanceledException();
+                    int conflicts = opened.MergeCloudSnapshots(inner); Refresh();
+                    return Task.FromResult((opened.ExportEncrypted(), conflicts));
+                },
+                () => Task.FromResult(session == opened && generation == stamp && opened?.IsOpen == true
+                    ? opened.ExportEncrypted() : File.ReadAllBytes(vaultPath)),
+                store.ReadPending, store.WritePending, () => store.Save(profile));
+            CloudStatus.Text = result.WaitingForUnlock ? "Cloud update ready · unlock to apply" :
+                result.Conflicts > 0 ? $"Cloud synced · {result.Conflicts} conflict copies" : "Cloud synced · up to date";
+        }
+        catch (Exception ex) when (ex is VaultException or IOException or System.Net.Http.HttpRequestException or CryptographicException or UnauthorizedAccessException or OperationCanceledException)
+        { cachedCloudSession = null; if (profile != null) CloudStatus.Text = ex is VaultException ? ex.Message : "Cloud offline · changes retry automatically"; }
+        finally { profile?.Clear(); cloudGate.Release(); }
+    }
+
+    // WPF defaults to several full list items per wheel notch. Precision laptop
+    // touchpads should scroll pixels, not jump through whole screens of logins.
+    private static ScrollViewer? VaultScroller(DependencyObject root)
+    {
+        if (root is ScrollViewer viewer) return viewer;
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var found = VaultScroller(VisualTreeHelper.GetChild(root, i));
+            if (found != null) return found;
+        }
+        return null;
+    }
+    private void SlowVaultWheel(object sender, MouseWheelEventArgs e)
+    {
+        var viewer = VaultScroller(EntryList);
+        if (viewer == null || viewer.ScrollableHeight <= 0) return;
+        double distance = Math.Clamp(Math.Abs(e.Delta) * 0.30, 2, 52);
+        viewer.ScrollToVerticalOffset(Math.Clamp(viewer.VerticalOffset - Math.Sign(e.Delta) * distance,
+            0, viewer.ScrollableHeight));
+        e.Handled = true;
+        lastActivity = DateTime.UtcNow;
+    }
+
+    private string? folderFilter;
+    private bool updatingFolders;
+    private sealed record FolderChoice(string? Name, string Label) { public override string ToString() => Label; }
+    private void SaveGeneratorDefaults(PasswordOptions options)
+    { preferences.Generator = options.Clone(); preferences.Save(preferencesPath); }
+    private void FolderChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (updatingFolders || session == null) return;
+        folderFilter = (FolderFilter.SelectedItem as FolderChoice)?.Name; Refresh();
+    }
+    private void OptionsClick(object sender, RoutedEventArgs e)
+    {
+        if (session == null) return;
+        var d = new FormDialog(this, "Vault options");
+        d.Label("These options stay available above your login list.");
+        d.Action("Add login", () => { d.Close(); AddClick(sender, e); }, true);
+        d.Action("Generate password", () => { d.Close(); GeneratorClick(sender, e); });
+        d.Action("Folders", () => { d.Close(); FoldersClick(); });
+        d.Action("Sync & Devices", () => { d.Close(); SyncClick(sender, e); });
+        d.Action("Backup & Restore", () => { d.Close(); BackupClick(sender, e); });
+        d.Action("Settings", () => { d.Close(); SettingsClick(sender, e); });
+        d.ShowDialog();
+    }
+    private void FoldersClick()
+    {
+        if (session == null) return;
+        var d = new FormDialog(this, "Folders");
+        d.Label("Choose a folder above the vault list to filter any section. Pick or create folders while editing a login.");
+        var names = new ListBox { ItemsSource = FolderCatalog.Choices(session.Data), MaxHeight = 200 };
+        d.Body.Children.Add(names); var name = d.Field("New folder name", "", 100);
+        d.Action("Add folder", () => Guard(() =>
+        {
+            if (session == null) return;
+            session.AddFolder(name.Text); name.Clear(); names.ItemsSource = FolderCatalog.Choices(session.Data); Refresh();
+        }), true); d.ShowDialog();
+    }
     private void Refresh()
     {
         if (session == null) return;
         var live = session.Data.Entries.Where(e => !e.Deleted).ToList();
-        var repeated = live.GroupBy(e => e.Password).Where(g => g.Key.Length > 0 && g.Count() > 1).SelectMany(g => g).Select(e => e.Id).ToHashSet();
-        int weak = live.Count(e => PasswordGenerator.Weak(e.Password));
-        CountText.Text = live.Count.ToString(); HealthText.Text = live.Count == 0 ? "Ready" : weak + repeated.Count == 0 ? "All checked" : $"{live.Where(e => PasswordGenerator.Weak(e.Password) || repeated.Contains(e.Id)).Count()} to review";
+        var report = PasswordHealth.Audit(session.Data.Entries);
+        var pending = report.Findings.Select(f => f.EntryId).ToHashSet(StringComparer.Ordinal);
+        CountText.Text = live.Count.ToString(); HealthText.Text = live.Count == 0 ? "Ready" : pending.Count == 0 ? "All reviewed" : $"{pending.Count} to review";
+        updatingFolders = true;
+        try
+        {
+            var choices = new List<FolderChoice> { new(null, "All folders") };
+            choices.AddRange(FolderCatalog.Choices(session.Data).Select(name => new FolderChoice(name,
+                name + " (" + session.Data.Entries.Count(e => !e.Purged && (filter == "trash" ? e.Deleted : !e.Deleted) &&
+                    (filter != "favorites" || e.Favorite) && (filter != "health" || pending.Contains(e.Id)) &&
+                    string.Equals(e.Folder, name, StringComparison.OrdinalIgnoreCase)) + ")")));
+            FolderFilter.ItemsSource = choices;
+            FolderFilter.SelectedItem = choices.FirstOrDefault(c => string.Equals(c.Name, folderFilter, StringComparison.OrdinalIgnoreCase)) ?? choices[0];
+            folderFilter = ((FolderChoice)FolderFilter.SelectedItem).Name;
+        }
+        finally { updatingFolders = false; }
         string search = SearchBox.Text.Trim();
-        var items = session.Data.Entries.Where(e => filter == "trash" ? e.Deleted : !e.Deleted)
+        var items = session.Data.Entries.Where(e => !e.Purged && (filter == "trash" ? e.Deleted : !e.Deleted))
             .Where(e => filter != "favorites" || e.Favorite)
-            .Where(e => filter != "health" || PasswordGenerator.Weak(e.Password) || repeated.Contains(e.Id))
+            .Where(e => filter != "health" || pending.Contains(e.Id))
+            .Where(e => folderFilter == null || string.Equals(e.Folder, folderFilter, StringComparison.OrdinalIgnoreCase))
             .Where(e => search.Length == 0 || new[] { e.Title, e.Username, e.Url, e.Folder }.Any(s => s.Contains(search, StringComparison.OrdinalIgnoreCase)))
             .OrderByDescending(e => e.Favorite).ThenBy(e => e.Title, StringComparer.OrdinalIgnoreCase).Select(e => new EntryRow(e)).ToList();
         string? previous = selected?.Id;
@@ -140,25 +300,101 @@ public partial class MainWindow : Window
         DetailTitle.Text = selected.Title; DetailHost.Text = selected.Url.Length > 0 ? OriginPolicy.ExactHost(selected.Url) : "No website saved";
         DetailUsername.Text = selected.Username; DetailNotes.Text = selected.Notes.Length > 0 ? selected.Notes : "No notes yet.";
         DeleteButton.Content = selected.Deleted ? "Restore login" : "Move to trash";
+        PermanentDeleteButton.Visibility = selected.Deleted ? Visibility.Visible : Visibility.Collapsed;
+        var finding = session == null ? null : PasswordHealth.Audit(session.Data.Entries, true).Findings.FirstOrDefault(f => f.EntryId == selected.Id);
+        bool reviewed = finding != null && selected.ReviewAcknowledgement == finding.Fingerprint;
+        ReviewWarnings.Text = finding == null ? "" : (reviewed ? "Reviewed: " : "Review: ") + string.Join("; ", finding.Reasons);
+        ReviewButton.Visibility = finding != null && !reviewed ? Visibility.Visible : Visibility.Collapsed;
     }
     private void SearchChanged(object sender, TextChangedEventArgs e) { if (SearchHint != null) SearchHint.Visibility = SearchBox.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed; if (session != null) Refresh(); }
     private void AllClick(object sender, RoutedEventArgs e) { filter = "all"; Refresh(); }
     private void FavoriteClick(object sender, RoutedEventArgs e) { filter = "favorites"; Refresh(); }
     private void TrashClick(object sender, RoutedEventArgs e) { filter = "trash"; Refresh(); }
-    private void HealthClick(object sender, RoutedEventArgs e) { filter = "health"; Refresh(); SetStatus("Local checks flag short or reused passwords. They do not check online breaches."); }
+    private void HealthClick(object sender, RoutedEventArgs e) { filter = "health"; Refresh(); SetStatus("Local checks flag short, reused, common or predictable passwords. Reviewed risks return if they change. No online breach lookup."); }
     private void AddClick(object sender, RoutedEventArgs e) => Edit(null);
     private void EditClick(object sender, RoutedEventArgs e) { if (selected != null) Edit(selected); }
     private void Edit(VaultEntry? entry)
     {
         if (session == null) return;
-        var updated = FormDialog.Edit(this, entry);
+        var updated = FormDialog.Edit(this, entry, folders: FolderCatalog.Choices(session.Data),
+            generatorOptions: preferences.Generator, saveGeneratorDefaults: SaveGeneratorDefaults);
         if (updated == null || session == null) return;
         Guard(() => { session.Upsert(updated); selected = updated; Refresh(); SetStatus("Login saved to your encrypted vault."); });
     }
     private void DeleteClick(object sender, RoutedEventArgs e)
     {
         if (selected == null || session == null) return;
-        Guard(() => { var copy = selected.Clone(); copy.Deleted = !copy.Deleted; session.Upsert(copy); Refresh(); SetStatus(copy.Deleted ? "Moved to encrypted trash. You can restore it." : "Login restored."); });
+        Guard(() => { var copy = selected.Clone(); copy.Deleted = !copy.Deleted; session.Upsert(copy); undoEntryId = copy.Deleted ? copy.Id : null; undoUntil = DateTime.UtcNow.AddSeconds(15); UndoButton.Visibility = copy.Deleted ? Visibility.Visible : Visibility.Collapsed; nextCloudCheck = DateTime.MinValue; Refresh(); SetStatus(copy.Deleted ? "Moved to encrypted trash. Undo is available for 15 seconds." : "Login restored."); });
+    }
+    private void UndoClick(object sender, RoutedEventArgs e)
+    {
+        if (session == null || undoEntryId == null || DateTime.UtcNow > undoUntil) return;
+        Guard(() => { var entry = session.Data.Entries.FirstOrDefault(x => x.Id == undoEntryId && x.Deleted && !x.Purged); if (entry == null) return; var copy = entry.Clone(); copy.Deleted = false; session.Upsert(copy); undoEntryId = null; UndoButton.Visibility = Visibility.Collapsed; nextCloudCheck = DateTime.MinValue; Refresh(); SetStatus("Login restored."); });
+    }
+    private void LockedCloudClick(object sender, RoutedEventArgs e)
+    {
+        if (busy) return;
+        if (File.Exists(vaultPath)) { LockError.Text = "Unlock this vault and connect it from Sync. A local vault already exists."; return; }
+        var d = new FormDialog(this, "Restore encrypted cloud vault", 510);
+        d.Label("Sign in with the same cloud account and paste the connection code from your own device. Your master passphrase unlocks the encrypted backup on this computer.");
+        var email = d.Field("Cloud account email", "", 320); var account = d.Secret("Cloud account password");
+        var code = d.Secret("Cloud connection code (BVCLOUD1:…)"); var master = d.Secret("Vault master passphrase");
+        var status = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 10, 0, 8) }; d.Body.Children.Add(status);
+        using var cancellation = new CancellationTokenSource();
+        using var http = new System.Net.Http.HttpClient(new System.Net.Http.HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(30) };
+        var auth = new SupabaseCloudAccount(http); bool running = false; int stamp = generation;
+        var restore = d.Action("Sign in & restore", async () =>
+        {
+            if (running) return; running = true;
+            string secret = account.Password, pairingCode = code.Password.Trim(), password = master.Password; account.Clear(); master.Clear();
+            try
+            {
+                if (File.Exists(vaultPath)) throw new VaultException("A local vault already exists.");
+                status.Text = "Signing in and checking encrypted snapshots…";
+                var signed = await auth.SignIn(email.Text.Trim(), secret, cancellation.Token);
+                var factors = await auth.ListFactors(signed, cancellation.Token);
+                if (factors.RequiresChallenge(signed)) signed = CloudMfaDialog.Verify(d, auth, signed, factors.Totp, _ => { },
+                    () => { if (stamp != generation || !d.IsVisible) throw new OperationCanceledException(); }, cancellation.Token);
+                var pairing = CloudPairing.Decode(pairingCode, Guid.Empty, signed.OwnerId);
+                var transport = new SupabaseSnapshotTransport(http, new Uri(CloudProject.Url), CloudProject.PublishableKey, _ => Task.FromResult(signed.AccessToken));
+                var rows = await transport.ListAsync(pairing.VaultSlot, cancellation.Token);
+                if (rows.Count == 0) throw new VaultException("No cloud backup yet. Sync the first device before joining.");
+                byte[] key = CloudSnapshotCodec.ParseRecoveryKey(pairing.RecoveryKey), inner = [];
+                try
+                {
+                    inner = CloudSnapshotCodec.Open(rows[0].Blob, key, pairing.VaultSlot, rows[0].DeviceSlot);
+                    if (VaultCodec.Parse(inner).VaultId != pairing.VaultId.ToString("D")) throw new VaultException("Cloud vault identity does not match the connection code.");
+                    if (stamp != generation || File.Exists(vaultPath)) throw new OperationCanceledException();
+                    var opened = await VaultSession.RestoreCloudNew(vaultPath, inner, password, deviceId);
+                    if (stamp != generation) { opened.Dispose(); throw new OperationCanceledException(); }
+                    session = opened; var profile = new CloudProfile { OwnerId = signed.OwnerId, VaultId = pairing.VaultId, VaultSlot = pairing.VaultSlot,
+                        DeviceSlot = Guid.NewGuid(), RecoveryKey = pairing.RecoveryKey, RefreshToken = signed.RefreshToken, Email = email.Text.Trim() };
+                    try { new CloudProfileStore(root).Save(profile); } finally { profile.Clear(); }
+                    LockView.Visibility = Visibility.Collapsed; VaultView.Visibility = Visibility.Visible; filter = "all"; folderFilter = null; SearchBox.Clear();
+                    MasterBox.Clear(); ConfirmBox.Clear(); lastActivity = DateTime.UtcNow; Refresh(); tray?.Update(); d.Close(); nextCloudCheck = DateTime.MinValue; _ = RunCloudSync();
+                }
+                finally { CryptographicOperations.ZeroMemory(key); CryptographicOperations.ZeroMemory(inner); foreach (var row in rows) CryptographicOperations.ZeroMemory(row.Blob); }
+            }
+            catch (OperationCanceledException) { status.Text = "Cloud restore cancelled. Your local vault is preserved."; }
+            catch (Exception ex) when (ex is VaultException or IOException or System.Net.Http.HttpRequestException or CryptographicException or UnauthorizedAccessException)
+            { status.Text = ex is VaultException ? ex.Message : "Cloud could not be reached or opened. Try again when connected."; }
+            finally { secret = ""; pairingCode = ""; password = ""; running = false; }
+        }, true);
+        d.Action("Cancel", d.Close); d.Closed += (_, _) => { cancellation.Cancel(); code.Clear(); account.Clear(); master.Clear(); };
+        d.ShowDialog();
+    }
+    private void PermanentDeleteClick(object sender, RoutedEventArgs e)
+    {
+        if (selected == null || session == null || !selected.Deleted) return;
+        string id = selected.Id;
+        if (MessageBox.Show(this, "Permanently remove this login from the vault? It cannot be restored. Older exported backups and unsynced devices may still hold their previous encrypted copy.", "Delete permanently", MessageBoxButton.OKCancel, MessageBoxImage.Warning) != MessageBoxResult.OK) return;
+        Guard(() => { session.DeletePermanently(id); selected = null; PrivateClipboard.Clear(); Refresh(); SetStatus("Login permanently deleted. Sync your devices to apply this deletion everywhere."); });
+    }
+    private void ReviewClick(object sender, RoutedEventArgs e)
+    {
+        if (selected == null || session == null || selected.Deleted) return;
+        if (MessageBox.Show(this, "I reviewed the warnings and accept this password for this login. Remove it from Review? Warnings return if the password or its risks change.", "Confirm review", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return;
+        Guard(() => { session.AcknowledgeReview(selected.Id); Refresh(); SetStatus("Review confirmed. This does not change the password or make it stronger."); });
     }
     private void CopyUserClick(object sender, RoutedEventArgs e) { if (selected != null) Copy(selected.Username); }
     private void CopyPasswordClick(object sender, RoutedEventArgs e) { if (selected != null) Copy(selected.Password); }
@@ -173,26 +409,143 @@ public partial class MainWindow : Window
     {
         if (selected?.Url.Length > 0) Guard(() => { OriginPolicy.ExactHost(selected.Url); Process.Start(new ProcessStartInfo(selected.Url) { UseShellExecute = true }); });
     }
+    private void ConnectBrowserExtension()
+    {
+        var dialog = new FormDialog(this, "Connect browser extension", 505);
+        dialog.Label("Step 1 · Install Lockvyn Autofill once in every browser profile you want to use. Browsers require your approval for the extension itself.");
+        dialog.Action("Open extension folder", () => Guard(() =>
+        {
+            string folder = Path.Combine(AppContext.BaseDirectory, "browser-extension");
+            if (!Directory.Exists(folder))
+                throw new VaultException("Browser extension folder is missing from the complete Lockvyn installation.");
+            Process.Start(new ProcessStartInfo("explorer.exe", '"' + folder + '"')
+                { UseShellExecute = true });
+        }), inBody: true);
+        dialog.Label("Step 2 · Copy the extension ID shown under chrome://extensions or edge://extensions. If two browsers have different IDs, register both.");
+        var extensionId = dialog.Field("Extension ID (32 letters, a-p)", "", 32);
+        var status = new TextBlock {
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = System.Windows.Media.Brushes.DimGray,
+            Margin = new Thickness(0, 8, 0, 8)
+        };
+        dialog.Body.Children.Add(status);
+        dialog.Action("Connect this extension to Lockvyn", () =>
+        {
+            try
+            {
+                BrowserNativeHostRepair.RegisterApproved(extensionId.Text.Trim(), AppContext.BaseDirectory);
+                extensionId.Clear();
+                status.Text = "Connected for the current Windows account. It works in every Chrome/Edge profile where you installed this extension. Register another ID if necessary; restart that browser once.";
+            }
+            catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException
+                                     or InvalidDataException or System.Text.Json.JsonException)
+            {
+                status.Text = "Could not connect: " + ex.Message;
+            }
+        }, true, inBody: true);
+        dialog.Label("Lockvyn never installs an extension behind your back, edits browser preferences, forces enterprise policies, or copies your saved passwords into the browser.");
+        dialog.Action("Done", dialog.Close);
+        dialog.ShowDialog();
+    }
+
     private void GeneratorClick(object sender, RoutedEventArgs e)
     {
         if (session == null) return;
-        var d = new FormDialog(this, "Make a stronger password");
-        d.Label("Cryptographically random · generated on this device");
-        var result = d.Field("Password", PasswordGenerator.Generate(), 128); result.IsReadOnly = true; result.FontFamily = new("Consolas");
-        var length = new Slider { Minimum = 16, Maximum = 64, Value = 24, TickFrequency = 1, IsSnapToTickEnabled = true, Margin = new(0, 12, 0, 12) };
-        var caption = new TextBlock { Text = "Length: 24 characters" }; d.Body.Children.Add(caption); d.Body.Children.Add(length);
-        length.ValueChanged += (_, _) => caption.Text = $"Length: {(int)length.Value} characters";
-        var symbols = new CheckBox { Content = "Include symbols", IsChecked = true }; d.Body.Children.Add(symbols);
-        d.Action("Generate again", () => result.Text = PasswordGenerator.Generate((int)length.Value, symbols.IsChecked == true));
-        d.Action("Copy password", () => Copy(result.Text), true); d.ShowDialog(); result.Clear();
+        PasswordGeneratorDialog.Show(this, preferences.Generator, SaveGeneratorDefaults, Copy);
     }
+    private void ManageDomainGroups(Window owner)
+    {
+        if(session == null)return;
+        var dialog = new FormDialog(owner,"Trusted domain groups",560);
+        dialog.Label("These local preferences group related hostnames for all saved logins. Only domains sharing a verified registrable domain can be grouped. Every password fill still needs your approval.");
+        var picker = new ComboBox {
+            DisplayMemberPath = nameof(DomainAliasGroup.Name),
+            Margin = new Thickness(0, 6, 0, 12),
+            ItemsSource = preferences.DomainGroups.ToList()
+        };
+        dialog.Body.Children.Add(picker);
+        var groupName = dialog.Field("Group name","Google",60);
+        var hostnames = dialog.Field("HTTPS hostnames, one per line (without https://)",
+            "google.com\nwww.google.com\naccounts.google.com",2000,true);
+        var message = new TextBlock { TextWrapping = TextWrapping.Wrap,
+            Foreground = Brushes.DarkSlateBlue, Margin = new Thickness(0, 10, 0, 10) };
+        dialog.Body.Children.Add(message);
+        picker.SelectionChanged += (_,_) => {
+            if(picker.SelectedItem is DomainAliasGroup g) {
+                groupName.Text = g.Name;
+                hostnames.Text = string.Join(Environment.NewLine,g.Hosts);
+            }
+        };
+        void Reload()
+        {
+            picker.ItemsSource = null;
+            picker.ItemsSource = preferences.DomainGroups.ToList();
+        }
+        dialog.Action("Save group",() => {
+            try {
+                if(session == null || !session.IsOpen)throw new VaultException("Unlock Lockvyn to edit domain groups.");
+                var hosts=hostnames.Text.Split(new[]{'\r','\n',',',';'},
+                    StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+                    .Select(x=>x.ToLowerInvariant()).ToList();
+                var updated = new DomainAliasGroup { Name=groupName.Text.Trim(), Hosts=hosts };
+                var groups = preferences.DomainGroups.Select(g=>new DomainAliasGroup {
+                    Name=g.Name, Hosts=g.Hosts.ToList() }).ToList();
+                int index=picker.SelectedIndex;
+                if(index>=0)groups[index]=updated;else groups.Add(updated);
+                if(groups.Select(g=>g.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count()!=groups.Count)
+                    throw new VaultException("Use a unique name for each domain group.");
+                OriginPolicy.ValidateGroups(groups);
+                var previous=preferences.DomainGroups;
+                preferences.DomainGroups=groups;
+                try { preferences.Save(preferencesPath); }
+                catch { preferences.DomainGroups=previous;throw; }
+                Reload();picker.SelectedIndex=index>=0?index:groups.Count-1;
+                message.Text="Domain group saved. Applies to every matching saved login immediately.";
+            } catch(Exception ex) when(ex is VaultException or IOException or UnauthorizedAccessException or ArgumentException) {
+                message.Text=ex.Message;
+            }
+        },true,inBody:true);
+        dialog.Action("New group",() => {
+            picker.SelectedIndex=-1;groupName.Text="";hostnames.Text="";message.Text="Enter at least two hosts belonging to the same website.";
+        },inBody:true);
+        dialog.Action("Delete selected group",() => {
+            if(picker.SelectedIndex<0) { message.Text="Select a group to remove.";return; }
+            try {
+                var groups=preferences.DomainGroups.Where((_,i)=>i!=picker.SelectedIndex).ToList();
+                var previous=preferences.DomainGroups;
+                preferences.DomainGroups=groups;
+                try { preferences.Save(preferencesPath); }
+                catch { preferences.DomainGroups=previous;throw; }
+                Reload();picker.SelectedIndex=-1;message.Text="Domain group deleted; saved logins are unchanged.";
+            }catch(Exception ex) when(ex is VaultException or IOException or UnauthorizedAccessException or ArgumentException){
+                message.Text=ex.Message;
+            }
+        },inBody:true);
+        dialog.Action("Close",dialog.Close,true);
+        dialog.ShowDialog();
+    }
+
     private void SettingsClick(object sender, RoutedEventArgs e)
     {
         if (session == null) return;
         var d = new FormDialog(this, "Your vault settings");
+        d.Action("Check for updates", () => { d.Close(); UpdatesClick(sender, e); }, inBody: true);
+        var updateAlerts = new CheckBox {
+            Content = "Notify me when new versions are available",
+            IsChecked = preferences.UpdateNotificationsEnabled,
+            Margin = new Thickness(0, 10, 0, 10) };
+        d.Body.Children.Add(updateAlerts);
+        updateAlerts.Click += (_, _) => Guard(() =>
+        {
+            preferences.UpdateNotificationsEnabled = updateAlerts.IsChecked == true;
+            preferences.Save(preferencesPath);
+            if (preferences.UpdateNotificationsEnabled)
+                nextUpdateCheckUtc = DateTime.UtcNow.AddSeconds(2);
+            else pendingUpdateVersion = null;
+        });
         var startup = new CheckBox { Content = "Start with Windows · locked in the tray", IsChecked = StartupEnabled() }; d.Body.Children.Add(startup);
         startup.Click += (_, _) => { SetStartup(startup.IsChecked == true); startup.IsChecked = StartupEnabled(); };
-        d.Label("Closing the main window locks the vault and keeps BoshaVault in the tray. Click the tray icon or use Ctrl + Alt + P to reopen. Right-click the icon for Exit.");
+        d.Label("Closing the main window locks the vault and keeps Lockvyn in the tray. Click the tray icon or use Ctrl + Alt + P to reopen. Right-click the icon for Exit.");
         var browserAuto = new CheckBox { Content = "Enable local Chrome / Edge Autofill", IsChecked = preferences.BrowserAutofillEnabled };
         d.Body.Children.Add(browserAuto);
         browserAuto.Click += (_, _) => Guard(() => {
@@ -200,10 +553,32 @@ public partial class MainWindow : Window
             preferences.Save(preferencesPath);
             SetStatus(preferences.BrowserAutofillEnabled ? "Browser Autofill enabled." : "Browser Autofill disabled.");
         });
-        d.Label("Browser setup: Install the BoshaVault extension in Chrome or Edge (Load unpacked), then run Install-BrowserAutofill.ps1 with its extension ID. Matching HTTPS logins appear near password fields. Every fill requires your approval on Windows. No blind typing.");
+        d.Label("Domain groups apply to every saved account automatically. Group HTTPS hosts within the same parent website (for example google.com and accounts.google.com). Fill still requires approval.");
+        d.Action("Manage trusted domain groups", () => ManageDomainGroups(d), inBody: true);
+        int browserGuideStart = d.Body.Children.Count;
+        d.Label("Install the Lockvyn browser extension once in each Chrome / Edge profile you choose. Connect its ID here one time. After every Windows update, the local connection repairs itself; no script or administrator permissions.");
+        d.Action("Connect browser extension · one-time setup", ConnectBrowserExtension, true, inBody: true);
+        d.Label("For each profile, open chrome://extensions or edge://extensions → Developer mode → Load unpacked. Choose the Lockvyn browser-extension folder. Copy its extension ID from the browser and register it once. You can unpin the toolbar icon. Existing Autofill continues to require deliberate approval.");
+        d.Action("Open browser extension folder", () => Guard(() => {
+            string folder = System.IO.Path.Combine(AppContext.BaseDirectory, "browser-extension");
+            if (!Directory.Exists(folder)) throw new VaultException("The extension folder is missing from this installation. Reinstall the complete Windows package.");
+            Process.Start(new ProcessStartInfo("explorer.exe", '"' + folder + '"') { UseShellExecute = true });
+        }), inBody: true);
+        var browserGuide = new StackPanel();
+        while (d.Body.Children.Count > browserGuideStart)
+        {
+            var element = d.Body.Children[browserGuideStart];
+            d.Body.Children.RemoveAt(browserGuideStart);
+            browserGuide.Children.Add(element);
+        }
+        d.Body.Children.Add(new Expander {
+            Header = "Browser extension setup · optional",
+            Content = browserGuide, Margin = new Thickness(0, 10, 0, 10)
+        });
         d.Label("Auto-lock after inactivity");
         var options = new ComboBox { ItemsSource = new[] { 1, 2, 5, 10 }, SelectedItem = timeoutMinutes, Padding = new(10), Margin = new(0, 0, 0, 18) }; d.Body.Children.Add(options);
-        d.Action("Apply auto-lock time", () => Guard(() => { int minutes = (int)options.SelectedItem; preferences.AutoLockMinutes = minutes; preferences.Save(preferencesPath); timeoutMinutes = minutes; SetStatus($"Auto-lock set to {timeoutMinutes} minutes and saved."); }));
+        d.Action("Apply auto-lock time", () => Guard(() => { int minutes = (int)options.SelectedItem; preferences.AutoLockMinutes = minutes; preferences.Save(preferencesPath); timeoutMinutes = minutes; SetStatus($"Auto-lock set to {timeoutMinutes} minutes and saved."); }), inBody: true);
+        int advancedStart = d.Body.Children.Count;
         var current = d.Secret("Current master passphrase"); var next = d.Secret("New master passphrase (16+ characters)"); var confirm = d.Secret("Confirm new passphrase");
         var note = new TextBlock { FontSize = 12, TextWrapping = TextWrapping.Wrap, Foreground = System.Windows.Media.Brushes.Gray }; d.Body.Children.Add(note);
         Button? change = null;
@@ -218,12 +593,12 @@ public partial class MainWindow : Window
             try { await activeSession.ChangePassword(oldPassword, newPassword); if (stamp != generation || session != activeSession || !d.IsVisible) return; Refresh(); note.Text = "Passphrase and vault key changed. Old backups still use their original passphrase. Other devices must verify the updated passphrase when merging."; }
             catch (Exception ex) when (ex is VaultException or IOException) { if (stamp == generation && d.IsVisible) note.Text = ex.Message; }
             finally { oldPassword = ""; newPassword = ""; change.IsEnabled = true; }
-        }, true);
+        }, true, inBody: true);
         d.Action("View local password health report", () => {
             if (session == null) return;
             var review = PasswordHealth.Audit(session.Data.Entries);
             var popup = new FormDialog(this, "Password health · local check", 540);
-            popup.Label($"Reviewed: {review.Total} logins. At risk: {review.AtRisk}. Reused: {review.Reused}. Short: {review.Short}. Common: {review.CommonPassword}. Predictable: {review.Predictable}.");
+            popup.Label($"Saved: {review.Total} logins. Awaiting review: {review.AtRisk}. Reused: {review.Reused}. Short: {review.Short}. Common: {review.CommonPassword}. Predictable: {review.Predictable}.");
             popup.Label("Results are calculated on this device only. No passwords or website history leave your vault. This is a limited local check, not an online breach database.");
             if(review.Findings.Count==0) popup.Label("No obvious issues detected by the current local rules.");
             foreach(var finding in review.Findings.Take(35))
@@ -231,12 +606,25 @@ public partial class MainWindow : Window
             if(review.Findings.Count>35) popup.Label($"Plus {review.Findings.Count-35} more entries. Review the vault list for the rest.");
             popup.Action("Close",popup.Close,true);
             popup.ShowDialog();
-        });
-        d.Action("Import Chrome / Bitwarden passwords from CSV", () => ImportBrowserPasswords(d));
+        }, inBody: true);
+        d.Action("Import Chrome / Bitwarden passwords from CSV", () => ImportBrowserPasswords(d), inBody: true);
         d.Label("Importing requires reviewing a local plaintext CSV. No source file is automatically deleted or uploaded.");
         d.Label("No reset service exists. Old backups are not revoked by changing the passphrase. Windows quick unlock is intentionally unavailable in this release.");
-        d.Action("Lock & move to tray", HideToTray);
-        d.Action("Exit BoshaVault", ExitApplication);
+        d.Action("Lock & move to tray", HideToTray, inBody: true);
+        d.Action("Exit Lockvyn", ExitApplication, inBody: true);
+        var advanced = new StackPanel();
+        while (d.Body.Children.Count > advancedStart)
+        {
+            var element = d.Body.Children[advancedStart];
+            d.Body.Children.RemoveAt(advancedStart);
+            advanced.Children.Add(element);
+        }
+        d.Body.Children.Add(new Expander {
+            Header = "Advanced security, import & troubleshooting",
+            Content = advanced, IsExpanded = false,
+            Margin = new Thickness(0, 16, 0, 10)
+        });
+        d.Action("Close Settings", d.Close, true);
         d.ShowDialog(); current.Clear(); next.Clear(); confirm.Clear();
     }
     // Diagnostic records contain stages + exception type only. Never write pairing
@@ -261,10 +649,93 @@ public partial class MainWindow : Window
     private void SyncClick(object sender, RoutedEventArgs e)
     {
         if (session == null) return;
+        var d = new FormDialog(this, "Sync & Devices", 540);
+        CloudProfile? summaryProfile = null;
+        try { summaryProfile = new CloudProfileStore(root).Load(Guid.Parse(session.Data.VaultId)); }
+        catch (Exception ex) when (ex is VaultException or IOException or UnauthorizedAccessException) { }
+        bool connected = summaryProfile != null;
+        string lastSynced = summaryProfile?.LastSyncUtc ?? "";
+        summaryProfile?.Clear();
+        d.Label(connected
+            ? "Cloud sync is connected. New passwords sync automatically when Internet is available. Open your vault on other devices to apply changes."
+            : "Connect an encrypted cloud account once to sync passwords between your devices automatically.");
+        var cloudCard = new StackPanel { Margin = new Thickness(0, 8, 0, 14) };
+        cloudCard.Children.Add(new TextBlock {
+            Text = connected ? "● Cloud connected · automatic sync" : "○ Cloud not connected",
+            FontWeight = FontWeights.SemiBold, FontSize = 17,
+            Foreground = connected ? Brushes.SeaGreen : Brushes.SlateGray });
+        cloudCard.Children.Add(new TextBlock { Text = connected
+            ? "Use Cloud Sync to view last sync, sync manually, or manage your account."
+            : "Your local vault stays available offline. Cloud is optional.",
+            Foreground = Brushes.DimGray, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 7, 0, 7) });
+        d.Body.Children.Add(cloudCard);
+        if (connected)
+        {
+            d.Label(lastSynced.Length == 0 ? "No successful sync yet." : "Last synced: " + lastSynced);
+            var hubStatus = new TextBlock { Foreground = Brushes.DimGray,
+                TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 3, 0, 5) };
+            d.Action("Sync Now", async () =>
+            {
+                hubStatus.Text = "Synchronizing encrypted changes…";
+                await RunCloudSync();
+                if (d.IsVisible) hubStatus.Text = CloudStatus.Text;
+            }, true, true);
+            d.Body.Children.Add(hubStatus);
+        }
+        d.Action("Cloud Sync · manage account", () => { d.Close(); CloudClick(sender, e); }, false, true);
+        d.Action("Add new device · secure QR", () => { d.Close(); OpenCloudSync(true); }, false, true);
+        d.Label("First-time pairing displays a two-minute public-key QR and asks you to verify six digits on both devices.");
+        d.Action("Offline transfer · private Wi-Fi", () => { d.Close(); OfflineTransferClick(sender, e); }, false, true);
+        d.Label("Use offline transfer only when cloud access is unavailable. Private-network tools are tucked into advanced options.");
+        d.ShowDialog();
+    }
+
+    private void BackupClick(object sender, RoutedEventArgs e)
+    {
+        if (session == null) return;
+        var d = new FormDialog(this, "Backup & Restore", 500);
+        d.Label("Keep an encrypted backup on another trusted drive. Export and restore never send your vault to a server.");
+        d.Action("Export encrypted backup", () => { d.Close(); Export(); }, true, true);
+        d.Action("Import / merge encrypted backup", () => { d.Close(); ImportMerge(); }, false, true);
+        d.Label("Import verifies the encrypted vault; any conflicting records are preserved. Your local vault is never silently replaced.");
+        d.ShowDialog();
+    }
+
+    private async void OfflineTransferClick(object sender, RoutedEventArgs e)
+    {
+        if (session == null) return;
+        cloudDialogOpen = true;
+        cachedCloudSession = null;
+        await cloudGate.WaitAsync(); cloudGate.Release();
         var d = new FormDialog(this, "Devices & encrypted backup", 610);
-        d.Label("Connect your phone on the same private Wi-Fi. Keep this window open until the encrypted transfer finishes.");
+        d.Label("Send an encrypted vault locally when the cloud is unavailable. On Android choose Sync & Devices → Offline Wi-Fi transfer.");
+        int networkStart = d.Body.Children.Count;
         string defaultIp = ""; try { defaultIp = LocalTransferServer.FindPrivateHost(); } catch (Exception ex) when (ex is VaultException or System.Net.Sockets.SocketException) { }
         var address = d.Field("Your private Wi-Fi IPv4 address", defaultIp, 15);
+        var networks = new ComboBox { Margin = new(0, 6, 0, 8), MinWidth = 300 };
+        void RefreshNetworks()
+        {
+            try
+            {
+                var choices = LocalTransferServer.PrivateInterfaces();
+                networks.ItemsSource = choices; networks.DisplayMemberPath = "Label";
+                networks.SelectedItem = choices.FirstOrDefault(n => n.Host == address.Text) ?? choices.FirstOrDefault();
+            }
+            catch (System.Net.NetworkInformation.NetworkInformationException) { networks.ItemsSource = null; }
+        }
+        networks.SelectionChanged += (_, _) => { if (networks.SelectedItem is LocalTransferServer.PrivateInterface choice) address.Text = choice.Host; };
+        d.Body.Children.Add(networks); RefreshNetworks();
+        d.Action("Refresh Wi-Fi addresses", RefreshNetworks, inBody: true);
+        var networkAdvanced = new StackPanel();
+        while (d.Body.Children.Count > networkStart)
+        {
+            var element = d.Body.Children[networkStart];
+            d.Body.Children.RemoveAt(networkStart);
+            networkAdvanced.Children.Add(element);
+        }
+        d.Body.Children.Add(new Expander {
+            Header = "Advanced network settings · IP addresses",
+            Content = networkAdvanced, Margin = new Thickness(0, 12, 0, 12) });
         var pairing = new TextBox { IsReadOnly = true, MaxLength = 4096, TextWrapping = TextWrapping.Wrap, MinHeight = 80, Margin = new(0, 10, 0, 0) };
         var qr = new Image { Width = 310, Height = 310, Stretch = Stretch.Uniform, SnapsToDevicePixels = true };
         RenderOptions.SetBitmapScalingMode(qr, BitmapScalingMode.NearestNeighbor);
@@ -284,6 +755,7 @@ public partial class MainWindow : Window
         {
             int remaining = (int)Math.Ceiling(((transfer?.ExpiresUtc ?? DateTime.UtcNow) - DateTime.UtcNow).TotalSeconds);
             if (remaining <= 0) { ClearPairing(); transfer?.Dispose(); transfer = null; status.Text = "Pairing expired. Start a new private transfer to try again."; }
+            else if (transfer is { IsCompleted: true }) { ClearPairing(); status.Text = "Transfer complete. Both devices have the merged vault."; }
             else if (transfer is { IsActive: false }) { ClearPairing(); status.Text = "Transfer stopped. Start a new private transfer and scan its new QR."; }
             else { countdown.Text = $"Expires in {remaining / 60}:{remaining % 60:00}"; if (transfer?.LastIssue != null) status.Text = transfer.LastIssue; }
         };
@@ -293,7 +765,7 @@ public partial class MainWindow : Window
             LocalTransferServer? currentTransfer = null;
             currentTransfer = new LocalTransferServer(
                 () => Dispatcher.Invoke(() => { if (transfer != currentTransfer || session == null) throw new VaultException("Transfer stopped."); return session.ExportEncrypted(); }),
-                bytes => Dispatcher.Invoke(() => { if (transfer != currentTransfer || session == null) throw new VaultException("Transfer stopped."); int c = MergeBackup(bytes); ClearPairing(); Refresh(); Touch(); status.Text = c == 0 ? "Transfer complete. Both devices have the merged vault." : $"Transfer complete. {c} conflict copies kept."; }),
+                bytes => Dispatcher.Invoke(() => { if (transfer != currentTransfer || session == null || currentTransfer?.IsActive != true) throw new VaultException("Transfer stopped."); int c = MergeBackup(bytes); ClearPairing(); Refresh(); Touch(); status.Text = c == 0 ? "Transfer complete. Both devices have the merged vault." : $"Transfer complete. {c} conflict copies kept."; }),
                 WriteTransferDiagnostic);
             transfer = currentTransfer;
             try
@@ -312,16 +784,60 @@ public partial class MainWindow : Window
             catch { ClearPairing(); transfer.Dispose(); transfer = null; throw; }
         }), true);
         d.Body.Children.Add(card); d.Body.Children.Add(status);
-        d.Action("Copy pairing code", () => { if (pairing.Text.Length > 0) Copy(pairing.Text); });
-        d.Body.Children.Add(new Expander { Header = "Or paste the pairing code manually", Content = pairing, Margin = new(0, 14, 0, 20) });
-        d.Label("If Windows asks for firewall access, allow this app on your private network. Guest Wi-Fi may block connections. Error types are saved to %LOCALAPPDATA%\\BoshaVault\\transfer.log without secret data.");
-        d.Label("Encrypted backup files"); d.Action("Export encrypted backup", Export); d.Action("Merge an encrypted backup", ImportMerge);
-        try { d.ShowDialog(); } finally { ClearPairing(); transfer?.Dispose(); transfer = null; }
+        var copyPairing = d.Action("Copy pairing code · fallback", () => { if (pairing.Text.Length > 0) Copy(pairing.Text); }, inBody: true);
+        d.Body.Children.Remove(copyPairing);
+        networkAdvanced.Children.Add(copyPairing);
+        networkAdvanced.Children.Add(new Expander { Header = "Manual pairing code · fallback", Content = pairing, Margin = new(0, 12, 0, 12) });
+        d.Label("If Windows asks for firewall access, allow this app on your private network. Guest Wi-Fi may block connections.");
+        var firewallButton = d.Action("Allow Lockvyn on private Wi-Fi (administrator approval)", async () =>
+        {
+            try
+            {
+                string script = System.IO.Path.Combine(AppContext.BaseDirectory, "Configure-PrivateTransfer.ps1");
+                string app = Environment.ProcessPath ?? throw new IOException();
+                if (!File.Exists(script)) throw new IOException();
+                string command = "& '" + script.Replace("'", "''") + "' -ProgramPath '" + app.Replace("'", "''") + "'";
+                string encoded = Convert.ToBase64String(System.Text.Encoding.Unicode.GetBytes(command));
+                string powershell = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe");
+                using var process = Process.Start(new ProcessStartInfo(powershell, "-NoProfile -ExecutionPolicy Bypass -EncodedCommand " + encoded) { UseShellExecute = true, Verb = "runas", WindowStyle = ProcessWindowStyle.Hidden });
+                if (process == null) throw new IOException();
+                await process.WaitForExitAsync();
+                status.Text = process.ExitCode == 0
+                    ? "Private-network access is configured for this installed app. Set your trusted home Wi-Fi to Private in Windows, then retry the current QR."
+                    : "Windows could not configure private-network access. Your firewall remains enabled. Check administrator permissions.";
+            }
+            catch (Win32Exception) { status.Text = "Administrator approval was cancelled. Private-network access was not changed."; }
+            catch (IOException) { status.Text = "Cannot locate the installed app's private-transfer helper. Update Lockvyn and retry."; }
+        }, inBody: true);
+        d.Body.Children.Remove(firewallButton);
+        networkAdvanced.Children.Add(firewallButton);
+        d.Label("This optional action needs administrator approval and allows only private local-network traffic for Lockvyn.");
+        var firewallHelp = d.Body.Children[^1];
+        d.Body.Children.RemoveAt(d.Body.Children.Count - 1);
+        networkAdvanced.Children.Add(firewallHelp);
+        try { d.ShowDialog(); } finally { ClearPairing(); transfer?.Dispose(); transfer = null; cloudDialogOpen = false; nextCloudCheck = DateTime.MinValue; }
+    }
+    private void CloudClick(object sender, RoutedEventArgs e) => OpenCloudSync(false);
+
+    private async void OpenCloudSync(bool openPairing)
+    {
+        if (session == null || cloudDialogOpen) return;
+        cloudDialogOpen = true;
+        cachedCloudSession = null;
+        try
+        {
+            await cloudGate.WaitAsync(); cloudGate.Release();
+            if (session == null) return;
+            var opened = session; int stamp = generation;
+            CloudSyncDialog.Show(this, root, opened, () => session == opened && generation == stamp,
+                () => { Refresh(); Touch(); }, Copy, openPairing);
+        }
+        finally { cloudDialogOpen = false; if (!new CloudProfileStore(root).Exists) CloudStatus.Text = "Cloud is optional"; nextCloudCheck = DateTime.MinValue; }
     }
     private void Export()
     {
         if (session == null) return;
-        var picker = new SaveFileDialog { Filter = "Encrypted vault (*.boshavault)|*.boshavault", FileName = $"BoshaVault-{DateTime.Now:yyyy-MM-dd}.boshavault" };
+        var picker = new SaveFileDialog { Filter = "Encrypted vault (*.boshavault)|*.boshavault", FileName = $"Lockvyn-{DateTime.Now:yyyy-MM-dd}.boshavault" };
         if (picker.ShowDialog(this) != true) return;
         Guard(() => { if (System.IO.Path.GetFullPath(picker.FileName).Equals(vaultPath, StringComparison.OrdinalIgnoreCase)) throw new VaultException("Choose a separate backup path."); File.WriteAllBytes(picker.FileName, session.ExportEncrypted()); SetStatus("Encrypted backup saved. Keep a copy away from this device."); });
     }
@@ -366,13 +882,13 @@ public partial class MainWindow : Window
     private void SetStatus(string text) { StatusText.Text = text; lastActivity = DateTime.UtcNow; }
     internal void Touch() => lastActivity = DateTime.UtcNow;
     private void Guard(Action action)
-    { try { action(); } catch (Exception ex) when (ex is VaultException or IOException or UnauthorizedAccessException or Win32Exception or COMException or System.Net.Sockets.SocketException) { MessageBox.Show(this, ex is VaultException ? ex.Message : ex is System.Net.Sockets.SocketException ? "Cannot start the transfer at this address. Use your current Wi-Fi IPv4 address and check your private-network firewall settings." : "The action could not be completed. Check file access and retry.", "BoshaVault"); } }
+    { try { action(); } catch (Exception ex) when (ex is VaultException or IOException or UnauthorizedAccessException or Win32Exception or COMException or System.Net.Sockets.SocketException) { MessageBox.Show(this, ex is VaultException ? ex.Message : ex is System.Net.Sockets.SocketException ? "Cannot start the transfer at this address. Use your current Wi-Fi IPv4 address and check your private-network firewall settings." : "The action could not be completed. Check file access and retry.", "Lockvyn"); } }
     private void OnSessionSwitch(object sender, SessionSwitchEventArgs e) { if (e.Reason is SessionSwitchReason.SessionLock or SessionSwitchReason.SessionLogoff or SessionSwitchReason.RemoteDisconnect) Dispatcher.BeginInvoke(LockVault); }
     private void OnPowerModeChanged(object sender, PowerModeChangedEventArgs e) { if (e.Mode == PowerModes.Suspend) Dispatcher.BeginInvoke(LockVault); }
     private void OnSourceInitialized(object? sender, EventArgs e)
     {
         hwnd = new WindowInteropHelper(this).Handle; source = HwndSource.FromHwnd(hwnd); source?.AddHook(WndProc);
-        if (!RegisterHotKey(hwnd, 1, 0x4003, 0x50)) SetStatus("Ctrl+Alt+P is already in use by another app. Open BoshaVault from the taskbar.");
+        if (!RegisterHotKey(hwnd, 1, 0x4003, 0x50)) SetStatus("Ctrl+Alt+P is already in use by another app. Open Lockvyn from the taskbar.");
         SetWindowDisplayAffinity(hwnd, 0x11); // Best effort; cannot defeat cameras / privileged software.
         try { tray = new TrayController(Dispatcher, BringToFront, LockVault, ExitApplication, () => session != null, StartupEnabled, SetStartup); }
         catch (Exception ex) when (ex is IOException or ArgumentException or Win32Exception or ExternalException)
@@ -418,9 +934,81 @@ public partial class MainWindow : Window
     {
         try { WindowsStartup.SetEnabled(enabled); tray?.Update(); SetStatus(enabled ? "Starts with Windows, locked in the tray." : "Automatic Windows startup disabled."); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
-        { BringToFront(); MessageBox.Show(this, "Cannot update your Windows startup setting. Check your user-account permissions.", "BoshaVault"); }
+        { BringToFront(); MessageBox.Show(this, "Cannot update your Windows startup setting. Check your user-account permissions.", "Lockvyn"); }
     }
     private void ExitApplication() { PrepareToExit(); Application.Current.Shutdown(); }
+    private void UpdatesClick(object sender, RoutedEventArgs e) => ShowUpdates(false);
+
+    private void ShowUpdates(bool checkImmediately)
+    {
+        if (updates != null) { updates.Activate(); return; }
+        updates = new UpdateDialog(this, checkImmediately);
+        updates.Closed += (_, _) => updates = null;
+        BringToFront();
+        updates.Show();
+    }
+
+    private async Task CheckUpdateAnnouncement()
+    {
+        if (updateCheckBusy || !preferences.UpdateNotificationsEnabled || exiting) return;
+        updateCheckBusy = true;
+        try
+        {
+            var manager = new UpdateManager(
+                new GithubSource("https://github.com/R3Dzf/BoshaVault", null, false));
+            if (!manager.IsInstalled) return;
+            var update = await manager.CheckForUpdatesAsync().WaitAsync(TimeSpan.FromSeconds(16));
+            if (update == null || exiting || !preferences.UpdateNotificationsEnabled) return;
+            string version = update.TargetFullRelease.Version.ToString();
+            if (version == alertedUpdateVersion) return;
+            pendingUpdateVersion = version;
+            alertedUpdateVersion = version;
+            if (!IsVisible || WindowState == WindowState.Minimized)
+                tray?.ShowUpdateAvailable(version);
+            else TryShowUpdateNotice();
+        }
+        catch (Exception ex) when (ex is IOException or HttpRequestException or
+                                    OperationCanceledException or TimeoutException)
+        {
+            // Update availability never blocks vault unlock, offline use or cloud sync.
+        }
+        finally { updateCheckBusy = false; }
+    }
+
+    private void TryShowUpdateNotice()
+    {
+        if (updatePromptVisible || !preferences.UpdateNotificationsEnabled || exiting ||
+            string.IsNullOrEmpty(pendingUpdateVersion) || !IsVisible ||
+            WindowState == WindowState.Minimized || updates != null ||
+            OwnedWindows.Cast<Window>().Any(window => window.IsVisible)) return;
+        string version = pendingUpdateVersion;
+        pendingUpdateVersion = null;
+        updatePromptVisible = true;
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (exiting) { updatePromptVisible = false; return; }
+            var dialog = new FormDialog(this, "Update available · " + version, 490);
+            dialog.Label("A new Lockvyn version is available. Your encrypted vault and settings stay on this device.");
+            dialog.Label("You can read a short What's New summary and see the download size before downloading.");
+            dialog.Action("Update now", () =>
+            {
+                dialog.Close();
+                ShowUpdates(true);
+            }, true, true);
+            dialog.Action("Later", dialog.Close, inBody: true);
+            dialog.Action("Don't notify me again", () =>
+            {
+                Guard(() =>
+                {
+                    preferences.UpdateNotificationsEnabled = false;
+                    preferences.Save(preferencesPath);
+                });
+                dialog.Close();
+            }, inBody: true);
+            dialog.Closed += (_, _) => updatePromptVisible = false;
+            dialog.ShowDialog();
+        });
+    }
     internal void PrepareToExit() { if (exiting) return; exiting = true; LockVault(); }
     internal void ReleaseDesktopResources()
     {

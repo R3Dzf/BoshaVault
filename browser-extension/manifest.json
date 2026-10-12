@@ -1,16 +1,46 @@
 {
   "manifest_version": 3,
-  "name": "BoshaVault Autofill (Local Preview)",
-  "version": "0.5.0",
-  "description": "User-approved local autofill through the BoshaVault Windows app. No cloud service.",
-  "permissions": ["nativeMessaging", "webNavigation", "activeTab"],
-  "host_permissions": ["https://*/*"],
-  "background": { "service_worker": "background.js" },
-  "content_scripts": [{
-    "matches": ["https://*/*"],
-    "js": ["password-utils.js", "content.js"],
-    "run_at": "document_idle",
-    "all_frames": false
-  }],
-  "action": { "default_title": "BoshaVault Autofill", "default_popup": "popup.html" }
+  "name": "Lockvyn Autofill",
+  "version": "0.8.0",
+  "description": "Private Lockvyn Autofill with optional Quiet Mode and conditional passkey suggestion control.",
+  "permissions": [
+    "nativeMessaging",
+    "webNavigation",
+    "activeTab",
+    "storage",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*/*"
+      ],
+      "js": [
+        "password-utils.js",
+        "content.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "action": {
+    "default_title": "Lockvyn Autofill",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/lockvyn-16.png",
+      "32": "icons/lockvyn-32.png"
+    }
+  },
+  "icons": {
+    "16": "icons/lockvyn-16.png",
+    "32": "icons/lockvyn-32.png",
+    "48": "icons/lockvyn-48.png",
+    "128": "icons/lockvyn-128.png"
+  }
 }

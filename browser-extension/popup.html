@@ -1,21 +1,31 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>BoshaVault Autofill</title>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Lockvyn Autofill</title>
 <style>
-body{box-sizing:border-box;margin:0;width:315px;background:#faf9ff;color:#2a2740;font:13px "Segoe UI",system-ui,sans-serif}
-header{padding:15px 15px 12px;background:#fff;border-bottom:1px solid #e6e1f2}
-h1{font-size:17px;margin:0 0 5px;color:#5943bf}
+body{box-sizing:border-box;margin:0;width:315px;background:#f7f8fc;color:#171b2e;font:13px "Segoe UI",system-ui,sans-serif}
+header{padding:15px 15px 12px;background:#fff;border-bottom:1px solid #e1e5ef}
+h1{font-size:17px;margin:0 0 5px;color:#6558d9;display:flex;align-items:center;gap:8px}h1 img{width:24px;height:24px}
 small{display:block;color:#767086;overflow-wrap:anywhere;line-height:1.5}
 main{padding:15px}
-button{display:block;width:100%;border:1px solid #dfd8f7;background:#f1edff;color:#45318f;padding:11px;border-radius:9px;font:600 13px "Segoe UI",system-ui;cursor:pointer;margin-bottom:9px}
-button.primary{background:#7762df;color:white;border-color:#7762df}
+button{display:block;width:100%;border:1px solid #e1e5ef;background:#efedff;color:#6558d9;padding:11px;border-radius:9px;font:600 13px "Segoe UI",system-ui;cursor:pointer;margin-bottom:9px}
+button.primary{background:#6558d9;color:white;border-color:#6558d9}
 button:hover{filter:brightness(.95)}
 #status{font-size:12px;line-height:1.5;padding:10px;border-radius:9px;background:#fff;min-height:21px;overflow-wrap:anywhere}
 footer{padding:0 15px 15px;color:#888;font-size:11px;line-height:1.5}
 </style></head><body>
-<header><h1>🔐 BoshaVault</h1><small id="site">Detecting current HTTPS website…</small></header>
+<header><h1><img src="icons/lockvyn-32.png" alt="">Lockvyn</h1><small id="site">Detecting current HTTPS website…</small></header>
 <main>
 <button class="primary" id="show">Show saved logins</button>
-<button id="save">Save this website in BoshaVault</button>
-<p id="status" role="status" aria-live="polite">Keep BoshaVault Windows running and unlocked.</p>
-</main><footer>Exact HTTPS website matching · User-approved filling · Local-only connection</footer>
+<button id="save">Save this website in Lockvyn</button>
+<label style="display:flex;align-items:center;gap:9px;margin:12px 1px;font-size:12px;line-height:1.4">
+<input id="quiet" type="checkbox" style="accent-color:#6558d9;width:17px;height:17px">
+<span><strong>Quiet Mode</strong> — show suggestions only when I request them</span></label>
+<div style="border-top:1px solid #e1e5ef;margin:14px 0 12px;padding-top:12px">
+<label style="display:flex;align-items:flex-start;gap:9px;font-size:12px;line-height:1.45">
+<input id="blockPasskeys" type="checkbox" style="accent-color:#6558d9;width:17px;height:17px;margin:2px 0;flex:none">
+<span><strong>Hide automatic Passkey suggestions</strong><small>Experimental · blocks sites' conditional WebAuthn requests. Explicit Passkey login remains available.</small></span>
+</label>
+<small style="margin:8px 0;color:#876341">This may affect some sites' sign-in experience. It cannot guarantee that Chrome or Windows Hello native suggestions will all disappear. Refresh other open login tabs after changing it.</small>
+</div>
+<p id="status" role="status" aria-live="polite">Keep Lockvyn Windows running and unlocked.</p>
+</main><footer>Only exact HTTPS sites · Confirm every fill in Windows · No passwords stored in this extension</footer>
 <script src="popup.js"></script>
 </body></html>

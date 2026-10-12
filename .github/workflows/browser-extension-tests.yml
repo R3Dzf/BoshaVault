@@ -1,0 +1,45 @@
+name: Browser Autofill security and UX
+
+on:
+  pull_request:
+    branches: [main, 'feat/quiet-chrome-passkey-suggestions']
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  browser:
+    name: Chrome / Edge extension tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate extension JavaScript and manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          for src in browser-extension/*.js; do node --check "$src"; done
+          node -e "const fs=require('fs');JSON.parse(fs.readFileSync('browser-extension/manifest.json','utf8'))"
+      - name: Verify autofill identity, suggestions, and password generator
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tools/test-browser-generator.cjs
+          node tools/test-browser-security.cjs
+          node tools/test-browser-content.cjs
+      - name: Verify opt-in reversible passkey behavior
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tools/test-passkey-controls.cjs
+          node tools/test-passkey-registration.cjs
