@@ -163,7 +163,15 @@ public final class MainActivity extends Activity {
             folders.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener(){public void onItemSelected(AdapterView<?> p,View v,int pos,long id){folderFilter=pos==0?null:names.get(pos);renderList();}public void onNothingSelected(AdapterView<?> p){}});
         }catch(Exception e){Ui.error(this,e);}
         FrameLayout area=new FrameLayout(this);list=new ListView(this);list.setDivider(new android.graphics.drawable.ColorDrawable(Ui.BG));
-        list.setDividerHeight(Ui.dp(this,8));list.setPadding(0,Ui.dp(this,6),0,0);list.setClipToPadding(false);area.addView(list,new FrameLayout.LayoutParams(-1,-1));
+        list.setDividerHeight(Ui.dp(this,8));
+        // ListView's default pressed selector is a rectangular overlay even
+        // when the actual login card has rounded corners.
+        list.setSelector(new android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT));
+        list.setVerticalScrollBarEnabled(true);
+        list.setScrollBarStyle(View.SCROLLBARS_INSIDE_OVERLAY);
+        list.setScrollBarSize(Ui.dp(this,3));
+        list.setFadingEdgeLength(0);
+        list.setPadding(0,Ui.dp(this,6),0,0);list.setClipToPadding(false);area.addView(list,new FrameLayout.LayoutParams(-1,-1));
         TextView empty=Ui.text(this,"No logins here. Change the section, folder or search, or add a login above.",14,Ui.MUTED,false);empty.setGravity(Gravity.CENTER);empty.setPadding(Ui.dp(this,14),Ui.dp(this,14),Ui.dp(this,14),Ui.dp(this,14));area.addView(empty,new FrameLayout.LayoutParams(-1,-1));list.setEmptyView(empty);root.addView(area,new LinearLayout.LayoutParams(-1,0,1));
         entryAdapter=new BaseAdapter(){
             public int getCount(){return displayedEntries.size();}public Object getItem(int position){return displayedEntries.get(position);}public long getItemId(int position){return position;}
@@ -171,7 +179,11 @@ public final class MainActivity extends Activity {
                 LinearLayout row;TextView[] text;
                 if(recycled==null){row=Ui.column(MainActivity.this);int pad=Ui.dp(MainActivity.this,15);row.setPadding(pad,pad,pad,pad);android.graphics.drawable.GradientDrawable surface=Ui.shape(Ui.WHITE,Ui.dp(MainActivity.this,14));
                     surface.setStroke(Math.max(1,Ui.dp(MainActivity.this,1)),Ui.BORDER);
-                    row.setBackground(surface);text=new TextView[]{Ui.text(MainActivity.this,"",16,Ui.INK,true),Ui.text(MainActivity.this,"",12,Ui.MUTED,false),Ui.text(MainActivity.this,"",11,Ui.PURPLE,false)};for(TextView t:text){t.setSingleLine(true);t.setEllipsize(TextUtils.TruncateAt.END);row.addView(t);Ui.gap(row,5);}row.setTag(text);}else{row=(LinearLayout)recycled;text=(TextView[])row.getTag();}
+                    row.setBackground(new android.graphics.drawable.RippleDrawable(
+                        android.content.res.ColorStateList.valueOf(0x206558D9),
+                        surface,Ui.shape(android.graphics.Color.WHITE,Ui.dp(MainActivity.this,14))));
+                    row.setElevation(0f);row.setStateListAnimator(null);
+                    text=new TextView[]{Ui.text(MainActivity.this,"",16,Ui.INK,true),Ui.text(MainActivity.this,"",12,Ui.MUTED,false),Ui.text(MainActivity.this,"",11,Ui.PURPLE,false)};for(TextView t:text){t.setSingleLine(true);t.setEllipsize(TextUtils.TruncateAt.END);row.addView(t);Ui.gap(row,5);}row.setTag(text);}else{row=(LinearLayout)recycled;text=(TextView[])row.getTag();}
                 JSONObject e=displayedEntries.get(position);text[0].setText(e.optString("title")+(e.optBoolean("favorite")?"   ★":""));text[1].setText(e.optString("username"));text[2].setText(e.optString("folder"));return row;
             }
         };list.setAdapter(entryAdapter);list.setOnItemClickListener((parent,view,position,id)->{if(position<displayedEntries.size())detail(displayedEntries.get(position));});renderList();
@@ -219,7 +231,7 @@ public final class MainActivity extends Activity {
         LinearLayout b=Ui.column(this);EditText name=Ui.field(b,"New folder name","",false,100);AlertDialog d=dialog("New folder",b);
         b.addView(Ui.button(this,"Add folder",true,()->{try{String typed=FolderCatalog.normalize(name.getText().toString());String canonical=typed;for(String existing:FolderCatalog.choices(engine.snapshot()))if(existing.equalsIgnoreCase(typed)){canonical=existing;break;}final String value=canonical;task(()->engine.addFolder(value),()->{d.dismiss();added.accept(value);});}catch(Exception e){toast(e.getMessage());}}));
     }
-    private AlertDialog dialog(String title,LinearLayout body){ScrollView scroll=new ScrollView(this);int p=Ui.dp(this,22);body.setPadding(p,p,p,p);scroll.addView(body);AlertDialog d=new AlertDialog.Builder(this).setTitle(title).setView(scroll).setNegativeButton("Close",null).create();dialogs.add(d);d.setOnDismissListener(x->dialogs.remove(d));d.show();d.getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE,WindowManager.LayoutParams.FLAG_SECURE);
+    private AlertDialog dialog(String title,LinearLayout body){ScrollView scroll=new ScrollView(this);scroll.setScrollBarSize(Ui.dp(this,3));scroll.setScrollBarStyle(View.SCROLLBARS_INSIDE_OVERLAY);int p=Ui.dp(this,22);body.setPadding(p,p,p,p);scroll.addView(body);AlertDialog d=new AlertDialog.Builder(this).setTitle(title).setView(scroll).setNegativeButton("Close",null).create();dialogs.add(d);d.setOnDismissListener(x->dialogs.remove(d));d.show();d.getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE,WindowManager.LayoutParams.FLAG_SECURE);
         // Some forms add fields after showing. AlertDialog otherwise marks the initially
         // non-editable window ALT_FOCUSABLE_IM and prevents the soft keyboard.
         d.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM);d.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);return d;}
