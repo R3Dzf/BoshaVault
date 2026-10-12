@@ -10,11 +10,43 @@ final class AndroidUpdateFeed {
     final String versionName,sha256,signerSha256,url,tag,packageName;
     final long versionCode,size;
     final int minSdk;
+    static final class Delta {
+        final long fromVersionCode,size;
+        final String fromSha256,sha256,url;
+        Delta(JSONObject o,String tag,long targetCode,long fullSize)throws Exception{
+            fromVersionCode=integer(o,"fromVersionCode");
+            fromSha256=o.getString("fromSha256");sha256=o.getString("sha256");
+            size=integer(o,"size");url=o.getString("url");
+            if(fromVersionCode<=0||fromVersionCode>=targetCode||
+               size<=0||size>=fullSize||size>MAX_APK||
+               !fromSha256.matches("[a-fA-F0-9]{64}")||
+               !sha256.matches("[a-fA-F0-9]{64}")||
+               !url.equals(REPOSITORY+"/releases/download/"+tag+"/Lockvyn-Android-from-"+fromVersionCode+".lvdelta.gz"))
+                throw new Exception("Invalid Android delta release metadata.");
+        }
+    }
+    final java.util.List<Delta> deltas=new java.util.ArrayList<>();
+    Delta forInstalled(long versionCode,String installedSha256){
+        for(Delta delta:deltas)
+            if(delta.fromVersionCode==versionCode&&delta.fromSha256.equalsIgnoreCase(installedSha256))
+                return delta;
+        return null;
+    }
     private AndroidUpdateFeed(JSONObject o)throws Exception{
         packageName=o.getString("packageName");versionName=o.getString("versionName");tag=o.getString("tag");sha256=o.getString("sha256");signerSha256=o.getString("signerSha256");url=o.getString("url");versionCode=integer(o,"versionCode");size=integer(o,"size");long sdk=integer(o,"minSdk");if(sdk<28||sdk>100)throw new Exception("Invalid Android minimum version.");minSdk=(int)sdk;
         if(integer(o,"schema")!=1||!packageName.equals("com.lockvyn.app")||!versionName.matches("[0-9]+\\.[0-9]+\\.[0-9]+")||!tag.equals("android-v"+versionName)||versionCode<1||versionCode>Integer.MAX_VALUE||size<1||size>MAX_APK||minSdk<28||minSdk>100)throw new Exception("Invalid Android release metadata.");
         if(!sha256.matches("[a-fA-F0-9]{64}")||!signerSha256.matches("[a-fA-F0-9]{64}"))throw new Exception("Invalid release checksum.");
         if(!url.equals(REPOSITORY+"/releases/download/"+tag+"/Lockvyn-Android.apk"))throw new Exception("Unexpected download source.");
+        if(o.has("deltas")){
+            JSONArray rows=o.getJSONArray("deltas");
+            if(rows.length()>3)throw new Exception("Too many Android delta sources.");
+            java.util.HashSet<Long> used=new java.util.HashSet<>();
+            for(int i=0;i<rows.length();i++){
+                Delta delta=new Delta(rows.getJSONObject(i),tag,versionCode,size);
+                if(!used.add(delta.fromVersionCode))throw new Exception("Repeated Android delta baseline.");
+                deltas.add(delta);
+            }
+        }
     }
     static AndroidUpdateFeed parse(String json,String expectedTag)throws Exception{
         if(json.length()>16384)throw new Exception("Release metadata is too large.");
