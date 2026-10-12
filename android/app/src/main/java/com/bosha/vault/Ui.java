@@ -31,9 +31,16 @@ final class Ui {
     static final int SUCCESS=Color.rgb(20,134,109);
 
     static int dp(Context c,int x){return Math.round(x*c.getResources().getDisplayMetrics().density);}
+    // The project builds with aapt2 + ECJ (no generated R.java). Resolve vector
+    // resource IDs from the linked APK instead of changing its build pipeline.
+    static int drawableId(Context c,String name){
+        int id=c.getResources().getIdentifier(name,"drawable",c.getPackageName());
+        if(id==0)throw new IllegalStateException("Missing bundled Lockvyn vector asset: "+name);
+        return id;
+    }
     static ImageView brandIcon(Context c,int size){
         ImageView icon=new ImageView(c);
-        icon.setImageResource(R.drawable.ic_vault);
+        icon.setImageResource(drawableId(c,"ic_vault"));
         icon.setContentDescription("Lockvyn");
         icon.setLayoutParams(new LinearLayout.LayoutParams(dp(c,size),dp(c,size)));
         return icon;
@@ -43,13 +50,6 @@ final class Ui {
         d.setColor(fill);d.setCornerRadius(radius);
         return d;
     }
-    static GradientDrawable outlined(int fill,int radius,int border){
-        GradientDrawable d=shape(fill,radius);
-        d.setStroke(dpSafeStroke(),border);
-        return d;
-    }
-    // GradientDrawable stroke needs a pixel count even without a Context.
-    private static int dpSafeStroke(){return 1;}
     private static GradientDrawable outlined(Context c,int fill,int radius,int border){
         GradientDrawable d=shape(fill,dp(c,radius));
         d.setStroke(Math.max(1,dp(c,1)),border);
