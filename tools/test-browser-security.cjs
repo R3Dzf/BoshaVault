@@ -10,7 +10,7 @@ const sender={
   url:host+"/login",tab:{id:101,url:host+"/login"}
 };
 
-function setup({changed=false,tabOrigin=host}={}) {
+function setup({changed=false,stale=false,tabOrigin=host}={}) {
   let handler, nativeCalls=0,frames=0;
   const chrome={
     runtime:{
@@ -25,7 +25,7 @@ function setup({changed=false,tabOrigin=host}={}) {
     },
     webNavigation:{async getFrame(){
       frames++;
-      return {documentId:changed&&frames>1?"document-2":"document-1",
+      return {documentId:(stale||(changed&&frames>1))?"document-2":"document-1",
         url:tabOrigin+"/login"};
     }},
     tabs:{async get(){return {url:tabOrigin+"/login"};}}
@@ -47,10 +47,15 @@ function setup({changed=false,tabOrigin=host}={}) {
   assert.equal(reply.status,"filled","same document may receive user-approved fill");
   assert.equal(scenario.nativeCalls(),1);
 
+  scenario=setup({stale:true});
+  reply=await scenario.request({op:"list"});
+  assert.equal(reply.status,"denied","already stale document cannot enumerate usernames");
+  assert.equal(scenario.nativeCalls(),0,"already stale document never reaches Native Messaging");
+
   scenario=setup({changed:true});
   reply=await scenario.request({op:"list"});
-  assert.equal(reply.status,"denied","stale document cannot enumerate vault usernames");
-  assert.equal(scenario.nativeCalls(),0,"stale list request never reaches Native Messaging");
+  assert.equal(reply.status,"denied","navigation during a native list request cannot receive usernames");
+  assert.equal(scenario.nativeCalls(),1,"navigation after the first identity check may have already sent the native request");
 
   scenario=setup({changed:true});
   reply=await scenario.request({op:"fill",entryId});
