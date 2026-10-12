@@ -175,23 +175,12 @@ public partial class MainWindow
             bool related=match.Relation==OriginPolicy.DomainRelation.Related;
             string savedHost=OriginPolicy.ExactHost(target.Url);
 
-            // Foreground notice must name the destination and account.
+            // No longer restore the entire main vault in front of the browser.
+            // A compact always-on-top approval still requires a deliberate click
+            // before returning one password to the same live browser document.
             int stamp = generation;
-            BringToFront();
-            bool allowed = MessageBox.Show(this,
-                (related ? "RELATED DOMAIN — EXTRA CAUTION\n\n" :
-                    "Allow this one-time fill?\n\n") +
-                "CURRENT browser site: https://" + host +
-                "\nSAVED login website: https://" + savedHost +
-                "\nSaved login: " + target.Title +
-                "\nUsername: " + target.Username +
-                (related ? "\n\nThe saved and requested hosts are DIFFERENT but share a registrable domain. " +
-                    "Only click Yes if you independently trust BOTH sites and expect to use this login there. " +
-                    "Review the browser address bar carefully; this may disclose your password to the current site." :
-                    "\n\nOnly approve if you are currently signing in at this website.") +
-                "\n\nThis fills only after your explicit approval.",
-                "Lockvyn · Confirm browser Autofill", MessageBoxButton.YesNo,
-                MessageBoxImage.Question, MessageBoxResult.No) == MessageBoxResult.Yes;
+            bool allowed = BrowserFillApprovalDialog.Confirm(
+                host, savedHost, target.Title, target.Username, related);
             if (!allowed || generation != stamp || session != activeSession || !activeSession.IsOpen)
                 return new() { Status = "denied", Message = "Browser fill canceled." };
             var verified=OriginPolicy.Relation(target.Url,request.Origin);
