@@ -79,6 +79,27 @@ try
         await Task.Delay(300); File.Delete(exchange + "/pairing.txt");
         return;
     }
+    // Global alias groups are explicit local preferences, never silent-fill permission.
+    var googleHosts = new List<DomainAliasGroup> {
+        new() { Name = "Google", Hosts = ["google.com","www.google.com","accounts.google.com"] }
+    };
+    OriginPolicy.ValidateGroups(googleHosts);
+    Check(OriginPolicy.Relation("https://www.google.com","https://accounts.google.com",googleHosts)
+          == OriginPolicy.DomainRelation.TrustedGroup, "approved same-site aliases have priority over related-domain suggestions");
+    Check(OriginPolicy.Relation("https://google.com","https://www.google.com",googleHosts)
+          == OriginPolicy.DomainRelation.Exact, "exact host matching retains priority over alias grouping");
+    Check(OriginPolicy.Relation("https://google.com","https://google.com.attacker.test",googleHosts)
+          == OriginPolicy.DomainRelation.None, "aliases cannot authorize lookalike or parent-domain phishing hosts");
+    RejectNow(() => OriginPolicy.ValidateGroups([new DomainAliasGroup {
+        Name="Cross site", Hosts=["google.com","evil.example"]
+    }]), "cross-site automatic alias groups are rejected");
+    RejectNow(() => OriginPolicy.ValidateGroups([new DomainAliasGroup {
+        Name="Public suffix tenants", Hosts=["alice.github.io","bob.github.io"]
+    }]), "independent private suffix tenants cannot be grouped");
+    RejectNow(() => OriginPolicy.ValidateGroups([
+        new DomainAliasGroup { Name="One", Hosts=["google.com","accounts.google.com"] },
+        new DomainAliasGroup { Name="Two", Hosts=["google.com","www.google.com"] }
+    ]), "overlapping domain groups are rejected");
     // Chrome/Bitwarden CSV imports never expose secrets to logs, and commits are atomic.
     string importFile = temp + "/csv-test.boshavault";
     using (var importSession = await VaultSession.Create(importFile, password, devA))
