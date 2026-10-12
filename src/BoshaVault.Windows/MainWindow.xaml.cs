@@ -41,6 +41,8 @@ public partial class MainWindow : Window
     private readonly SemaphoreSlim cloudGate = new(1, 1);
     private bool cloudDialogOpen;
     private DateTime nextCloudCheck = DateTime.MinValue;
+    private SupabaseCloudAccount.Session? cachedCloudSession;
+    private DateTime cachedCloudUntil;
 
     public MainWindow()
     {
@@ -137,17 +139,23 @@ public partial class MainWindow : Window
             finally { CryptographicOperations.ZeroMemory(disk); }
             var store = new CloudProfileStore(root);
             profile = store.Load(vaultId);
-            if (profile is not { AutoSync: true }) return;
+            if (profile == null) { CloudStatus.Text = "Cloud not connected · open Sync"; cachedCloudSession = null; return; }
+            if (!profile.AutoSync) { CloudStatus.Text = "Cloud paused on this computer"; cachedCloudSession = null; return; }
             var auth = new SupabaseCloudAccount(http);
-            var signedIn = await auth.Refresh(profile.RefreshToken);
-            if (cloudDialogOpen) return;
-            if (signedIn.OwnerId != profile.OwnerId) throw new VaultException("Cloud account changed. Reconnect this device.");
-            profile.RefreshToken = signedIn.RefreshToken; store.Save(profile);
-            var factors = await auth.ListFactors(signedIn);
-            if (factors.RequiresChallenge(signedIn))
+            var signedIn = cachedCloudSession;
+            if (signedIn == null || cachedCloudUntil < DateTime.UtcNow || signedIn.OwnerId != profile.OwnerId)
             {
-                CloudStatus.Text = "Cloud paused · verify 2FA in Sync";
-                return;
+                signedIn = await auth.Refresh(profile.RefreshToken);
+                if (signedIn.OwnerId != profile.OwnerId) throw new VaultException("Cloud account changed. Reconnect this device.");
+                profile.RefreshToken = signedIn.RefreshToken; store.Save(profile);
+                if (cloudDialogOpen) return; // Persist refresh rotation before the manual dialog loads it.
+                var factors = await auth.ListFactors(signedIn);
+                if (factors.RequiresChallenge(signedIn))
+                {
+                    cachedCloudSession = null; CloudStatus.Text = "Cloud paused · verify 2FA in Sync";
+                    return;
+                }
+                cachedCloudSession = signedIn; cachedCloudUntil = DateTime.UtcNow.AddSeconds(45);
             }
             var transport = new SupabaseSnapshotTransport(http, new Uri(CloudProject.Url), CloudProject.PublishableKey, _ => Task.FromResult(signedIn.AccessToken));
             var opened = session; int stamp = generation;
@@ -165,7 +173,7 @@ public partial class MainWindow : Window
                 result.Conflicts > 0 ? $"Cloud synced · {result.Conflicts} conflict copies" : "Cloud synced · up to date";
         }
         catch (Exception ex) when (ex is VaultException or IOException or System.Net.Http.HttpRequestException or CryptographicException or UnauthorizedAccessException or OperationCanceledException)
-        { if (profile != null) CloudStatus.Text = ex is VaultException ? ex.Message : "Cloud offline · changes retry automatically"; }
+        { cachedCloudSession = null; if (profile != null) CloudStatus.Text = ex is VaultException ? ex.Message : "Cloud offline · changes retry automatically"; }
         finally { profile?.Clear(); cloudGate.Release(); }
     }
 
@@ -443,6 +451,7 @@ public partial class MainWindow : Window
     {
         if (session == null) return;
         cloudDialogOpen = true;
+        cachedCloudSession = null;
         await cloudGate.WaitAsync(); cloudGate.Release();
         var d = new FormDialog(this, "Devices & encrypted backup", 610);
         d.Label("Connect your phone on the same private Wi-Fi. Keep this window open until the encrypted transfer finishes.");
@@ -549,6 +558,7 @@ public partial class MainWindow : Window
     {
         if (session == null || cloudDialogOpen) return;
         cloudDialogOpen = true;
+        cachedCloudSession = null;
         try
         {
             await cloudGate.WaitAsync(); cloudGate.Release();

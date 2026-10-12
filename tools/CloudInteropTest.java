@@ -15,6 +15,7 @@ public final class CloudInteropTest {
             check(Arrays.equals(inner,CloudSnapshot.open(outer,key,slot,device)),".NET outer cloud envelope authenticates and opens in Java");
             JSONObject pair=CloudSnapshot.pairing(Files.readString(folder.resolve("cloud-pairing.txt")),profile.getString("vaultId"),profile.getString("ownerId"));
             check(pair.getString("recoveryKey").equals(profile.getString("recoveryKey")),".NET cloud connection code validates in Java");
+            check(CloudSnapshot.pairing(Files.readString(folder.resolve("cloud-pairing.txt")),null,profile.getString("ownerId")).getString("vaultId").equals(profile.getString("vaultId")),"Empty Android device accepts the paired vault identity");
             byte[] sealed=CloudSnapshot.seal(inner,key,slot,device);Files.write(folder.resolve("java.cloud"),sealed);
             check(Arrays.equals(inner,CloudSnapshot.open(sealed,key,slot,device)),"Java outer encryption roundtrip");
             byte[] corrupted=outer.clone();corrupted[corrupted.length-1]^=1;reject(()->CloudSnapshot.open(corrupted,key,slot,device),"Java rejects corrupted cloud ciphertext");

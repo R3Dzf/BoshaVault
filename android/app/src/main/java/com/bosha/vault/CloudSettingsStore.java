@@ -58,6 +58,6 @@ final class CloudSettingsStore {
         try{try(FileOutputStream out=new FileOutputStream(temporary)){out.write(bytes);out.getFD().sync();}Files.move(temporary.toPath(),pending.toPath(),StandardCopyOption.REPLACE_EXISTING);}
         finally{Files.deleteIfExists(temporary.toPath());}
     }
-    void forget()throws Exception{Files.deleteIfExists(path.toPath());writePending(null);}
+    void forget()throws Exception{synchronized(CloudClient.GATE){Files.deleteIfExists(path.toPath());writePending(null);}}
     static void clear(JSONObject profile){if(profile!=null){profile.remove("refreshToken");profile.remove("recoveryKey");}}
 }

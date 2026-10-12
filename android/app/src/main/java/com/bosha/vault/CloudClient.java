@@ -17,9 +17,10 @@ final class CloudClient implements AutoCloseable {
     private final Guard guard;
     private volatile HttpsURLConnection connection;
     private volatile boolean cancelled;
+    private volatile boolean persistingRefresh;
     final CloudAuth auth;
     CloudClient(Guard guard){this.guard=guard;auth=new CloudAuth((method,path,body,access)->request(method,path,body,access,method.equals("POST")&&path.equals("auth/v1/factors")?524288:65536));}
-    private void check()throws Exception{if(cancelled)throw new IOException("Cloud operation cancelled.");guard.check();}
+    private void check()throws Exception{if(persistingRefresh)return;if(cancelled)throw new IOException("Cloud operation cancelled.");guard.check();}
     private byte[] request(String method,String path,JSONObject body,String access,int limit)throws Exception{
         check();HttpsURLConnection conn=(HttpsURLConnection)new URL(URL+path).openConnection();connection=conn;
         conn.setInstanceFollowRedirects(false);conn.setConnectTimeout(15000);conn.setReadTimeout(30000);conn.setRequestMethod(method);conn.setRequestProperty("apikey",PUBLIC_KEY);
@@ -43,12 +44,15 @@ final class CloudClient implements AutoCloseable {
     CloudAuth.Session signIn(String email,String password)throws Exception{return auth.signIn(email,password);}
     void signUp(String email,String password)throws Exception{auth.signUp(email,password);}
     CloudAuth.Session refresh(JSONObject profile,CloudSettingsStore store)throws Exception{
-        synchronized(GATE){JSONObject latest=store.load(profile.getString("vaultId"));if(latest==null)throw new Exception("Cloud is disconnected on this device.");
-            CloudAuth.Session signedIn=auth.refresh(latest.getString("refreshToken"));
-            profile.put("refreshToken",signedIn.refresh);latest.put("refreshToken",signedIn.refresh);store.save(latest);CloudSettingsStore.clear(latest);return signedIn;}
+        synchronized(GATE){check();JSONObject latest=store.load(profile.getString("vaultId"));if(latest==null)throw new Exception("Cloud is disconnected on this device.");
+            persistingRefresh=true;
+            try{CloudAuth.Session signedIn=auth.refresh(latest.getString("refreshToken"));
+                profile.put("refreshToken",signedIn.refresh);latest.put("refreshToken",signedIn.refresh);store.save(latest);return signedIn;}
+            finally{persistingRefresh=false;CloudSettingsStore.clear(latest);if(cancelled){HttpsURLConnection conn=connection;if(conn!=null)conn.disconnect();}}
+        }
     }
     void saveSession(CloudAuth.Session session,JSONObject profile,CloudSettingsStore store)throws Exception{
-        synchronized(GATE){check();if(!session.owner.equals(profile.getString("ownerId")))throw new Exception("Cloud account changed. Reconnect this device.");
+        synchronized(GATE){if(!session.owner.equals(profile.getString("ownerId")))throw new Exception("Cloud account changed. Reconnect this device.");
             JSONObject latest=store.load(profile.getString("vaultId"));if(latest==null)throw new Exception("Cloud is disconnected on this device.");
             profile.put("refreshToken",session.refresh);latest.put("refreshToken",session.refresh);store.save(latest);CloudSettingsStore.clear(latest);}
     }
@@ -63,7 +67,7 @@ final class CloudClient implements AutoCloseable {
             profile.put("refreshToken",latest.getString("refreshToken"));
             for(String field:new String[]{"lastUploadedHash","lastOuterHash","downloadedStamp","mergedStamp","keyEpoch","autoSync"})if(latest.has(field))profile.put(field,latest.get(field));
             String slot=profile.getString("vaultSlot"),device=profile.getString("deviceSlot");byte[] local=null,key=null,outer=null,response=null;
-            List<byte[]> snapshots=new ArrayList<>();int conflicts=0;
+            List<byte[]> snapshots=new ArrayList<>();int conflicts=0;boolean changed=false;
             try{
                 local=engine!=null&&engine.isOpen()?engine.export():VaultEngine.read(vault);
                 JSONObject env=VaultEngine.parse(local);if(!env.getString("vaultId").equals(profile.getString("vaultId")))throw new Exception("Cloud settings do not match this vault.");
@@ -91,7 +95,7 @@ final class CloudClient implements AutoCloseable {
                         }finally{Arrays.fill(blob,(byte)0);}
                     }
                     byte[] staged=pending.toString().getBytes(StandardCharsets.UTF_8);
-                    try{check();store.writePending(staged);profile.put("downloadedStamp",stamp(others));store.save(profile);}finally{Arrays.fill(staged,(byte)0);}
+                    try{check();store.writePending(staged);profile.put("downloadedStamp",stamp(others));store.save(profile);changed=true;}finally{Arrays.fill(staged,(byte)0);}
                 }else if(cached!=null&&!profile.optString("downloadedStamp").equals(profile.optString("mergedStamp"))){
                     JSONArray rows=StrictJson.array(new String(cached,StandardCharsets.UTF_8));if(rows.length()>64)throw new Exception("Too many pending cloud devices.");
                     for(int i=0;i<rows.length();i++){JSONObject row=rows.getJSONObject(i);String id=row.getString("deviceSlot"),encoded=row.getString("blob");if(!VaultEngine.id(id)||encoded.length()>2800000)throw new Exception("Invalid pending cloud data.");byte[] blob=Base64.getDecoder().decode(encoded);
@@ -108,9 +112,11 @@ final class CloudClient implements AutoCloseable {
                 if(!hash.equals(profile.optString("lastUploadedHash"))||ownDigest.isEmpty()||!ownDigest.equals(profile.optString("lastOuterHash"))){
                     outer=CloudSnapshot.seal(local,key,slot,device);String outerHash=hex(VaultEngine.sha(outer));JSONObject body=new JSONObject().put("owner_id",session.owner).put("vault_slot",slot).put("device_slot",device).put("ciphertext_base64",Base64.getEncoder().encodeToString(outer)).put("ciphertext_sha256",outerHash);
                     byte[] reply=request("POST","rest/v1/opaque_device_snapshots?on_conflict=owner_id,vault_slot,device_slot",body,session.access,65536);Arrays.fill(reply,(byte)0);
-                    profile.put("lastUploadedHash",hash).put("lastOuterHash",outerHash);
+                    profile.put("lastUploadedHash",hash).put("lastOuterHash",outerHash);changed=true;
                 }
-                profile.put("lastSyncUtc",Instant.now().toString());store.save(profile);return conflicts;
+                Instant now=Instant.now();String previous=profile.optString("lastSyncUtc");
+                try{if(previous.isEmpty()||now.toEpochMilli()-Instant.parse(previous).toEpochMilli()>60000)changed=true;}catch(Exception invalid){changed=true;}
+                if(changed){profile.put("lastSyncUtc",now.toString());store.save(profile);}return conflicts;
             }finally{CloudSettingsStore.clear(latest);if(response!=null)Arrays.fill(response,(byte)0);if(key!=null)Arrays.fill(key,(byte)0);if(local!=null)Arrays.fill(local,(byte)0);if(outer!=null)Arrays.fill(outer,(byte)0);for(byte[] inner:snapshots)Arrays.fill(inner,(byte)0);}
         }
     }
@@ -132,7 +138,7 @@ final class CloudClient implements AutoCloseable {
             }finally{Arrays.fill(blob,(byte)0);}
         }finally{Arrays.fill(key,(byte)0);if(response!=null)Arrays.fill(response,(byte)0);}
     }
-    void signOut(CloudAuth.Session signedIn,CloudSettingsStore store)throws Exception{auth.signOut(signedIn);check();store.forget();}
+    void signOut(CloudAuth.Session signedIn,CloudSettingsStore store)throws Exception{synchronized(GATE){auth.signOut(signedIn);check();store.forget();}}
     private static String hex(byte[] bytes){StringBuilder result=new StringBuilder();for(byte b:bytes)result.append(String.format(Locale.ROOT,"%02x",b&255));return result.toString();}
-    @Override public void close(){cancelled=true;HttpsURLConnection conn=connection;if(conn!=null)conn.disconnect();}
+    @Override public void close(){cancelled=true;if(!persistingRefresh){HttpsURLConnection conn=connection;if(conn!=null)conn.disconnect();}}
 }

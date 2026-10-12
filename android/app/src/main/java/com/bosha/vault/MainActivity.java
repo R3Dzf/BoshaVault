@@ -28,7 +28,7 @@ public final class MainActivity extends Activity {
     private final ExecutorService worker=Executors.newSingleThreadExecutor(),cloudWorker=Executors.newSingleThreadExecutor();
     private final Handler handler=new Handler(Looper.getMainLooper());
     private volatile int epoch; private int timeout=2,attempts; private volatile boolean active; private boolean busy; private long lastTouch,retryAfter,clipboardUntil;
-    private String filter="all",search="",clipboard,undoEntryId;private long undoUntil;private boolean cloudOpen;private long nextCloudCheck;private TextView syncStatus;private volatile CloudClient autoClient;
+    private String filter="all",search="",clipboard,undoEntryId;private long undoUntil;private volatile boolean cloudOpen;private volatile long nextCloudCheck;private long autoSessionUntil;private TextView syncStatus;private volatile CloudClient autoClient;private volatile CloudAuth.Session autoSession;private String autoSessionSlot;
     private byte[] exportBytes,pendingImport; private volatile LocalTransfer pendingTransfer;
     private String scannedPairing,scannedCloud;
     private final List<AlertDialog> dialogs=new ArrayList<>();
@@ -36,7 +36,7 @@ public final class MainActivity extends Activity {
     @Override public void onCreate(Bundle b){super.onCreate(b);try{engine=Store.engine(this);CloudSyncJob.schedule(this);}catch(Exception e){Ui.error(this,e);finish();return;}handler.post(tick);}
     @Override protected void onStart(){super.onStart();active=true;showLock();}
     @Override protected void onResume(){super.onResume();if(scannedPairing!=null){String code=scannedPairing;scannedPairing=null;showPairing(Store.vault(this).exists(),code);}if(scannedCloud!=null){String code=scannedCloud;scannedCloud=null;joinCloud(code);}}
-    @Override protected void onStop(){super.onStop();active=false;epoch++;CloudClient running=autoClient;if(running!=null)running.close();cancelLocalTransfer();for(AlertDialog d:new ArrayList<>(dialogs))d.dismiss();dialogs.clear();displayedEntries.clear();list=null;entryAdapter=null;vaultStats=null;syncStatus=null;if(root!=null)root.removeAllViews();worker.execute(()->engine.close());}
+    @Override protected void onStop(){super.onStop();active=false;epoch++;autoSession=null;CloudClient running=autoClient;if(running!=null)running.close();cancelLocalTransfer();for(AlertDialog d:new ArrayList<>(dialogs))d.dismiss();dialogs.clear();displayedEntries.clear();list=null;entryAdapter=null;vaultStats=null;syncStatus=null;if(root!=null)root.removeAllViews();worker.execute(()->engine.close());}
     @Override protected void onDestroy(){handler.removeCallbacks(tick);worker.shutdown();cloudWorker.shutdown();super.onDestroy();}
     @Override public boolean dispatchTouchEvent(android.view.MotionEvent e){lastTouch=SystemClock.elapsedRealtime();return super.dispatchTouchEvent(e);}
     @Override public void onUserInteraction(){super.onUserInteraction();lastTouch=SystemClock.elapsedRealtime();}
@@ -59,11 +59,15 @@ public final class MainActivity extends Activity {
                     if(!profile.optBoolean("autoSync",true)){result="Cloud paused on this phone";return;}
                     result="Cloud synced · up to date";
                     client=new CloudClient(()->{if(!active||stamp!=epoch||cloudOpen||!engine.isOpen())throw new IOException("Cloud operation cancelled.");});autoClient=client;
-                    CloudAuth.Session signed=client.refresh(profile,store);
-                    if(client.auth.factors(signed).requiresChallenge(signed))result="Cloud paused · verify 2FA in Sync";
-                    else{int conflicts=client.syncAutomatic(engine,null,profile,store,signed);if(conflicts>0)result="Cloud synced · "+conflicts+" conflict copies";}
+                    CloudAuth.Session signed=autoSession;
+                    if(signed==null||SystemClock.elapsedRealtime()>=autoSessionUntil||!signed.owner.equals(profile.getString("ownerId"))||!profile.getString("vaultSlot").equals(autoSessionSlot)){
+                        signed=client.refresh(profile,store);
+                        if(client.auth.factors(signed).requiresChallenge(signed)){autoSession=null;result="Cloud paused · verify 2FA in Sync";nextCloudCheck=SystemClock.elapsedRealtime()+60000;return;}
+                        autoSession=signed;autoSessionSlot=profile.getString("vaultSlot");autoSessionUntil=SystemClock.elapsedRealtime()+45000;
+                    }
+                    int conflicts=client.syncAutomatic(engine,null,profile,store,signed);if(conflicts>0)result="Cloud synced · "+conflicts+" conflict copies";
                 }
-            }catch(Exception e){result="Cloud offline · changes retry automatically";}
+            }catch(Exception e){autoSession=null;result="Cloud offline · changes retry automatically";}
             finally{CloudSettingsStore.clear(profile);if(client!=null)client.close();autoClient=null;String status=result;runOnUiThread(()->{if(active&&stamp==epoch&&syncStatus!=null){syncStatus.setText(status);if(status.startsWith("Cloud synced"))renderList();}});}
         });
     }
@@ -296,6 +300,7 @@ public final class MainActivity extends Activity {
     }
     private void cloud(){
         if(!engine.isOpen()||busy)return;
+        autoSession=null;
         cloudOpen=true;
         final CloudSettingsStore store=new CloudSettingsStore(this);final int stamp=epoch;
         final CloudClient client=new CloudClient(()->{if(!active||stamp!=epoch||!engine.isOpen())throw new IOException("Cloud operation cancelled.");});
@@ -310,7 +315,7 @@ public final class MainActivity extends Activity {
         if(profile!=null){
             b.addView(Ui.text(this,"Connected to "+profile.optString("email")+". New logins sync automatically when connected. Unlock to apply incoming changes.",13,Ui.MUTED,false));
             b.addView(Ui.text(this,profile.optString("lastSyncUtc").isEmpty()?"No successful sync yet.":"Last successful sync: "+profile.optString("lastSyncUtc"),12,Ui.MUTED,false));
-            CheckBox auto=check(b,"Sync automatically on this device",profile.optBoolean("autoSync",true));auto.setOnCheckedChangeListener((button,enabled)->cloudTask(status,()->{profile.put("autoSync",enabled);store.save(profile);},()->{status.setText(enabled?"Automatic sync is on.":"Automatic sync is paused on this device.");if(enabled)nextCloudCheck=0;}));
+            CheckBox auto=check(b,"Sync automatically on this device",profile.optBoolean("autoSync",true));auto.setOnCheckedChangeListener((button,enabled)->cloudTask(status,()->{synchronized(CloudClient.GATE){JSONObject latest=store.load(profile.getString("vaultId"));if(latest==null)throw new IOException("Cloud is disconnected on this device.");try{latest.put("autoSync",enabled);store.save(latest);profile.put("autoSync",enabled);}finally{CloudSettingsStore.clear(latest);}}},()->{status.setText(enabled?"Automatic sync is on.":"Automatic sync is paused on this device.");if(enabled)nextCloudCheck=0;}));
             b.addView(Ui.button(this,"Sync now",true,()->cloudRefresh(client,profile,store,status,signedIn->{int[] conflicts={0};cloudTask(status,()->conflicts[0]=client.sync(engine,profile,store,signedIn),()->{status.setText("Synced successfully. "+conflicts[0]+" conflict copies kept.");renderList();});})));
             b.addView(Ui.button(this,"Cloud account security · 2FA",false,()->cloudRefresh(client,profile,store,status,signedIn->cloudSecurity(client,signedIn,profile,store))));
             b.addView(Ui.button(this,"Copy connection code for your other device",false,()->{try{copy(CloudSnapshot.pairing(profile));status.setText("Connection code copied. Share it only with your own trusted device; clipboard clears in 20 seconds.");}catch(Exception e){Ui.error(this,e);}}));
