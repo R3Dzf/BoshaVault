@@ -61,6 +61,14 @@ public static class CloudAccountTests
                 !invite.Contains(profile.RecoveryKey, StringComparison.Ordinal) &&
                 !invite.Contains("BVCLOUD1:", StringComparison.Ordinal),
                 "temporary QR identifies only an expiring public-key session and no vault secrets");
+            byte[] qrPng = PairingQr.Render(invite);
+            Check(qrPng.Length > 500 && qrPng.AsSpan(0, 8).SequenceEqual(new byte[] {137,80,78,71,13,10,26,10}),
+                "secure BVPAIR2 invitation renders as a valid PNG QR on Windows");
+            await Reject(() => { PairingQr.Render("BVPAIR2:invalid"); return Task.CompletedTask; },
+                "invalid secure QR invitation is rejected before rendering");
+            byte[] legacyCloudQr = PairingQr.Render(code);
+            Check(legacyCloudQr.AsSpan(0, 8).SequenceEqual(new byte[] {137,80,78,71,13,10,26,10}),
+                "legacy recovery QR remains available as an explicit fallback");
             var sas = inviter.SecurityCode(phone.PublicKey, inviter.PublicKey);
             Check(sas.Length == 6 && sas.All(char.IsAsciiDigit),
                 "short authentication code is six decimal digits, derived from ECDH");
