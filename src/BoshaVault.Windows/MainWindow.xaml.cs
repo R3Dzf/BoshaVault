@@ -47,6 +47,9 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        var builtVersion = typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "unknown";
+        InstalledVersionLabel.Text = "LOCKVYN  /  v" + builtVersion;
+        SidebarVersionLabel.Text = "v" + builtVersion;
         Directory.CreateDirectory(root); vaultPath = System.IO.Path.Combine(root, "vault.boshavault");
         preferencesPath = System.IO.Path.Combine(root, "desktop.json"); preferences = DesktopPreferences.Load(preferencesPath); timeoutMinutes = preferences.AutoLockMinutes;
         string devicePath = System.IO.Path.Combine(root, "device.id");
@@ -195,7 +198,8 @@ public partial class MainWindow : Window
         d.Action("Add login", () => { d.Close(); AddClick(sender, e); }, true);
         d.Action("Generate password", () => { d.Close(); GeneratorClick(sender, e); });
         d.Action("Folders", () => { d.Close(); FoldersClick(); });
-        d.Action("Devices & encrypted backup", () => { d.Close(); SyncClick(sender, e); });
+        d.Action("Sync & Devices", () => { d.Close(); SyncClick(sender, e); });
+        d.Action("Backup & Restore", () => { d.Close(); BackupClick(sender, e); });
         d.Action("Settings", () => { d.Close(); SettingsClick(sender, e); });
         d.ShowDialog();
     }
@@ -447,14 +451,52 @@ public partial class MainWindow : Window
 
     private readonly object transferLogGate = new();
 
-    private async void SyncClick(object sender, RoutedEventArgs e)
+    private void SyncClick(object sender, RoutedEventArgs e)
+    {
+        if (session == null) return;
+        var d = new FormDialog(this, "Sync & Devices", 540);
+        bool connected = new CloudProfileStore(root).Exists;
+        d.Label(connected
+            ? "Cloud sync is connected. New passwords sync automatically when Internet is available. Open your vault on other devices to apply changes."
+            : "Connect an encrypted cloud account once to sync passwords between your devices automatically.");
+        var cloudCard = new StackPanel { Margin = new Thickness(0, 8, 0, 14) };
+        cloudCard.Children.Add(new TextBlock {
+            Text = connected ? "● Cloud connected · automatic sync" : "○ Cloud not connected",
+            FontWeight = FontWeights.SemiBold, FontSize = 17,
+            Foreground = connected ? Brushes.SeaGreen : Brushes.SlateGray });
+        cloudCard.Children.Add(new TextBlock { Text = connected
+            ? "Use Cloud Sync to view last sync, sync manually, or manage your account."
+            : "Your local vault stays available offline. Cloud is optional.",
+            Foreground = Brushes.DimGray, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 7, 0, 7) });
+        d.Body.Children.Add(cloudCard);
+        d.Action("Cloud Sync", () => { d.Close(); CloudClick(sender, e); }, true, true);
+        d.Action("Add new device · secure QR", () => { d.Close(); OpenCloudSync(true); }, false, true);
+        d.Label("First-time pairing displays a two-minute public-key QR and asks you to verify six digits on both devices.");
+        d.Action("Offline transfer · private Wi-Fi", () => { d.Close(); OfflineTransferClick(sender, e); }, false, true);
+        d.Label("Use offline transfer only when cloud access is unavailable. Private-network tools are tucked into advanced options.");
+        d.ShowDialog();
+    }
+
+    private void BackupClick(object sender, RoutedEventArgs e)
+    {
+        if (session == null) return;
+        var d = new FormDialog(this, "Backup & Restore", 500);
+        d.Label("Keep an encrypted backup on another trusted drive. Export and restore never send your vault to a server.");
+        d.Action("Export encrypted backup", () => { d.Close(); Export(); }, true, true);
+        d.Action("Import / merge encrypted backup", () => { d.Close(); ImportMerge(); }, false, true);
+        d.Label("Import verifies the encrypted vault; any conflicting records are preserved. Your local vault is never silently replaced.");
+        d.ShowDialog();
+    }
+
+    private async void OfflineTransferClick(object sender, RoutedEventArgs e)
     {
         if (session == null) return;
         cloudDialogOpen = true;
         cachedCloudSession = null;
         await cloudGate.WaitAsync(); cloudGate.Release();
         var d = new FormDialog(this, "Devices & encrypted backup", 610);
-        d.Label("Connect your phone on the same private Wi-Fi. Keep this window open until the encrypted transfer finishes.");
+        d.Label("Send an encrypted vault locally when the cloud is unavailable. On Android choose Sync & Devices → Offline Wi-Fi transfer.");
+        int networkStart = d.Body.Children.Count;
         string defaultIp = ""; try { defaultIp = LocalTransferServer.FindPrivateHost(); } catch (Exception ex) when (ex is VaultException or System.Net.Sockets.SocketException) { }
         var address = d.Field("Your private Wi-Fi IPv4 address", defaultIp, 15);
         var networks = new ComboBox { Margin = new(0, 6, 0, 8), MinWidth = 300 };
@@ -471,6 +513,16 @@ public partial class MainWindow : Window
         networks.SelectionChanged += (_, _) => { if (networks.SelectedItem is LocalTransferServer.PrivateInterface choice) address.Text = choice.Host; };
         d.Body.Children.Add(networks); RefreshNetworks();
         d.Action("Refresh Wi-Fi addresses", RefreshNetworks, inBody: true);
+        var networkAdvanced = new StackPanel();
+        while (d.Body.Children.Count > networkStart)
+        {
+            var element = d.Body.Children[networkStart];
+            d.Body.Children.RemoveAt(networkStart);
+            networkAdvanced.Children.Add(element);
+        }
+        d.Body.Children.Add(new Expander {
+            Header = "Advanced network settings · IP addresses",
+            Content = networkAdvanced, Margin = new Thickness(0, 12, 0, 12) });
         var pairing = new TextBox { IsReadOnly = true, MaxLength = 4096, TextWrapping = TextWrapping.Wrap, MinHeight = 80, Margin = new(0, 10, 0, 0) };
         var qr = new Image { Width = 310, Height = 310, Stretch = Stretch.Uniform, SnapsToDevicePixels = true };
         RenderOptions.SetBitmapScalingMode(qr, BitmapScalingMode.NearestNeighbor);
@@ -519,10 +571,12 @@ public partial class MainWindow : Window
             catch { ClearPairing(); transfer.Dispose(); transfer = null; throw; }
         }), true);
         d.Body.Children.Add(card); d.Body.Children.Add(status);
-        d.Action("Copy pairing code", () => { if (pairing.Text.Length > 0) Copy(pairing.Text); });
-        d.Body.Children.Add(new Expander { Header = "Or paste the pairing code manually", Content = pairing, Margin = new(0, 14, 0, 20) });
+        var copyPairing = d.Action("Copy pairing code · fallback", () => { if (pairing.Text.Length > 0) Copy(pairing.Text); }, inBody: true);
+        d.Body.Children.Remove(copyPairing);
+        networkAdvanced.Children.Add(copyPairing);
+        networkAdvanced.Children.Add(new Expander { Header = "Manual pairing code · fallback", Content = pairing, Margin = new(0, 12, 0, 12) });
         d.Label("If Windows asks for firewall access, allow this app on your private network. Guest Wi-Fi may block connections.");
-        d.Action("Allow Lockvyn on private Wi-Fi (administrator approval)", async () =>
+        var firewallButton = d.Action("Allow Lockvyn on private Wi-Fi (administrator approval)", async () =>
         {
             try
             {
@@ -542,19 +596,17 @@ public partial class MainWindow : Window
             catch (Win32Exception) { status.Text = "Administrator approval was cancelled. Private-network access was not changed."; }
             catch (IOException) { status.Text = "Cannot locate the installed app's private-transfer helper. Update Lockvyn and retry."; }
         }, inBody: true);
-        d.Label("This optional action allows only this installed app on Private networks and local-subnet TCP. It needs Windows administrator approval; Public networks stay blocked.");
-        d.Label("Encrypted backup files"); d.Action("Export encrypted backup", Export); d.Action("Merge an encrypted backup", ImportMerge);
-        d.Action("Optional encrypted cloud sync", () =>
-        {
-            if (session == null) return;
-            transfer?.Dispose(); transfer = null; ClearPairing();
-            var opened = session; int stamp = generation;
-            CloudSyncDialog.Show(this, root, opened, () => session == opened && generation == stamp,
-                () => { Refresh(); Touch(); }, Copy);
-        });
+        d.Body.Children.Remove(firewallButton);
+        networkAdvanced.Children.Add(firewallButton);
+        d.Label("This optional action needs administrator approval and allows only private local-network traffic for Lockvyn.");
+        var firewallHelp = d.Body.Children[^1];
+        d.Body.Children.RemoveAt(d.Body.Children.Count - 1);
+        networkAdvanced.Children.Add(firewallHelp);
         try { d.ShowDialog(); } finally { ClearPairing(); transfer?.Dispose(); transfer = null; cloudDialogOpen = false; nextCloudCheck = DateTime.MinValue; }
     }
-    private async void CloudClick(object sender, RoutedEventArgs e)
+    private void CloudClick(object sender, RoutedEventArgs e) => OpenCloudSync(false);
+
+    private async void OpenCloudSync(bool openPairing)
     {
         if (session == null || cloudDialogOpen) return;
         cloudDialogOpen = true;
@@ -565,7 +617,7 @@ public partial class MainWindow : Window
             if (session == null) return;
             var opened = session; int stamp = generation;
             CloudSyncDialog.Show(this, root, opened, () => session == opened && generation == stamp,
-                () => { Refresh(); Touch(); }, Copy);
+                () => { Refresh(); Touch(); }, Copy, openPairing);
         }
         finally { cloudDialogOpen = false; if (!new CloudProfileStore(root).Exists) CloudStatus.Text = "Cloud is optional"; nextCloudCheck = DateTime.MinValue; }
     }
