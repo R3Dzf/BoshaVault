@@ -74,7 +74,8 @@
     frame.style.cssText="position:fixed;z-index:2147483646;width:310px;max-width:calc(100vw - 16px);pointer-events:auto;";
     shadow=frame.attachShadow({mode:"closed"});
     const style=document.createElement("style");
-    style.textContent=".panel{box-sizing:border-box;width:100%;background:#fff;color:#242335;border:1px solid #e1e5ef;border-radius:14px;box-shadow:0 6px 18px #171b2e1f;padding:10px;max-height:min(420px,76vh);overflow-y:auto;overscroll-behavior:contain;font:13px system-ui,sans-serif}.top{font-weight:700;padding:5px;color:#6558d9}.sub{font-size:11px;color:#777;overflow-wrap:anywhere;padding:0 6px 7px}button{display:block;text-align:left;width:100%;background:#efedff;color:#32276c;border:0;border-radius:8px;padding:10px;margin:5px 0;cursor:pointer;font:13px system-ui,sans-serif}button:hover{background:#e8e0ff}button.primary{color:#fff;background:#6558d9}button.primary:hover{background:#6250c1}.msg{padding:9px;line-height:1.4;white-space:pre-wrap}";
+    style.textContent=".panel{box-sizing:border-box;width:100%;background:#fff;color:#242335;border:1px solid #e1e5ef;border-radius:14px;box-shadow:0 6px 18px #171b2e1f;padding:10px;max-height:min(390px,70vh);overflow-y:auto;scrollbar-width:thin;scrollbar-color:#b9abea transparent;overscroll-behavior:contain;font:13px system-ui,sans-serif}.top{font-weight:700;padding:5px;color:#6558d9}.sub{font-size:11px;color:#777;overflow-wrap:anywhere;padding:0 6px 7px}button{display:block;text-align:left;width:100%;background:#efedff;color:#32276c;border:0;border-radius:8px;padding:10px;margin:5px 0;cursor:pointer;font:13px system-ui,sans-serif}button:hover{background:#e8e0ff}button.primary{color:#fff;background:#6558d9}button.primary:hover{background:#6250c1}.msg{padding:9px;line-height:1.4;white-space:pre-wrap}";
+    style.textContent += ".panel::-webkit-scrollbar{width:6px}.panel::-webkit-scrollbar-track{background:transparent}.panel::-webkit-scrollbar-thumb{background:#b9abea;border-radius:10px}.account-search{box-sizing:border-box;width:100%;height:39px;background:#faf9ff;color:#242335;border:1px solid #d8d2ed;border-radius:9px;padding:8px 11px;font:13px system-ui,sans-serif;outline:none}.account-search:focus{border-color:#6558d9}.section{font-size:11px;color:#70698a;padding:9px 6px 3px;font-weight:600}";
     panel=document.createElement("div");
     panel.className="panel";
     shadow.append(style,panel);
@@ -235,45 +236,86 @@
     if(typeof reply?.warning==="string" && reply.warning.length>0)
       line("⚠️ "+reply.warning);
     savedMatches=reply?.status==="ok" && Array.isArray(reply.accounts)
-      ? reply.accounts.slice(0,10) : [];
+      ? reply.accounts.slice(0,50) : [];
     const more=document.createElement("div");
     more.style.display="none";
     let extraCount=0;
     if(reply?.status==="ok" && Array.isArray(reply.accounts)) {
-      const exact=reply.accounts.filter(a=>a && a.related!==true);
-      const related=reply.accounts.filter(a=>a && a.related===true);
-      for(const account of exact.slice(0,10)) {
-        if(typeof account.id!=="string" || typeof account.username!=="string")continue;
-        button((account.title||"Saved login")+" · "+account.username,
-          ()=>fill(ctx,account.id),true);
-      }
-      for(const account of related.slice(0,10)) {
-        if(typeof account.id!=="string" || typeof account.username!=="string")continue;
-        const savedHost=typeof account.website==="string"?account.website:"";
-        button("Other site: "+savedHost+" · "+account.username,
-          ()=>fill(ctx,account.id),false,more);
-        extraCount++;
-      }
-      if(!reply.accounts.length)line("No saved login on this website.","sub");
+      const accounts=reply.accounts.filter(a=>a && typeof a.id==="string" &&
+        typeof a.username==="string").slice(0,50);
+      if(accounts.length) {
+        const search=document.createElement("input");
+        search.type="search";search.className="account-search";
+        search.placeholder="Search email or account…";
+        search.setAttribute("aria-label","Search saved login accounts");
+        panel.append(search);
+        const entries=document.createElement("div");
+        panel.append(entries);
+        const noResults=document.createElement("div");
+        noResults.className="sub";noResults.textContent="No matching saved account.";
+        noResults.style.display="none";panel.append(noResults);
+        const normalizedEmail=(ctx.user?.value||"").trim().toLocaleLowerCase();
+        accounts.sort((a,b)=>{
+          const score=x=>x.username.toLocaleLowerCase()===normalizedEmail && normalizedEmail ? -1 :
+            x.related!==true ? 0 : x.groupMatched===true ? 1 : 2;
+          return score(a)-score(b);
+        });
+        const rows=[];
+        let lastSection="";
+        for(const account of accounts){
+          const section=account.related!==true ? "Exact website" :
+            account.groupMatched===true ? "Your trusted domain group" : "Related website · review before filling";
+          if(section!==lastSection){
+            const heading=document.createElement("div");heading.className="section";
+            heading.textContent=section;entries.append(heading);
+            rows.push({element:heading,key:"",isHeading:true});
+            lastSection=section;
+          }
+          const savedHost=typeof account.website==="string"?account.website:"";
+          const exact=account.related!==true;
+          const entryLabel=(account.title||"Saved login")+" · "+account.username+
+            (exact?"":" · "+savedHost);
+          const el=button(entryLabel,()=>fill(ctx,account.id),exact,entries);
+          rows.push({element:el,key:(account.username+" "+(account.title||"")+" "+savedHost).toLocaleLowerCase()});
+        }
+        search.addEventListener("input",()=>{
+          const q=search.value.toLocaleLowerCase().trim();
+          let count=0;
+          for(const row of rows){
+            if(row.isHeading)continue;
+            const show=row.key.includes(q);row.element.style.display=show?"block":"none";
+            if(show)count++;
+          }
+          // Hide an entire empty section after a filter has been applied.
+          let heading=null,shown=0;
+          for(const row of [...rows,{isHeading:true,element:null}]){
+            if(row.isHeading){
+              if(heading)heading.style.display=shown?"block":"none";
+              heading=row.element;shown=0;
+            }else if(row.element.style.display!=="none")shown++;
+          }
+          noResults.style.display=count?"none":"block";
+        });
+      }else line("No saved login matched this website.","sub");
     } else if(reply?.status==="locked") {
       button("Unlock Lockvyn",async()=>{
-        message("Unlock the vault once, then choose the login here.");
+        message("Unlock your vault, then select the account here.");
         await chrome.runtime.sendMessage({op:"open"}).catch(()=>{});
       },true);
     } else if(reply?.status==="unavailable"){
       line("Lockvyn on Windows is not connected.","sub");
     }
-    if(ctx.pass)button("Generate strong password",()=>generate(ctx,24,true));
-    if(reply?.status==="ok" && !reply.accounts?.length)
-      button("Save current website",()=>capture(ctx));
-    else {button("Save current website",()=>capture(ctx),false,more);extraCount++;}
+    button("Save current website",()=>capture(ctx),false,more);extraCount++;
     if(ctx.pass) {
+      button("Generate strong password",()=>generate(ctx,24,true),!savedMatches.length,
+        savedMatches.length?more:panel);
+      if(savedMatches.length)extraCount++;
       button("Generate 32-character password",()=>generate(ctx,32,true),false,more);
       button("Generate without symbols",()=>generate(ctx,24,false),false,more);
       extraCount+=2;
     }
-    if(extraCount) {
-      button("More options"+(extraCount>0?" ▾":""),()=>{
+    if(extraCount){
+      button("More options ▾",()=>{
         more.style.display=more.style.display==="none"?"block":"none";
       });
       panel.append(more);
