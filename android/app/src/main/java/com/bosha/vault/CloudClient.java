@@ -157,9 +157,11 @@ final class CloudClient implements AutoCloseable {
     void pairingRequest(DevicePairing session,CloudAuth.Session signed)throws Exception{
         JSONObject row=pairingRead(session,signed);
         if(!row.getString("state").equals("waiting"))throw new Exception("That pairing QR has already been used.");
-        byte[] response=request("PATCH","rest/v1/device_pairing_sessions?session_id=eq."+session.sessionId+"&state=eq.waiting",
-            new JSONObject().put("state","requested").put("joiner_public_key",session.publicKey),signed.access,8192);
-        Arrays.fill(response,(byte)0);
+        byte[] response=request("POST","rest/v1/rpc/lockvyn_pairing_request",
+            new JSONObject().put("p_session_id",session.sessionId).put("p_joiner_public_key",session.publicKey),signed.access,8192);
+        try{if(!new String(response,StandardCharsets.UTF_8).trim().equals("true"))
+            throw new Exception("This QR is already used or expired. Open Add device on Windows again.");}
+        finally{Arrays.fill(response,(byte)0);}
         JSONObject requested=pairingRead(session,signed);
         if(!requested.getString("state").equals("requested")||!requested.getString("joiner_public_key").equals(session.publicKey))
             throw new Exception("Another phone requested this QR. Start a new pairing.");
@@ -175,9 +177,11 @@ final class CloudClient implements AutoCloseable {
         return row.getString("sealed_pairing");
     }
     void pairingComplete(DevicePairing session,CloudAuth.Session signed)throws Exception{
-        byte[] response=request("PATCH","rest/v1/device_pairing_sessions?session_id=eq."+session.sessionId+"&state=eq.approved",
-            new JSONObject().put("state","completed"),signed.access,8192);
-        Arrays.fill(response,(byte)0);
+        byte[] response=request("POST","rest/v1/rpc/lockvyn_pairing_complete",
+            new JSONObject().put("p_session_id",session.sessionId).put("p_joiner_public_key",session.publicKey),signed.access,8192);
+        try{if(!new String(response,StandardCharsets.UTF_8).trim().equals("true"))
+            throw new Exception("Pairing approval expired or did not match this phone.");}
+        finally{Arrays.fill(response,(byte)0);}
         if(!pairingRead(session,signed).getString("state").equals("completed"))
             throw new Exception("The pairing acknowledgement was not accepted.");
     }
