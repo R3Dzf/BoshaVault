@@ -11,6 +11,9 @@ public sealed class DesktopPreferences
     public int AutoLockMinutes { get; set; } = 2;
     public bool TrayTipShown { get; set; }
     public bool BrowserAutofillEnabled { get; set; } = true;
+    // Off only when the user explicitly chooses "Don't notify me again".
+    // Manual update checks remain available in Settings.
+    public bool UpdateNotificationsEnabled { get; set; } = true;
     public PasswordOptions Generator { get; set; } = new();
     private static readonly JsonSerializerOptions Options = new() { UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow, MaxDepth = 4 };
     public static bool ValidTimeout(int minutes) => minutes is 1 or 2 or 5 or 10;
