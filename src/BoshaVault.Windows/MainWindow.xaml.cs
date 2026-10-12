@@ -484,7 +484,7 @@ public partial class MainWindow : Window
         dialog.Action("Save group",() => {
             try {
                 if(session == null || !session.IsOpen)throw new VaultException("Unlock Lockvyn to edit domain groups.");
-                var hosts=hostnames.Text.Split(new[]{'\\r','\\n',',',';'},
+                var hosts=hostnames.Text.Split(new[]{'\r','\n',',',';'},
                     StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
                     .Select(x=>x.ToLowerInvariant()).ToList();
                 var updated = new DomainAliasGroup { Name=groupName.Text.Trim(), Hosts=hosts };
