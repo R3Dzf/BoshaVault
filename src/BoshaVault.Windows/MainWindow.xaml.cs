@@ -453,10 +453,10 @@ public partial class MainWindow : Window
         if (session == null) return;
         PasswordGeneratorDialog.Show(this, preferences.Generator, SaveGeneratorDefaults, Copy);
     }
-    private void ManageDomainGroups()
+    private void ManageDomainGroups(Window owner)
     {
         if(session == null)return;
-        var dialog = new FormDialog(this,"Trusted domain groups",560);
+        var dialog = new FormDialog(owner,"Trusted domain groups",560);
         dialog.Label("These local preferences group related hostnames for all saved logins. Only domains sharing a verified registrable domain can be grouped. Every password fill still needs your approval.");
         var picker = new ComboBox {
             DisplayMemberPath = nameof(DomainAliasGroup.Name),
@@ -554,7 +554,7 @@ public partial class MainWindow : Window
             SetStatus(preferences.BrowserAutofillEnabled ? "Browser Autofill enabled." : "Browser Autofill disabled.");
         });
         d.Label("Domain groups apply to every saved account automatically. Group HTTPS hosts within the same parent website (for example google.com and accounts.google.com). Fill still requires approval.");
-        d.Action("Manage trusted domain groups", ManageDomainGroups, inBody: true);
+        d.Action("Manage trusted domain groups", () => ManageDomainGroups(d), inBody: true);
         int browserGuideStart = d.Body.Children.Count;
         d.Label("Install the Lockvyn browser extension once in each Chrome / Edge profile you choose. Connect its ID here one time. After every Windows update, the local connection repairs itself; no script or administrator permissions.");
         d.Action("Connect browser extension · one-time setup", ConnectBrowserExtension, true, inBody: true);
