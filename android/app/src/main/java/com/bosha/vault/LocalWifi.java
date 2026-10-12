@@ -10,9 +10,15 @@ import java.util.*;
 final class LocalWifi {
     static LocalTransfer connect(Context context,String pairing)throws Exception{return new LocalTransfer(pairing,(socket,host)->bind(context,socket,host),message->{});}
     static int score(NetworkCapabilities caps,LinkProperties links,InetAddress target){
-        if(caps==null||links==null||!caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)||caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN))return -1;
+        if(caps==null||links==null)return -1;
+        List<LinkAddress> rows=links.getLinkAddresses();byte[][] addresses=new byte[rows.size()][];int[] prefixes=new int[rows.size()];
+        for(int i=0;i<rows.size();i++){addresses[i]=rows.get(i).getAddress().getAddress();prefixes[i]=rows.get(i).getPrefixLength();}
+        return score(caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI),caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN),addresses,prefixes,target.getAddress());
+    }
+    static int score(boolean wifi,boolean vpn,byte[][] addresses,int[] prefixes,byte[] target){
+        if(!wifi||vpn||addresses==null||prefixes==null||addresses.length!=prefixes.length)return -1;
         int score=0;
-        for(LinkAddress link:links.getLinkAddresses())if(link.getAddress() instanceof Inet4Address){score=Math.max(score,sameSubnet(link.getAddress().getAddress(),target.getAddress(),link.getPrefixLength())?2:1);}
+        for(int i=0;i<addresses.length;i++)if(addresses[i].length==4){score=Math.max(score,sameSubnet(addresses[i],target,prefixes[i])?2:1);}
         return score;
     }
     static void bind(Context context,Socket socket,String host)throws IOException{
@@ -25,7 +31,9 @@ final class LocalWifi {
             int score=score(caps,links,target);
             if(score>best&&score>0){best=score;chosen=network;}
         }
-        if(chosen!=null){chosen.bindSocket(socket);return;}
+        if(chosen!=null){
+            try{chosen.bindSocket(socket);}catch(IOException failure){throw new IOException("Android blocked the local Wi-Fi route. Reconnect Wi-Fi and check whether a VPN permits local-network access.",failure);}return;
+        }
         // A phone hosting a hotspot may expose its AP interface without a Wi-Fi
         // Network handle. Bind its local source IPv4 only when the PC shares that
         // subnet; never fall back to an arbitrary mobile-data/default socket.
