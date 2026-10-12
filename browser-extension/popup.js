@@ -3,6 +3,17 @@ const site=document.getElementById("site");
 const status=document.getElementById("status");
 const show=document.getElementById("show");
 const save=document.getElementById("save");
+const quiet=document.getElementById("quiet");
+chrome.storage.local.get({quietMode:false},prefs=>{
+  quiet.checked=prefs?.quietMode===true;
+});
+quiet.addEventListener("change",()=>{
+  chrome.storage.local.set({quietMode:quiet.checked},()=>{
+    status.textContent=quiet.checked
+      ? "Quiet Mode on. Open the extension menu and choose Show saved logins when needed."
+      : "Automatic suggestions enabled on HTTPS login fields.";
+  });
+});
 async function activeTab() {
   const tabs=await chrome.tabs.query({active:true,currentWindow:true});
   const tab=tabs?.[0];
