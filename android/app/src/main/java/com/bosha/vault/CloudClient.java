@@ -27,7 +27,7 @@ final class CloudClient implements AutoCloseable {
         if(access!=null)conn.setRequestProperty("Authorization","Bearer "+access);
         byte[] payload=null;
         try{
-            if(body!=null){conn.setDoOutput(true);conn.setRequestProperty("Content-Type","application/json");conn.setRequestProperty("Prefer","resolution=merge-duplicates,return=minimal");payload=body.toString().getBytes(StandardCharsets.UTF_8);conn.setFixedLengthStreamingMode(payload.length);try(OutputStream out=conn.getOutputStream()){out.write(payload);}}
+            if(body!=null){conn.setDoOutput(true);conn.setRequestProperty("Content-Type","application/json");conn.setRequestProperty("Prefer",path.startsWith("rest/v1/rpc/lockvyn_pairing_")?"return=representation":"resolution=merge-duplicates,return=minimal");payload=body.toString().getBytes(StandardCharsets.UTF_8);conn.setFixedLengthStreamingMode(payload.length);try(OutputStream out=conn.getOutputStream()){out.write(payload);}}
             int status=conn.getResponseCode();check();if(status<200||status>=300){String code=errorCode(conn);throw new Exception(CloudAuth.error(status,path,code));}
             if(conn.getContentLengthLong()>limit)throw new Exception("Cloud response exceeds its size limit.");
             try(InputStream in=conn.getInputStream();ByteArrayOutputStream out=new ByteArrayOutputStream()){
