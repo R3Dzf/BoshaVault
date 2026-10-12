@@ -23,6 +23,7 @@ public sealed class BrowserAccount
     public string Username { get; set; } = "";
     public string Website { get; set; } = "";
     public bool Related { get; set; }
+    public bool GroupMatched { get; set; }
 }
 public sealed class BrowserAutofillResponse
 {
