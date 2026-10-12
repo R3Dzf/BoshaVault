@@ -35,6 +35,8 @@ jobs:
         with:
           go-version: '1.24.x'
           cache: false
+      - name: Validate Calm Pro Windows/Android visual contracts
+        run: python tools/test_calm_pro_ui.py
       - name: Validate every Arabic email with Go template rendering
         run: go run tools/validate-email-templates.go
       - name: Fetch pinned JVM test dependencies
