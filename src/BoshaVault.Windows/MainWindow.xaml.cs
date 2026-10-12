@@ -12,6 +12,8 @@ using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using BoshaVault.Core;
 using Microsoft.Win32;
+using Velopack;
+using Velopack.Sources;
 
 namespace BoshaVault.Windows;
 
@@ -37,6 +39,9 @@ public partial class MainWindow : Window
     private bool exiting, resourcesReleased;
     private WindowState previousWindowState = WindowState.Normal;
     private UpdateDialog? updates;
+    private DateTime nextUpdateCheckUtc = DateTime.UtcNow.AddSeconds(18);
+    private bool updateCheckBusy, updatePromptVisible;
+    private string? pendingUpdateVersion, alertedUpdateVersion;
     private string? undoEntryId; private DateTime undoUntil;
     private readonly SemaphoreSlim cloudGate = new(1, 1);
     private bool cloudDialogOpen;
@@ -64,7 +69,12 @@ public partial class MainWindow : Window
         SystemEvents.SessionSwitch += OnSessionSwitch; SystemEvents.PowerModeChanged += OnPowerModeChanged;
         Closing += OnClosing;
         Closed += (_, _) => { ReleaseDesktopResources(); Application.Current.Shutdown(); };
-        StateChanged += (_, _) => { if (WindowState != WindowState.Minimized) previousWindowState = WindowState; };
+        StateChanged += (_, _) =>
+        {
+            if (WindowState != WindowState.Minimized) previousWindowState = WindowState;
+            TryShowUpdateNotice();
+        };
+        Activated += (_, _) => TryShowUpdateNotice();
         timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         timer.Tick += (_, _) =>
         {
@@ -72,6 +82,12 @@ public partial class MainWindow : Window
             if (revealed && DateTime.UtcNow >= revealUntil) Mask();
             if (UndoButton.Visibility == Visibility.Visible && DateTime.UtcNow > undoUntil) { undoEntryId = null; UndoButton.Visibility = Visibility.Collapsed; }
             if (session != null && (transfer?.IsActive != true || transfer.IsCompleted) && DateTime.UtcNow - lastActivity > TimeSpan.FromMinutes(timeoutMinutes)) LockVault();
+            if (preferences.UpdateNotificationsEnabled && !updateCheckBusy &&
+                !exiting && DateTime.UtcNow >= nextUpdateCheckUtc)
+            {
+                nextUpdateCheckUtc = DateTime.UtcNow.AddHours(6);
+                _ = CheckUpdateAnnouncement();
+            }
             if (!cloudDialogOpen && DateTime.UtcNow >= nextCloudCheck)
             {
                 nextCloudCheck = DateTime.UtcNow.AddSeconds(session == null ? 60 : 12);
@@ -402,6 +418,19 @@ public partial class MainWindow : Window
         if (session == null) return;
         var d = new FormDialog(this, "Your vault settings");
         d.Action("Check for updates", () => { d.Close(); UpdatesClick(sender, e); }, inBody: true);
+        var updateAlerts = new CheckBox {
+            Content = "Notify me when new versions are available",
+            IsChecked = preferences.UpdateNotificationsEnabled,
+            Margin = new Thickness(0, 10, 0, 10) };
+        d.Body.Children.Add(updateAlerts);
+        updateAlerts.Click += (_, _) => Guard(() =>
+        {
+            preferences.UpdateNotificationsEnabled = updateAlerts.IsChecked == true;
+            preferences.Save(preferencesPath);
+            if (preferences.UpdateNotificationsEnabled)
+                nextUpdateCheckUtc = DateTime.UtcNow.AddSeconds(2);
+            else pendingUpdateVersion = null;
+        });
         var startup = new CheckBox { Content = "Start with Windows · locked in the tray", IsChecked = StartupEnabled() }; d.Body.Children.Add(startup);
         startup.Click += (_, _) => { SetStartup(startup.IsChecked == true); startup.IsChecked = StartupEnabled(); };
         d.Label("Closing the main window locks the vault and keeps Lockvyn in the tray. Click the tray icon or use Ctrl + Alt + P to reopen. Right-click the icon for Exit.");
@@ -766,12 +795,77 @@ public partial class MainWindow : Window
         { BringToFront(); MessageBox.Show(this, "Cannot update your Windows startup setting. Check your user-account permissions.", "Lockvyn"); }
     }
     private void ExitApplication() { PrepareToExit(); Application.Current.Shutdown(); }
-    private void UpdatesClick(object sender, RoutedEventArgs e)
+    private void UpdatesClick(object sender, RoutedEventArgs e) => ShowUpdates(false);
+
+    private void ShowUpdates(bool checkImmediately)
     {
         if (updates != null) { updates.Activate(); return; }
-        updates = new UpdateDialog(this);
+        updates = new UpdateDialog(this, checkImmediately);
         updates.Closed += (_, _) => updates = null;
+        BringToFront();
         updates.Show();
+    }
+
+    private async Task CheckUpdateAnnouncement()
+    {
+        if (updateCheckBusy || !preferences.UpdateNotificationsEnabled || exiting) return;
+        updateCheckBusy = true;
+        try
+        {
+            var manager = new UpdateManager(
+                new GithubSource("https://github.com/R3Dzf/BoshaVault", null, false));
+            if (!manager.IsInstalled) return;
+            var update = await manager.CheckForUpdatesAsync().WaitAsync(TimeSpan.FromSeconds(16));
+            if (update == null || exiting || !preferences.UpdateNotificationsEnabled) return;
+            string version = update.TargetFullRelease.Version.ToString();
+            if (version == alertedUpdateVersion) return;
+            pendingUpdateVersion = version;
+            alertedUpdateVersion = version;
+            if (!IsVisible || WindowState == WindowState.Minimized)
+                tray?.ShowUpdateAvailable(version);
+            else TryShowUpdateNotice();
+        }
+        catch (Exception ex) when (ex is IOException or HttpRequestException or
+                                    OperationCanceledException or TimeoutException)
+        {
+            // Update availability never blocks vault unlock, offline use or cloud sync.
+        }
+        finally { updateCheckBusy = false; }
+    }
+
+    private void TryShowUpdateNotice()
+    {
+        if (updatePromptVisible || !preferences.UpdateNotificationsEnabled || exiting ||
+            string.IsNullOrEmpty(pendingUpdateVersion) || !IsVisible ||
+            WindowState == WindowState.Minimized || updates != null ||
+            OwnedWindows.Cast<Window>().Any(window => window.IsVisible)) return;
+        string version = pendingUpdateVersion;
+        pendingUpdateVersion = null;
+        updatePromptVisible = true;
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (exiting) { updatePromptVisible = false; return; }
+            var dialog = new FormDialog(this, "Update available · " + version, 490);
+            dialog.Label("A new Lockvyn version is available. Your encrypted vault and settings stay on this device.");
+            dialog.Label("You can read a short What's New summary and see the download size before downloading.");
+            dialog.Action("Update now", () =>
+            {
+                dialog.Close();
+                ShowUpdates(true);
+            }, true, true);
+            dialog.Action("Later", dialog.Close, inBody: true);
+            dialog.Action("Don't notify me again", () =>
+            {
+                Guard(() =>
+                {
+                    preferences.UpdateNotificationsEnabled = false;
+                    preferences.Save(preferencesPath);
+                });
+                dialog.Close();
+            }, inBody: true);
+            dialog.Closed += (_, _) => updatePromptVisible = false;
+            dialog.ShowDialog();
+        });
     }
     internal void PrepareToExit() { if (exiting) return; exiting = true; LockVault(); }
     internal void ReleaseDesktopResources()
