@@ -19,6 +19,9 @@ function setup({changed=false,stale=false,tabOrigin=host}={}) {
       async sendNativeMessage(name,message){
         nativeCalls++;
         assert.equal(name,"com.boshavault.desktop");
+        if(message.op==="list")return {status:"ok",accounts:[{
+          id:entryId,username:"synthetic-user@example.invalid",website:"github.com"
+        }]};
         return message.op==="update" ? {status:"updated"} :
           {status:"filled",username:"fakeuser",password:"fake-password-to-protect"};
       }
@@ -47,6 +50,11 @@ function setup({changed=false,stale=false,tabOrigin=host}={}) {
   assert.equal(reply.status,"filled","same document may receive user-approved fill");
   assert.equal(scenario.nativeCalls(),1);
 
+  scenario=setup();
+  reply=await scenario.request({op:"list"});
+  assert.equal(reply.status,"ok","live document may list account metadata");
+  assert.equal(reply.accounts.length,1,"live document receives a synthetic account");
+
   scenario=setup({stale:true});
   reply=await scenario.request({op:"list"});
   assert.equal(reply.status,"denied","already stale document cannot enumerate usernames");
@@ -55,6 +63,7 @@ function setup({changed=false,stale=false,tabOrigin=host}={}) {
   scenario=setup({changed:true});
   reply=await scenario.request({op:"list"});
   assert.equal(reply.status,"denied","navigation during a native list request cannot receive usernames");
+  assert.equal(reply.accounts,undefined,"navigation must not expose account metadata");
   assert.equal(scenario.nativeCalls(),1,"navigation after the first identity check may have already sent the native request");
 
   scenario=setup({changed:true});
