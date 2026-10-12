@@ -184,16 +184,66 @@
     </ControlTemplate>
    </Setter.Value></Setter>
   </Style>
-  <Style x:Key="FolderPicker" TargetType="ComboBox" BasedOn="{StaticResource {x:Type ComboBox}}">
+  <Style x:Key="ModernFolderItem" TargetType="ComboBoxItem">
+   <Setter Property="Padding" Value="12,10"/>
+   <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+   <Setter Property="Template"><Setter.Value>
+    <ControlTemplate TargetType="ComboBoxItem">
+     <Border x:Name="ItemSurface" Background="Transparent" CornerRadius="9" Padding="{TemplateBinding Padding}" Margin="3,2">
+      <ContentPresenter Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}"
+       VerticalAlignment="Center" RecognizesAccessKey="True"/>
+     </Border>
+     <ControlTemplate.Triggers>
+      <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="ItemSurface" Property="Background" Value="#F3F0FF"/></Trigger>
+      <Trigger Property="IsSelected" Value="True"><Setter TargetName="ItemSurface" Property="Background" Value="#ECE7FF"/></Trigger>
+     </ControlTemplate.Triggers>
+    </ControlTemplate>
+   </Setter.Value></Setter>
+  </Style>
+  <Style x:Key="FolderPicker" TargetType="ComboBox">
    <Setter Property="MinWidth" Value="165"/>
    <Setter Property="MinHeight" Value="43"/>
-   <Setter Property="Background" Value="#FFFFFF"/>
    <Setter Property="Foreground" Value="#171B2E"/>
-   <Setter Property="BorderBrush" Value="#E1E5EF"/>
-   <Setter Property="BorderThickness" Value="1"/>
-   <Setter Property="Padding" Value="12,9"/>
    <Setter Property="FontSize" Value="13"/>
    <Setter Property="FontWeight" Value="SemiBold"/>
+   <Setter Property="ItemContainerStyle" Value="{StaticResource ModernFolderItem}"/>
+   <Setter Property="Template"><Setter.Value>
+    <ControlTemplate TargetType="ComboBox">
+     <Grid>
+      <Border x:Name="SelectionSurface" Background="White" CornerRadius="12" BorderBrush="#DDD7EF" BorderThickness="1">
+       <Grid Margin="13,0,11,0">
+        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="20"/></Grid.ColumnDefinitions>
+        <ContentPresenter Grid.Column="0" Margin="1,0,5,0"
+         Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+         IsHitTestVisible="False" VerticalAlignment="Center"/>
+        <Path Grid.Column="1" Data="M 2 5 L 7 10 L 12 5"
+         Stroke="#72678E" StrokeThickness="2" StrokeStartLineCap="Round"
+         StrokeEndLineCap="Round" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+       </Grid>
+      </Border>
+      <ToggleButton Focusable="False" Background="Transparent" BorderThickness="0"
+       IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">
+       <ToggleButton.Template><ControlTemplate TargetType="ToggleButton"><Border Background="Transparent"/></ControlTemplate></ToggleButton.Template>
+      </ToggleButton>
+      <Popup x:Name="PART_Popup" Placement="Bottom" AllowsTransparency="True" Focusable="False"
+       IsOpen="{TemplateBinding IsDropDownOpen}" PopupAnimation="Fade">
+       <Border Margin="0,5,0,8" Background="White" BorderBrush="#DDD7EF" BorderThickness="1"
+        CornerRadius="12" Padding="5" MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}">
+        <Border.Effect><DropShadowEffect xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+         Color="#32234F" BlurRadius="16" ShadowDepth="3" Opacity="0.16"/></Border.Effect>
+        <ScrollViewer MaxHeight="275" VerticalScrollBarVisibility="Auto" CanContentScroll="True">
+         <ItemsPresenter/>
+        </ScrollViewer>
+       </Border>
+      </Popup>
+     </Grid>
+     <ControlTemplate.Triggers>
+      <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="SelectionSurface" Property="BorderBrush" Value="#BDB1EE"/></Trigger>
+      <Trigger Property="IsKeyboardFocusWithin" Value="True"><Setter TargetName="SelectionSurface" Property="BorderBrush" Value="#6558D9"/></Trigger>
+      <Trigger Property="IsEnabled" Value="False"><Setter TargetName="SelectionSurface" Property="Opacity" Value="0.45"/></Trigger>
+     </ControlTemplate.Triggers>
+    </ControlTemplate>
+   </Setter.Value></Setter>
   </Style>
  </Application.Resources>
 </Application>
