@@ -77,12 +77,14 @@ public static class OriginPolicy
     {
         if(groups == null || groups.Count > 24)throw new VaultException("Too many domain groups.");
         var seen = new HashSet<string>(StringComparer.Ordinal);
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach(var group in groups)
         {
             if(group == null || string.IsNullOrWhiteSpace(group.Name) ||
                group.Name.Length > 60 || group.Name.Any(char.IsControl) ||
                group.Hosts == null || group.Hosts.Count is < 2 or > 16)
                 throw new VaultException("Each group needs a name and 2–16 valid HTTPS hosts.");
+            if(!names.Add(group.Name.Trim()))throw new VaultException("Duplicate domain group name.");
             string? baseDomain = null;
             foreach(var raw in group.Hosts)
             {
@@ -105,11 +107,14 @@ public static class OriginPolicy
     private static bool IsInSameGroup(string saved,string requested,IReadOnlyList<DomainAliasGroup>? groups)
     {
         if(groups == null || groups.Count == 0)return false;
-        // Validate on every authorization path, not only when saving UI state.
-        try { ValidateGroups(groups); }
-        catch(VaultException) { return false; }
-        return groups.Any(g=>g.Hosts.Contains(saved,StringComparer.Ordinal) &&
-                             g.Hosts.Contains(requested,StringComparer.Ordinal));
+        // Fail closed even when a corrupted preference slips through: aliases
+        // must share the pinned PSL registrable domain before any group lookup.
+        var a=RegistrableDomain(saved);
+        var b=RegistrableDomain(requested);
+        if(a==null || !string.Equals(a,b,StringComparison.Ordinal))return false;
+        return groups.Any(g=>g.Hosts != null &&
+            g.Hosts.Contains(saved,StringComparer.Ordinal) &&
+            g.Hosts.Contains(requested,StringComparer.Ordinal));
     }
 
     public static DomainRelation Relation(string storedUrl,string requestedUrl,
