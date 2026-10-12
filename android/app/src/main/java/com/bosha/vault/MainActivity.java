@@ -141,13 +141,9 @@ public final class MainActivity extends Activity {
         }catch(Exception e){Ui.error(this,e);}
     }
     private void options(){
-        LinearLayout b=Ui.column(this);AlertDialog d=dialog("Vault options",b);
-        b.addView(Ui.button(this,"+ Add login",true,()->{d.dismiss();edit(null);}));
+        LinearLayout b=Ui.column(this);AlertDialog d=dialog("Vault tools",b);
         b.addView(Ui.button(this,"Generate password",false,()->{d.dismiss();generator();}));
         b.addView(Ui.button(this,"Folders",false,()->{d.dismiss();folders();}));
-        b.addView(Ui.button(this,"Sync & Devices",false,()->{d.dismiss();syncHub();}));
-        b.addView(Ui.button(this,"Backup & Restore",false,()->{d.dismiss();backupHub();}));
-        b.addView(Ui.button(this,"Settings & Autofill",false,()->{d.dismiss();settings();}));
     }
     private void appUpdates(){
         if(busy){toast("Finish the current vault action before updating.");return;}
@@ -361,11 +357,16 @@ public final class MainActivity extends Activity {
             b.addView(Ui.text(this,profile.optString("lastSyncUtc").isEmpty()?"No successful sync yet.":"Last successful sync: "+profile.optString("lastSyncUtc"),12,Ui.MUTED,false));
             CheckBox auto=check(b,"Sync automatically on this device",profile.optBoolean("autoSync",true));auto.setOnCheckedChangeListener((button,enabled)->cloudTask(status,()->{synchronized(CloudClient.GATE){JSONObject latest=store.load(profile.getString("vaultId"));if(latest==null)throw new IOException("Cloud is disconnected on this device.");try{latest.put("autoSync",enabled);store.save(latest);profile.put("autoSync",enabled);}finally{CloudSettingsStore.clear(latest);}}},()->{status.setText(enabled?"Automatic sync is on.":"Automatic sync is paused on this device.");if(enabled)nextCloudCheck=0;}));
             b.addView(Ui.button(this,"Sync now",true,()->cloudRefresh(client,profile,store,status,signedIn->{int[] conflicts={0};cloudTask(status,()->conflicts[0]=client.sync(engine,profile,store,signedIn),()->{status.setText("Synced successfully. "+conflicts[0]+" conflict copies kept.");renderList();});})));
-            b.addView(Ui.button(this,"Cloud account security · 2FA",false,()->cloudRefresh(client,profile,store,status,signedIn->cloudSecurity(client,signedIn,profile,store))));
-            b.addView(Ui.button(this,"Copy legacy recovery code (advanced)",false,()->{try{copy(CloudSnapshot.pairing(profile));status.setText("Permanent cloud recovery key copied; keep private. The clipboard clears in 20 seconds.");}catch(Exception e){Ui.error(this,e);}}));
-            b.addView(Ui.text(this,"Connect your other device once using this account and connection code. The code contains your recovery key. Keep an encrypted local backup.",12,Ui.MUTED,false));
-            b.addView(Ui.button(this,"Disconnect this device",false,()->new AlertDialog.Builder(this).setTitle("Disconnect cloud?").setMessage("Keep your local vault and encrypted cloud backups, and sign out this cloud session? Keep your connection code on another trusted device first.").setNegativeButton("Cancel",null).setPositiveButton("Disconnect",(x,y)->cloudRefresh(client,profile,store,status,signedIn->cloudTask(status,()->client.signOut(signedIn,store),()->{d.dismiss();toast("Cloud session signed out. Previously issued access tokens expire normally. Local vault unchanged.");}))).show()));
-            b.addView(Ui.button(this,"Forget local cloud settings (offline)",false,()->new AlertDialog.Builder(this).setTitle("Forget cloud settings?").setMessage("This forgets your recovery key and saved sign-in on this phone. It does not revoke server sessions or remove cloud backups. Keep your code elsewhere first.").setNegativeButton("Cancel",null).setPositiveButton("Forget",(x,y)->cloudTask(status,store::forget,()->{d.dismiss();toast("Local settings forgotten; server session not revoked.");})).show()));
+            b.addView(Ui.button(this,"Connect to my PC · secure QR",false,()->{d.dismiss();connectToPc("");}));
+            LinearLayout advancedCloud=Ui.column(this);advancedCloud.setVisibility(View.GONE);
+            b.addView(Ui.button(this,"Security & advanced cloud options ▾",false,()->advancedCloud.setVisibility(
+                advancedCloud.getVisibility()==View.GONE?View.VISIBLE:View.GONE)));
+            b.addView(advancedCloud);
+            advancedCloud.addView(Ui.button(this,"Cloud account security · 2FA",false,()->cloudRefresh(client,profile,store,status,signedIn->cloudSecurity(client,signedIn,profile,store))));
+            advancedCloud.addView(Ui.button(this,"Copy legacy recovery code · keep private",false,()->{try{copy(CloudSnapshot.pairing(profile));status.setText("Permanent cloud recovery key copied; keep private. The clipboard clears in 20 seconds.");}catch(Exception e){Ui.error(this,e);}}));
+            advancedCloud.addView(Ui.text(this,"This legacy recovery code contains a permanent key. Normally use secure QR pairing instead.",12,Ui.MUTED,false));
+            advancedCloud.addView(Ui.button(this,"Disconnect this device",false,()->new AlertDialog.Builder(this).setTitle("Disconnect cloud?").setMessage("Keep your local vault and encrypted cloud backups, and sign out this cloud session? Keep your connection code on another trusted device first.").setNegativeButton("Cancel",null).setPositiveButton("Disconnect",(x,y)->cloudRefresh(client,profile,store,status,signedIn->cloudTask(status,()->client.signOut(signedIn,store),()->{d.dismiss();toast("Cloud session signed out. Previously issued access tokens expire normally. Local vault unchanged.");}))).show()));
+            advancedCloud.addView(Ui.button(this,"Forget local cloud settings (offline)",false,()->new AlertDialog.Builder(this).setTitle("Forget cloud settings?").setMessage("This forgets your recovery key and saved sign-in on this phone. It does not revoke server sessions or remove cloud backups. Keep your code elsewhere first.").setNegativeButton("Cancel",null).setPositiveButton("Forget",(x,y)->cloudTask(status,store::forget,()->{d.dismiss();toast("Local settings forgotten; server session not revoked.");})).show()));
         }else{
             b.addView(Ui.text(this,"Create a Lockvyn cloud account here with your own email. Each person uses their own account; sign in with that same account on your own devices.",13,Ui.MUTED,false));
             b.addView(Ui.text(this,"Your offline vault needs no account. The cloud password is separate from your master passphrase.",12,Ui.MUTED,false));
