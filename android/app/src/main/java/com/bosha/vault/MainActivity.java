@@ -370,14 +370,17 @@ public final class MainActivity extends Activity {
         }else{
             b.addView(Ui.text(this,"Create a Lockvyn cloud account here with your own email. Each person uses their own account; sign in with that same account on your own devices.",13,Ui.MUTED,false));
             b.addView(Ui.text(this,"Your offline vault needs no account. The cloud password is separate from your master passphrase.",12,Ui.MUTED,false));
-            EditText email=Ui.field(b,"Cloud account email","",false,320),password=Ui.field(b,"Separate cloud password (16+ characters)","",true,1024),code=Ui.field(b,"Other device's cloud connection code (only when joining)","",true,1024);email.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
-            EditText confirmation=Ui.field(b,"Email confirmation code (if shown in your email)","",true,10);confirmation.setInputType(InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+            EditText email=Ui.field(b,"Cloud account email","",false,320),password=Ui.field(b,"Separate cloud password (16+ characters)","",true,1024);
+            email.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
+            LinearLayout accountAdvanced=Ui.column(this);accountAdvanced.setVisibility(View.GONE);
+            EditText code=Ui.field(accountAdvanced,"Other device's cloud recovery code · advanced","",true,1024);
+            EditText confirmation=Ui.field(accountAdvanced,"Email confirmation code (if shown in your email)","",true,10);confirmation.setInputType(InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_VARIATION_PASSWORD);
             b.addView(Ui.text(this,"First device: create and confirm a cloud account, then start a new cloud vault. To join this vault from a connected PC, choose Connect to my PC and scan its temporary QR.",12,Ui.MUTED,false));
             b.addView(Ui.button(this,"Connect to my PC · scan secure QR",true,()->{d.dismiss();connectToPc("");}));
             b.addView(Ui.button(this,"Create cloud account",false,()->{String secret=password.getText().toString(),address=email.getText().toString().trim();password.setText("");cloudTask(status,()->client.signUp(address,secret),()->status.setText("Confirm the account using your email, then sign in below. Local vault unchanged."));}));
-            b.addView(Ui.button(this,"Resend confirmation email",false,()->{String address=email.getText().toString().trim();cloudTask(status,()->client.resendConfirmation(address),()->status.setText("If the account is awaiting confirmation, check your email including Spam. Wait at least 60 seconds before requesting another message."));}));
-            b.addView(Ui.button(this,"Confirm email code",false,()->{String digits=confirmation.getText().toString().trim(),address=email.getText().toString().trim();confirmation.setText("");cloudTask(status,()->client.auth.verifyEmail(address,digits),()->status.setText("Email confirmed. Enter your cloud password and sign in below. 2FA is checked separately."));}));
-            for(boolean existing:new boolean[]{false,true})b.addView(Ui.button(this,existing?"Join this vault's existing cloud":"Start a new cloud vault",!existing,()->{
+            accountAdvanced.addView(Ui.button(this,"Resend confirmation email",false,()->{String address=email.getText().toString().trim();cloudTask(status,()->client.resendConfirmation(address),()->status.setText("If the account is awaiting confirmation, check your email including Spam. Wait at least 60 seconds before requesting another message."));}));
+            accountAdvanced.addView(Ui.button(this,"Confirm email code",false,()->{String digits=confirmation.getText().toString().trim(),address=email.getText().toString().trim();confirmation.setText("");cloudTask(status,()->client.auth.verifyEmail(address,digits),()->status.setText("Email confirmed. Enter your cloud password and sign in below. 2FA is checked separately."));}));
+            for(boolean existing:new boolean[]{false,true})(existing?accountAdvanced:b).addView(Ui.button(this,existing?"Join this vault's existing cloud":"Start a new cloud vault",!existing,()->{
                 String address=email.getText().toString().trim(),secret=password.getText().toString(),pairingCode=code.getText().toString().trim();password.setText("");code.setText("");
                 CloudAuth.Session[] session={null};cloudTask(status,()->session[0]=client.signIn(address,secret),()->cloudAssure(client,session[0],null,store,status,false,signedIn->cloudTask(status,()->{
                     if(!active||stamp!=epoch)throw new IOException("Cloud operation cancelled.");
@@ -387,6 +390,9 @@ public final class MainActivity extends Activity {
                 },()->{d.dismiss();cloud();})));
             }));
         }
+            b.addView(Ui.button(this,"Email verification & legacy recovery ▾",false,()->
+                accountAdvanced.setVisibility(accountAdvanced.getVisibility()==View.GONE?View.VISIBLE:View.GONE)));
+            b.addView(accountAdvanced);
         Ui.gap(b,12);b.addView(status);
     }
     /** Guided, authenticated, user-approved pairing; no recovery key in the QR. */
