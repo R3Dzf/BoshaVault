@@ -53,15 +53,79 @@ final class AndroidUpdater {
             byte[] buffer=new byte[8192];int n;while((n=in.read(buffer))!=-1){alive();if(out.size()+n>limit)throw new IOException("Update response is too large.");out.write(buffer,0,n);}return new String(out.toByteArray(),StandardCharsets.UTF_8);
         }finally{c.disconnect();connection=null;}
     }
+    private File installedApk(Context c)throws Exception{
+        PackageInfo app=installed(c);
+        if(app.applicationInfo==null||app.applicationInfo.sourceDir==null)
+            throw new IOException("Installed APK location is not available.");
+        return new File(app.applicationInfo.sourceDir);
+    }
+    private AndroidUpdateFeed.Delta applicable(Context c,AndroidUpdateFeed feed){
+        try{
+            PackageInfo app=installed(c);
+            File base=installedApk(c);
+            return feed.forInstalled(app.getLongVersionCode(),AndroidDelta.sha256(base));
+        }catch(Exception ignored){return null;}
+    }
+    long expectedDownload(Context c,AndroidUpdateFeed feed){
+        AndroidUpdateFeed.Delta delta=applicable(c,feed);
+        return delta==null?feed.size:delta.size;
+    }
+    private void downloadFile(String url,long size,String expected,File dest,Progress progress,int begin,int end)throws Exception{
+        alive();HttpURLConnection request=open(url);
+        try(InputStream in=request.getInputStream();FileOutputStream out=new FileOutputStream(dest)){
+            MessageDigest digest=MessageDigest.getInstance("SHA-256");
+            byte[] buffer=new byte[32768];long total=0;int n,last=-1;
+            try{
+                while((n=in.read(buffer))!=-1){
+                    alive();total+=n;
+                    if(total>size)throw new IOException("Downloaded file exceeds the signed release metadata.");
+                    out.write(buffer,0,n);digest.update(buffer,0,n);
+                    int p=begin+(int)(total*(end-begin)/size);
+                    if(p!=last){progress.changed(p);last=p;}
+                }
+                out.getFD().sync();
+                if(total!=size||!hex(digest.digest()).equalsIgnoreCase(expected))
+                    throw new IOException("Update download failed checksum/size verification.");
+                alive();
+            }finally{java.util.Arrays.fill(buffer,(byte)0);}
+        }finally{request.disconnect();connection=null;}
+    }
     File download(Context c,AndroidUpdateFeed feed,Progress progress)throws Exception{
-        alive();feed.requireUpgrade(c.getPackageName(),installed(c).getLongVersionCode(),signer(installed(c)),Build.VERSION.SDK_INT);
-        File target=apk(c),partial=new File(c.getCacheDir(),"lockvyn-update.part");boolean complete=false;
-        if(c.getCacheDir().getUsableSpace()<feed.size*2+2*1024*1024)throw new IOException("Not enough free space for the update.");
-        HttpURLConnection request=open(feed.url);try(InputStream in=request.getInputStream();FileOutputStream out=new FileOutputStream(partial)){
-            byte[] buffer=new byte[32768];long total=0;int n,last=-1;while((n=in.read(buffer))!=-1){alive();total+=n;if(total>feed.size)throw new IOException("Update size differs from the release.");out.write(buffer,0,n);int percent=(int)(total*100/feed.size);if(percent!=last){progress.changed(percent);last=percent;}}
-            out.getFD().sync();if(total!=feed.size)throw new IOException("The download is incomplete.");alive();verify(c,partial,feed);
-            if(target.exists()&&!target.delete())throw new IOException("Cannot replace the cached update.");if(!partial.renameTo(target))throw new IOException("Cannot finish the update download.");alive();complete=true;return target;
-        }finally{request.disconnect();connection=null;if(!complete){partial.delete();target.delete();}}
+        alive();
+        PackageInfo installed=installed(c);
+        feed.requireUpgrade(c.getPackageName(),installed.getLongVersionCode(),signer(installed),Build.VERSION.SDK_INT);
+        File target=apk(c),partial=new File(c.getCacheDir(),"lockvyn-update.part");
+        File patch=new File(c.getCacheDir(),"lockvyn-update.delta.part");
+        boolean complete=false;
+        target.delete();partial.delete();patch.delete();
+        try{
+            AndroidUpdateFeed.Delta delta=applicable(c,feed);
+            if(delta!=null&&c.getCacheDir().getUsableSpace()>feed.size+delta.size+2*1024*1024L){
+                try{
+                    downloadFile(delta.url,delta.size,delta.sha256,patch,progress,0,65);
+                    alive();progress.changed(68);
+                    AndroidDelta.apply(installedApk(c),patch,partial,delta.fromSha256,feed.sha256,feed.size,()->alive());
+                    alive();progress.changed(94);
+                    verify(c,partial,feed);
+                    if(!partial.renameTo(target))throw new IOException("Could not retain reconstructed Android update.");
+                    alive();complete=true;progress.changed(100);return target;
+                }catch(Exception e){
+                    if(cancelled.get()||Thread.currentThread().isInterrupted())throw e;
+                    // A stale base, invalid patch or damaged archive must never modify the installed APK.
+                    // Only the FULL, separately verified signed APK may be installed as fallback.
+                    patch.delete();partial.delete();target.delete();progress.changed(0);
+                }finally{patch.delete();}
+            }
+            if(c.getCacheDir().getUsableSpace()<feed.size+2*1024*1024L)
+                throw new IOException("Not enough free storage for an Android update.");
+            downloadFile(feed.url,feed.size,feed.sha256,partial,progress,0,98);
+            verify(c,partial,feed);
+            if(!partial.renameTo(target))throw new IOException("Could not finish the Android update.");
+            alive();complete=true;progress.changed(100);return target;
+        }finally{
+            patch.delete();partial.delete();
+            if(!complete)target.delete();
+        }
     }
     static void verify(Context c,File file,AndroidUpdateFeed feed)throws Exception{
         PackageInfo current=installed(c);feed.requireUpgrade(c.getPackageName(),current.getLongVersionCode(),signer(current),Build.VERSION.SDK_INT);
