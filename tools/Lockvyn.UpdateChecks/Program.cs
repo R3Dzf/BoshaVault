@@ -35,10 +35,19 @@ if (published)
     var match = System.Text.RegularExpressions.Regex.Match(name, @"^Lockvyn-(\d+\.\d+\.\d+)-full\.nupkg$");
     if (!match.Success) throw new Exception("Unexpected published baseline name.");
     baseline = new VelopackAsset { PackageId = "Lockvyn", Type = VelopackAssetType.Full, Version = SemanticVersion.Parse(match.Groups[1].Value), FileName = name };
-    File.Copy(args[3], Path.Combine(feedDir, name), true);
+    // The real-release workflow keeps the published base package in the feed.
+    // Copy only when the caller provided a different directory.
+    string incomingBase=Path.GetFullPath(args[3]);
+    string feedBase=Path.GetFullPath(Path.Combine(feedDir,name));
+    if(!string.Equals(incomingBase,feedBase,StringComparison.OrdinalIgnoreCase))
+        File.Copy(incomingBase,feedBase,true);
 }
 else baseline = feed.Assets.Single(a => a.Type == VelopackAssetType.Full && a.Version.ToString() == "9.0.0");
-var target = published ? feed.Assets.Single(a => a.Type == VelopackAssetType.Full) : feed.Assets.Single(a => a.Type == VelopackAssetType.Full && a.Version.ToString() == "9.0.1");
+var target = published
+    ? feed.Assets.Where(a => a.Type == VelopackAssetType.Full &&
+            System.Version.Parse(a.Version.ToString()) > System.Version.Parse(baseline.Version.ToString()))
+        .OrderByDescending(a => System.Version.Parse(a.Version.ToString())).First()
+    : feed.Assets.Single(a => a.Type == VelopackAssetType.Full && a.Version.ToString() == "9.0.1");
 int checks = 0;
 void Check(bool condition, string message) { if (!condition) throw new Exception(message); Console.WriteLine("PASS: " + message); checks++; }
 void SameContent(string actual, string expected)
