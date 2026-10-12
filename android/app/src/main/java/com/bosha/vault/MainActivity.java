@@ -31,13 +31,54 @@ public final class MainActivity extends Activity {
     private String filter="all",search="",clipboard,undoEntryId;private long undoUntil;private volatile boolean cloudOpen;private volatile long nextCloudCheck;private long autoSessionUntil;private TextView syncStatus;private volatile CloudClient autoClient;private volatile CloudAuth.Session autoSession;private String autoSessionSlot;
     private byte[] exportBytes,pendingImport; private volatile LocalTransfer pendingTransfer;
     private String scannedPairing,scannedCloud,scannedSecure;
+    private int authenticatorDialogs;
+    private long authGraceUntil;
+    private static final long AUTH_GRACE_MS=90000L;
+    private boolean screenLocked(){
+        android.app.KeyguardManager km=(android.app.KeyguardManager)getSystemService(KEYGUARD_SERVICE);
+        android.os.PowerManager pm=(android.os.PowerManager)getSystemService(POWER_SERVICE);
+        return (km!=null&&km.isKeyguardLocked())||(pm!=null&&!pm.isInteractive());
+    }
     private final List<AlertDialog> dialogs=new ArrayList<>();
-    private final Runnable tick=new Runnable(){public void run(){if(active&&engine!=null&&engine.isOpen()&&SystemClock.elapsedRealtime()-lastTouch>timeout*60000L)lock();if(active&&engine!=null&&engine.isOpen())autoSyncTick();handler.postDelayed(this,1000);}};
+    private final Runnable tick=new Runnable(){public void run(){
+        if(!active&&authGraceUntil>0&&(SystemClock.elapsedRealtime()>=authGraceUntil||screenLocked()))lock();
+        if(active&&engine!=null&&engine.isOpen()&&SystemClock.elapsedRealtime()-lastTouch>timeout*60000L)lock();
+        if(active&&engine!=null&&engine.isOpen())autoSyncTick();
+        handler.postDelayed(this,1000);
+    }};
     @Override public void onCreate(Bundle b){super.onCreate(b);try{engine=Store.engine(this);CloudSyncJob.schedule(this);}catch(Exception e){Ui.error(this,e);finish();return;}handler.post(tick);}
-    @Override protected void onStart(){super.onStart();active=true;showLock();}
+    @Override protected void onStart(){
+        super.onStart();
+        boolean resume=authGraceUntil>0&&SystemClock.elapsedRealtime()<authGraceUntil
+            &&!screenLocked()&&engine!=null&&engine.isOpen()&&authenticatorDialogs>0;
+        active=true;authGraceUntil=0;
+        if(resume){lastTouch=SystemClock.elapsedRealtime();return;}
+        for(AlertDialog dlg:new ArrayList<>(dialogs))dlg.dismiss();
+        dialogs.clear();authenticatorDialogs=0;
+        worker.execute(()->engine.close());showLock();
+    }
     @Override protected void onResume(){super.onResume();if(scannedPairing!=null){String code=scannedPairing;scannedPairing=null;showPairing(Store.vault(this).exists(),code);}if(scannedCloud!=null){String code=scannedCloud;scannedCloud=null;joinCloud(code);}if(scannedSecure!=null&&(!Store.vault(this).exists()||engine.isOpen())){String code=scannedSecure;scannedSecure=null;connectToPc(code);}}
-    @Override protected void onStop(){super.onStop();active=false;epoch++;autoSession=null;CloudClient running=autoClient;if(running!=null)running.close();cancelLocalTransfer();for(AlertDialog d:new ArrayList<>(dialogs))d.dismiss();dialogs.clear();displayedEntries.clear();list=null;entryAdapter=null;vaultStats=null;syncStatus=null;if(root!=null)root.removeAllViews();worker.execute(()->engine.close());}
-    @Override protected void onDestroy(){handler.removeCallbacks(tick);worker.shutdown();cloudWorker.shutdown();super.onDestroy();}
+    @Override protected void onStop(){
+        super.onStop();active=false;
+        if(authenticatorDialogs>0&&engine!=null&&engine.isOpen()&&!screenLocked()&&!busy){
+            authGraceUntil=SystemClock.elapsedRealtime()+AUTH_GRACE_MS;return;
+        }
+        authGraceUntil=0;epoch++;autoSession=null;
+        CloudClient running=autoClient;if(running!=null)running.close();
+        cancelLocalTransfer();
+        for(AlertDialog dlg:new ArrayList<>(dialogs))dlg.dismiss();
+        dialogs.clear();authenticatorDialogs=0;
+        displayedEntries.clear();list=null;entryAdapter=null;vaultStats=null;syncStatus=null;
+        if(root!=null)root.removeAllViews();
+        worker.execute(()->engine.close());
+    }
+    @Override protected void onDestroy(){
+        authGraceUntil=0;handler.removeCallbacks(tick);
+        for(AlertDialog dlg:new ArrayList<>(dialogs))dlg.dismiss();
+        dialogs.clear();authenticatorDialogs=0;
+        if(engine!=null)engine.close();
+        worker.shutdown();cloudWorker.shutdown();super.onDestroy();
+    }
     @Override public boolean dispatchTouchEvent(android.view.MotionEvent e){lastTouch=SystemClock.elapsedRealtime();return super.dispatchTouchEvent(e);}
     @Override public void onUserInteraction(){super.onUserInteraction();lastTouch=SystemClock.elapsedRealtime();}
     @Override public void onBackPressed(){if(engine.isOpen()){lock();}else super.onBackPressed();}
@@ -47,7 +88,7 @@ public final class MainActivity extends Activity {
         worker.execute(()->{Exception failure=null;try{action.run();}catch(Exception e){failure=e;}if(!active||stamp!=epoch)engine.close();Exception error=failure;runOnUiThread(()->{busy=false;if(!active||stamp!=epoch)return;if(error!=null)Ui.error(this,error);else{nextCloudCheck=0;done.run();}});});
     }
     private void cancelLocalTransfer(){LocalTransfer current=pendingTransfer;pendingTransfer=null;if(current!=null)current.cancel();}
-    private void lock(){epoch++;undoEntryId=null;CloudClient running=autoClient;if(running!=null)running.close();cancelLocalTransfer();for(AlertDialog d:new ArrayList<>(dialogs))d.dismiss();dialogs.clear();displayedEntries.clear();list=null;entryAdapter=null;vaultStats=null;syncStatus=null;clearClipboard();worker.execute(()->engine.close());showLock();}
+    private void lock(){authGraceUntil=0;authenticatorDialogs=0;epoch++;undoEntryId=null;CloudClient running=autoClient;if(running!=null)running.close();cancelLocalTransfer();for(AlertDialog d:new ArrayList<>(dialogs))d.dismiss();dialogs.clear();displayedEntries.clear();list=null;entryAdapter=null;vaultStats=null;syncStatus=null;clearClipboard();worker.execute(()->engine.close());showLock();}
     private void autoSyncTick(){
         long now=SystemClock.elapsedRealtime();if(cloudOpen||busy||now<nextCloudCheck)return;nextCloudCheck=now+12000;
         int stamp=epoch;cloudWorker.execute(()->{
@@ -298,10 +339,10 @@ public final class MainActivity extends Activity {
         });
     }
     private void cloudVerify(CloudClient client,CloudAuth.Session session,JSONObject profile,CloudSettingsStore store,List<CloudAuth.Factor> factors,CloudSessionReady ready){
-            LinearLayout b=Ui.column(this);b.addView(Ui.text(this,"Enter a current six-digit authenticator code. Cloud access waits for verification.",13,Ui.MUTED,false));
+            LinearLayout b=Ui.column(this);b.addView(Ui.text(this,"Copy the six-digit code from your authenticator and return within 90 seconds. Locking the phone closes this step.",13,Ui.MUTED,false));
             Spinner device=new Spinner(this);device.setAdapter(new ArrayAdapter<CloudAuth.Factor>(this,android.R.layout.simple_spinner_dropdown_item,factors));b.addView(device);
             EditText code=Ui.field(b,"Authenticator code","",true,6);code.setInputType(InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_VARIATION_PASSWORD);
-            TextView result=Ui.text(this,"Ready.",13,Ui.MUTED,false);AlertDialog d=dialog("Verify cloud 2FA",b);
+            TextView result=Ui.text(this,"Ready.",13,Ui.MUTED,false);AlertDialog d=dialog("Verify cloud 2FA",b);authenticatorDialogs++;
             b.addView(Ui.button(this,"Verify & continue",true,()->{
                 String digits=code.getText().toString().trim(),id=((CloudAuth.Factor)device.getSelectedItem()).id;code.setText("");CloudAuth.Session[] next={null};
                 cloudTask(result,()->{next[0]=client.auth.verify(session,id,digits);if(profile!=null)client.saveSession(next[0],profile,store);},()->{
@@ -309,7 +350,10 @@ public final class MainActivity extends Activity {
                 });
             }));
             b.addView(Ui.button(this,"Cancel",false,d::dismiss));b.addView(result);
-            d.setOnDismissListener(x->{dialogs.remove(d);clearCloudFields(b);});
+            d.setOnDismissListener(x->{dialogs.remove(d);clearCloudFields(b);
+                authenticatorDialogs=Math.max(0,authenticatorDialogs-1);
+                if(authenticatorDialogs==0)authGraceUntil=0;
+            });
     }
     private void cloudRefresh(CloudClient client,JSONObject profile,CloudSettingsStore store,TextView status,CloudSessionReady ready){
         CloudAuth.Session[] signedIn={null};cloudTask(status,()->signedIn[0]=client.refresh(profile,store),()->cloudAssure(client,signedIn[0],profile,store,status,false,ready));
@@ -355,7 +399,12 @@ public final class MainActivity extends Activity {
             cloudTask(status,()->client.saveSession(client.auth.verify(session,enrollment.id,digits),profile,store),()->{if(!d.isShowing())return;d.dismiss();finished.run();});
         }));
         b.addView(Ui.button(this,"Cancel setup",false,()->cloudTask(status,()->client.auth.unenroll(session,enrollment.id),()->{if(d.isShowing())d.dismiss();})));
-        b.addView(status);d.setOnDismissListener(x->{dialogs.remove(d);clearCloudFields(b);image.setImageDrawable(null);if(bitmap[0]!=null){bitmap[0].eraseColor(0);bitmap[0].recycle();bitmap[0]=null;}enrollment.close();});
+        b.addView(status);authenticatorDialogs++;
+        d.setOnDismissListener(x->{dialogs.remove(d);clearCloudFields(b);
+            authenticatorDialogs=Math.max(0,authenticatorDialogs-1);
+            if(authenticatorDialogs==0)authGraceUntil=0;
+            image.setImageDrawable(null);if(bitmap[0]!=null){bitmap[0].eraseColor(0);bitmap[0].recycle();bitmap[0]=null;}enrollment.close();
+        });
     }
     private void cloud(){
         if(!engine.isOpen()||busy)return;
