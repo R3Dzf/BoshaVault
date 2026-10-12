@@ -18,6 +18,13 @@ footer{padding:0 15px 15px;color:#888;font-size:11px;line-height:1.5}
 <label style="display:flex;align-items:center;gap:9px;margin:12px 1px;font-size:12px;line-height:1.4">
 <input id="quiet" type="checkbox" style="accent-color:#6558d9;width:17px;height:17px">
 <span><strong>Quiet Mode</strong> — show suggestions only when I request them</span></label>
+<div style="border-top:1px solid #e1e5ef;margin:14px 0 12px;padding-top:12px">
+<label style="display:flex;align-items:flex-start;gap:9px;font-size:12px;line-height:1.45">
+<input id="blockPasskeys" type="checkbox" style="accent-color:#6558d9;width:17px;height:17px;margin:2px 0;flex:none">
+<span><strong>Hide automatic Passkey suggestions</strong><small>Experimental · blocks sites' conditional WebAuthn requests. Explicit Passkey login remains available.</small></span>
+</label>
+<small style="margin:8px 0;color:#876341">This may affect some sites' sign-in experience. It cannot guarantee that Chrome or Windows Hello native suggestions will all disappear. Refresh other open login tabs after changing it.</small>
+</div>
 <p id="status" role="status" aria-live="polite">Keep Lockvyn Windows running and unlocked.</p>
 </main><footer>Only exact HTTPS sites · Confirm every fill in Windows · No passwords stored in this extension</footer>
 <script src="popup.js"></script>
