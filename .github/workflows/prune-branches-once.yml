@@ -1,0 +1,56 @@
+name: Prune old branches
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/prune-branches-once.yml']
+permissions:
+  contents: write
+  pull-requests: read
+jobs:
+  cleanup:
+    if: github.repository == 'R3Dzf/BoshaVault' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const owner="R3Dzf", repo="BoshaVault";
+            const targets=[{"name":"feat/android-delta-updates","sha":"7e97857f1f00bf99f07b1774cfc5425609407ec7"},{"name":"feat/browser-autofill-seamless-host","sha":"ff08a2255e765a4877c4345057080cf8960a0be0"},{"name":"feat/browser-safe-quickfill","sha":"8dc1d7b7b0609c1e373b186a8100daade9800dae"},{"name":"feat/calm-pro-ui-phase1","sha":"71476021a257cc0d12f30b81140152210914f16b"},{"name":"feat/clean-unified-navigation","sha":"589b15aa65a0b721dc952f030d58809469b4772b"},{"name":"feat/device-pairing-wizard","sha":"2d52af713509a3b93dcda293679392706cd81321"},{"name":"feat/encrypted-cloud-sync","sha":"abcc7dfdcd7ca20de8445745dfaec04069305410"},{"name":"feat/lockvyn-ux-complete","sha":"7511c528f95199beffd6eaa199f70bcc02332b24"},{"name":"feat/quiet-chrome-passkey-suggestions","sha":"83d074000abfac1da3844c9fcdf6b0a02ed2c704"},{"name":"fix/mfa-resume-calm-ui-and-updates","sha":"393f33d6d27f5d8e6eeb1140bacdc2df4681e77f"},{"name":"maintenance/windows-checksums-v1.11.0","sha":"b1b54f5ab777353d2256ee451af580215865c6e1"},{"name":"maintenance/windows-delta-v1.12.0","sha":"564894870d3da334fb558f2bb2348b82afac3d87"},{"name":"release/android-v1.7.0","sha":"a57df7bead51e9978e3ca374d2baf53e5f06e8ca"},{"name":"release/android-v1.8.0","sha":"bc8def58f46b4046be405f72ca0f3c950adf2005"},{"name":"release/android-v1.8.1","sha":"93b1be338cee62653c059aa9efceafa8623a1005"},{"name":"release/android-v1.9.0","sha":"67359b3ff65a6253415e0dcebfc1a25e90fa9846"},{"name":"release/android-v1.10.0","sha":"2d52af713509a3b93dcda293679392706cd81321"},{"name":"release/android-v1.11.0","sha":"7e97857f1f00bf99f07b1774cfc5425609407ec7"},{"name":"release/android-v1.12.0","sha":"589b15aa65a0b721dc952f030d58809469b4772b"},{"name":"release/android-v1.13.0","sha":"71476021a257cc0d12f30b81140152210914f16b"},{"name":"release/android-v1.14.0","sha":"393f33d6d27f5d8e6eeb1140bacdc2df4681e77f"},{"name":"release/windows-v1.11.0","sha":"9af54fd85dc89211844e62f46847aaf4f0bf8899"},{"name":"release/windows-v1.12.0","sha":"bc8def58f46b4046be405f72ca0f3c950adf2005"},{"name":"release/windows-v1.13.0","sha":"abcc7dfdcd7ca20de8445745dfaec04069305410"},{"name":"release/windows-v1.14.0","sha":"2d52af713509a3b93dcda293679392706cd81321"},{"name":"release/windows-v1.14.1","sha":"6b7490171d0cf218641abb0fb0d7b6c33a4e2642"},{"name":"release/windows-v1.15.0","sha":"589b15aa65a0b721dc952f030d58809469b4772b"},{"name":"release/windows-v1.16.0","sha":"71476021a257cc0d12f30b81140152210914f16b"},{"name":"release/windows-v1.17.0","sha":"393f33d6d27f5d8e6eeb1140bacdc2df4681e77f"},{"name":"release/windows-v1.18.0","sha":"ff08a2255e765a4877c4345057080cf8960a0be0"},{"name":"release/windows-v1.19.0","sha":"8dc1d7b7b0609c1e373b186a8100daade9800dae"},{"name":"release/windows-v1.20.0","sha":"83d074000abfac1da3844c9fcdf6b0a02ed2c704"},{"name":"sync/main-20261013","sha":"c3b3d9583e371b9b0c07ce9964096e1ad724f8bc"},{"name":"test/device-pairing-1.14-1.10","sha":"2d52af713509a3b93dcda293679392706cd81321"}];
+            const keep=new Set(["main","release/windows-v1.21.0","release/android-v1.14.1","fix/windows-secure-device-qr-1.14.1","autofill-ux-improvements"]);
+            const prs=await github.paginate(github.rest.pulls.list,{owner,repo,state:"open",per_page:100});
+            const blocked=new Set(prs.filter(p=>p.head.repo?.full_name===owner+"/"+repo).map(p=>p.head.ref));
+            const removed=[],skipped=[];
+            for(const {name,sha} of targets){
+              if(keep.has(name) || blocked.has(name)){
+                skipped.push(name+" (protected by keep-list/open PR)");continue;
+              }
+              try{
+                const ref=await github.rest.git.getRef({owner,repo,ref:"heads/"+name});
+                if(ref.data.object.sha!==sha){skipped.push(name+" (changed)");continue;}
+                if(name.startsWith("release/")){
+                  const tag=name.substring("release/".length);
+                  const release=await github.rest.repos.getReleaseByTag({owner,repo,tag});
+                  const tagRef=await github.rest.git.getRef({owner,repo,ref:"tags/"+tag});
+                  if(release.data.target_commitish!==sha || !release.data.assets?.length ||
+                     (tagRef.data.object.sha!==sha && tagRef.data.object.type!=="tag")){
+                    skipped.push(name+" (release/tag mismatch)");continue;
+                  }
+                }else{
+                  const comparison=await github.rest.repos.compareCommits({owner,repo,base:name,head:"main"});
+                  if(!["ahead","identical"].includes(comparison.data.status)){
+                    skipped.push(name+" (unmerged commits)");continue;
+                  }
+                }
+                await github.rest.git.deleteRef({owner,repo,ref:"heads/"+name});
+                removed.push(name);
+                core.info("Removed old branch: "+name);
+              }catch(error){skipped.push(name+" ("+(error.status||error.message)+")");}
+            }
+            const remaining=await github.paginate(github.rest.repos.listBranches,{owner,repo,per_page:100});
+            core.info("Removed "+removed.length+" branches; "+remaining.length+" remain");
+            await core.summary.addHeading("Branch cleanup")
+              .addRaw("Deleted: "+removed.length+"; Remaining: "+remaining.length+"; Skipped: "+skipped.length)
+              .addBreak().addRaw("Release assets, tags, and all active PR branches were preserved.").write();
+            if(skipped.length)core.setFailed("Review skipped branches: "+skipped.join("; "));
+            

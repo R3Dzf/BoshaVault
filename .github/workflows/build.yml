@@ -2,10 +2,10 @@ name: Build Lockvyn (Windows and Android)
 
 on:
   push:
-    branches: [main, 'feat/quiet-chrome-passkey-suggestions']
+    branches: [main]
     tags: ['v*']
   pull_request:
-    branches: [main, 'feat/quiet-chrome-passkey-suggestions']
+    branches: [main]
   workflow_dispatch:
     inputs:
       signed_release:

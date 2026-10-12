@@ -2,7 +2,7 @@ name: Browser Autofill security and UX
 
 on:
   pull_request:
-    branches: [main, 'feat/quiet-chrome-passkey-suggestions']
+    branches: [main]
   push:
     branches: [main]
   workflow_dispatch:
