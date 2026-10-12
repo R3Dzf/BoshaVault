@@ -1,13 +1,14 @@
 {
   "manifest_version": 3,
   "name": "Lockvyn Autofill",
-  "version": "0.7.0",
-  "description": "Private HTTPS autofill, with optional quiet mode and user-approved local Lockvyn Windows connection.",
+  "version": "0.8.0",
+  "description": "Private Lockvyn Autofill with optional Quiet Mode and conditional passkey suggestion control.",
   "permissions": [
     "nativeMessaging",
     "webNavigation",
     "activeTab",
-    "storage"
+    "storage",
+    "scripting"
   ],
   "host_permissions": [
     "https://*/*"
