@@ -38,7 +38,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       message.password.length < 16 || message.password.length > 128 || !/^[!-~]+$/.test(message.password))))) {
       return {status:"denied", message:"Invalid generated password or username."};
     }
-    if (["fill","save","update","capture"].includes(message.op) && !(await sameActiveDocument(sender,page.origin)))
+    if (["list","fill","save","update","capture"].includes(message.op) && !(await sameActiveDocument(sender,page.origin)))
       return {status:"denied", message:"Browser page changed. Retry on the intended website."};
     const answer = await chrome.runtime.sendNativeMessage(NATIVE, {
       op: message.op, origin: page.origin, entryId: ["fill","update"].includes(message.op) ? message.entryId : "",
