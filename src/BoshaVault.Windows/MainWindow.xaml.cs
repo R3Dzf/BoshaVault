@@ -453,6 +453,78 @@ public partial class MainWindow : Window
         if (session == null) return;
         PasswordGeneratorDialog.Show(this, preferences.Generator, SaveGeneratorDefaults, Copy);
     }
+    private void ManageDomainGroups()
+    {
+        if(session == null)return;
+        var dialog = new FormDialog(this,"Trusted domain groups",560);
+        dialog.Label("These local preferences group related hostnames for all saved logins. Only domains sharing a verified registrable domain can be grouped. Every password fill still needs your approval.");
+        var picker = new ComboBox {
+            DisplayMemberPath = nameof(DomainAliasGroup.Name),
+            Margin = new Thickness(0, 6, 0, 12),
+            ItemsSource = preferences.DomainGroups.ToList()
+        };
+        dialog.Body.Children.Add(picker);
+        var groupName = dialog.Field("Group name","Google",60);
+        var hostnames = dialog.Field("HTTPS hostnames, one per line (without https://)",
+            "google.com\nwww.google.com\naccounts.google.com",2000,true);
+        var message = new TextBlock { TextWrapping = TextWrapping.Wrap,
+            Foreground = Brushes.DarkSlateBlue, Margin = new Thickness(0, 10, 0, 10) };
+        dialog.Body.Children.Add(message);
+        picker.SelectionChanged += (_,_) => {
+            if(picker.SelectedItem is DomainAliasGroup g) {
+                groupName.Text = g.Name;
+                hostnames.Text = string.Join(Environment.NewLine,g.Hosts);
+            }
+        };
+        void Reload()
+        {
+            picker.ItemsSource = null;
+            picker.ItemsSource = preferences.DomainGroups.ToList();
+        }
+        dialog.Action("Save group",() => {
+            try {
+                if(session == null || !session.IsOpen)throw new VaultException("Unlock Lockvyn to edit domain groups.");
+                var hosts=hostnames.Text.Split(new[]{'\\r','\\n',',',';'},
+                    StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+                    .Select(x=>x.ToLowerInvariant()).ToList();
+                var updated = new DomainAliasGroup { Name=groupName.Text.Trim(), Hosts=hosts };
+                var groups = preferences.DomainGroups.Select(g=>new DomainAliasGroup {
+                    Name=g.Name, Hosts=g.Hosts.ToList() }).ToList();
+                int index=picker.SelectedIndex;
+                if(index>=0)groups[index]=updated;else groups.Add(updated);
+                if(groups.Select(g=>g.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count()!=groups.Count)
+                    throw new VaultException("Use a unique name for each domain group.");
+                OriginPolicy.ValidateGroups(groups);
+                var previous=preferences.DomainGroups;
+                preferences.DomainGroups=groups;
+                try { preferences.Save(preferencesPath); }
+                catch { preferences.DomainGroups=previous;throw; }
+                Reload();picker.SelectedIndex=index>=0?index:groups.Count-1;
+                message.Text="Domain group saved. Applies to every matching saved login immediately.";
+            } catch(Exception ex) when(ex is VaultException or IOException or UnauthorizedAccessException or ArgumentException) {
+                message.Text=ex.Message;
+            }
+        },true,inBody:true);
+        dialog.Action("New group",() => {
+            picker.SelectedIndex=-1;groupName.Text="";hostnames.Text="";message.Text="Enter at least two hosts belonging to the same website.";
+        },inBody:true);
+        dialog.Action("Delete selected group",() => {
+            if(picker.SelectedIndex<0) { message.Text="Select a group to remove.";return; }
+            try {
+                var groups=preferences.DomainGroups.Where((_,i)=>i!=picker.SelectedIndex).ToList();
+                var previous=preferences.DomainGroups;
+                preferences.DomainGroups=groups;
+                try { preferences.Save(preferencesPath); }
+                catch { preferences.DomainGroups=previous;throw; }
+                Reload();picker.SelectedIndex=-1;message.Text="Domain group deleted; saved logins are unchanged.";
+            }catch(Exception ex) when(ex is VaultException or IOException or UnauthorizedAccessException or ArgumentException){
+                message.Text=ex.Message;
+            }
+        },inBody:true);
+        dialog.Action("Close",dialog.Close,true);
+        dialog.ShowDialog();
+    }
+
     private void SettingsClick(object sender, RoutedEventArgs e)
     {
         if (session == null) return;
@@ -481,6 +553,8 @@ public partial class MainWindow : Window
             preferences.Save(preferencesPath);
             SetStatus(preferences.BrowserAutofillEnabled ? "Browser Autofill enabled." : "Browser Autofill disabled.");
         });
+        d.Label("Domain groups apply to every saved account automatically. Group HTTPS hosts within the same parent website (for example google.com and accounts.google.com). Fill still requires approval.");
+        d.Action("Manage trusted domain groups", ManageDomainGroups, inBody: true);
         int browserGuideStart = d.Body.Children.Count;
         d.Label("Install the Lockvyn browser extension once in each Chrome / Edge profile you choose. Connect its ID here one time. After every Windows update, the local connection repairs itself; no script or administrator permissions.");
         d.Action("Connect browser extension · one-time setup", ConnectBrowserExtension, true, inBody: true);
