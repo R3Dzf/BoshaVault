@@ -60,6 +60,7 @@ public partial class MainWindow : Window
         PreviewKeyDown += (_, _) => lastActivity = DateTime.UtcNow;
         PreviewMouseDown += (_, _) => lastActivity = DateTime.UtcNow;
         foreach (var input in new UIElement[] { SearchBox, EntryList }) input.MouseWheel += (_, _) => lastActivity = DateTime.UtcNow;
+        EntryList.PreviewMouseWheel += SlowVaultWheel;
         SystemEvents.SessionSwitch += OnSessionSwitch; SystemEvents.PowerModeChanged += OnPowerModeChanged;
         Closing += OnClosing;
         Closed += (_, _) => { ReleaseDesktopResources(); Application.Current.Shutdown(); };
@@ -178,6 +179,29 @@ public partial class MainWindow : Window
         catch (Exception ex) when (ex is VaultException or IOException or System.Net.Http.HttpRequestException or CryptographicException or UnauthorizedAccessException or OperationCanceledException)
         { cachedCloudSession = null; if (profile != null) CloudStatus.Text = ex is VaultException ? ex.Message : "Cloud offline · changes retry automatically"; }
         finally { profile?.Clear(); cloudGate.Release(); }
+    }
+
+    // WPF defaults to several full list items per wheel notch. Precision laptop
+    // touchpads should scroll pixels, not jump through whole screens of logins.
+    private static ScrollViewer? VaultScroller(DependencyObject root)
+    {
+        if (root is ScrollViewer viewer) return viewer;
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var found = VaultScroller(VisualTreeHelper.GetChild(root, i));
+            if (found != null) return found;
+        }
+        return null;
+    }
+    private void SlowVaultWheel(object sender, MouseWheelEventArgs e)
+    {
+        var viewer = VaultScroller(EntryList);
+        if (viewer == null || viewer.ScrollableHeight <= 0) return;
+        double distance = Math.Clamp(Math.Abs(e.Delta) * 0.30, 2, 52);
+        viewer.ScrollToVerticalOffset(Math.Clamp(viewer.VerticalOffset - Math.Sign(e.Delta) * distance,
+            0, viewer.ScrollableHeight));
+        e.Handled = true;
+        lastActivity = DateTime.UtcNow;
     }
 
     private string? folderFilter;
