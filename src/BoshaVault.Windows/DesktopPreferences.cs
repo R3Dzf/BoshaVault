@@ -25,7 +25,7 @@ public sealed class DesktopPreferences
         try
         {
             using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-            if (stream.Length > 16384) return new();
+            if (stream.Length > 131072) return new();
             var preferences = JsonSerializer.Deserialize<DesktopPreferences>(stream, Options);
             if (preferences is not { Version: 1 } || !ValidTimeout(preferences.AutoLockMinutes)) return new();
             try { PasswordGenerator.Validate(preferences.Generator); }
