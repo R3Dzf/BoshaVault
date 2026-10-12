@@ -86,7 +86,7 @@ public partial class MainWindow : Window
             if (preferences.UpdateNotificationsEnabled && !updateCheckBusy &&
                 !exiting && DateTime.UtcNow >= nextUpdateCheckUtc)
             {
-                nextUpdateCheckUtc = DateTime.UtcNow.AddHours(6);
+                nextUpdateCheckUtc = DateTime.UtcNow.AddHours(1);
                 _ = CheckUpdateAnnouncement();
             }
             if (!cloudDialogOpen && DateTime.UtcNow >= nextCloudCheck)
