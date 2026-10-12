@@ -11,7 +11,7 @@ namespace BoshaVault.Windows;
 internal static class CloudSyncDialog
 {
     public static void Show(MainWindow owner, string root, VaultSession vault,
-        Func<bool> current, Action changed, Action<string> copy)
+        Func<bool> current, Action changed, Action<string> copy, bool openPairing = false)
     {
         using var cancellation = new CancellationTokenSource();
         using var http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(30) };
@@ -21,6 +21,7 @@ internal static class CloudSyncDialog
         var d = new FormDialog(owner, "Encrypted cloud sync", 520);
         var buttons = new List<Button>();
         bool running = false, closed = false;
+        Button? addDeviceButton = null;
         Guid vaultId = Guid.Parse(vault.Data.VaultId);
         var status = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 12, 0, 10) };
         void EnsureCurrent() { if (closed || !current() || !vault.IsOpen) throw new OperationCanceledException(); }
@@ -76,10 +77,27 @@ internal static class CloudSyncDialog
             ClearPage();
             d.Label("Cloud is connected to " + profile!.Email + ". New logins sync automatically while connected; offline changes retry when Internet returns.");
             d.Label(profile.LastSyncUtc.Length == 0 ? "No successful sync yet." : "Last successful sync: " + profile.LastSyncUtc);
-            d.Label("Connect your second device once with the same account and connection code. Unlock it to apply incoming changes. Wi-Fi transfer still works offline.");
+            d.Label("Your other devices can sync automatically. Add a device with the secure two-minute QR instead of sending recovery codes.");
             var code = d.Field("Connection code for your other device", "", 1024, true); code.IsReadOnly = true;
             var qr = new Image { Width = 260, Height = 260, Visibility = Visibility.Collapsed, Margin = new Thickness(0, 8, 0, 8) }; d.Body.Children.Add(qr);
-            d.Label("The code contains your cloud recovery key. Share it only with your own trusted device. Keep an encrypted local backup.");
+            d.Label("Legacy recovery exposes a permanent cloud key. Only use it for trusted recovery when normal QR pairing is unavailable.");
+            var recovery = new StackPanel { Margin = new Thickness(0, 4, 0, 12) };
+            for (int i = 0; i < 4; i++)
+            {
+                var item = d.Body.Children[^4];
+                d.Body.Children.RemoveAt(d.Body.Children.Count - 4);
+                recovery.Children.Add(item);
+            }
+            var advanced = new StackPanel();
+            Button AdvancedAction(string label, Func<Task> action)
+            {
+                var b = Action(label, action, inBody: true);
+                d.Body.Children.Remove(b);
+                advanced.Children.Add(b);
+                return b;
+            }
+            advanced.Children.Add(new Expander { Header = "Legacy recovery key · only if needed",
+                Content = recovery, Margin = new Thickness(0, 5, 0, 12) });
             d.Body.Children.Add(status);
             var auto = new CheckBox { Content = "Sync automatically on this device", IsChecked = profile.AutoSync, Margin = new Thickness(0, 8, 0, 8) };
             auto.Click += (_, _) => { profile.AutoSync = auto.IsChecked == true; store.Save(profile); Status(profile.AutoSync ? "Automatic sync is on. Offline changes retry when connected." : "Automatic sync is paused on this device."); };
@@ -94,41 +112,43 @@ internal static class CloudSyncDialog
                     store.ReadPending, store.WritePending, () => store.Save(profile), cancellation.Token);
                 EnsureCurrent();
                 Status($"Cloud is up to date. {result.Conflicts} conflict copies kept.");
-            }, true);
-            Action("Add device · secure QR approval", async () =>
+            }, true, inBody: true);
+            addDeviceButton = Action("Add new device · secure QR", async () =>
             {
                 var signedIn = await Refresh();
                 EnsureCurrent();
                 await DevicePairingWindow.Show(owner, profile!, signedIn, cancellation.Token);
                 EnsureCurrent();
                 Status("Add device session closed. Check the phone for pairing status.");
-            }, true);
-            d.Label("Advanced recovery fallback: this legacy QR contains your permanent cloud recovery key. Use only on devices you control.");
-            Action("Show legacy recovery code / QR", () => {
+            }, true, inBody: true);
+            AdvancedAction("Show legacy recovery code / QR", () => {
                 code.Text = CloudPairing.Encode(profile); byte[] png = PairingQr.Render(code.Text);
                 try { using var stream = new MemoryStream(png); var bitmap = new BitmapImage(); bitmap.BeginInit(); bitmap.CacheOption = BitmapCacheOption.OnLoad; bitmap.StreamSource = stream; bitmap.EndInit(); bitmap.Freeze(); qr.Source = bitmap; qr.Visibility = Visibility.Visible; }
                 finally { CryptographicOperations.ZeroMemory(png); }
                 copy(code.Text); Status("Scan this QR only on your own device. The code was copied and clipboard clears in 20 seconds."); return Task.CompletedTask;
             });
-            Action("Cloud account security · 2FA", async () =>
+            AdvancedAction("Cloud account security · 2FA", async () =>
             {
                 var signedIn = await Refresh();
                 CloudMfaDialog.Manage(d, auth, signedIn, profile, store, EnsureCurrent, cancellation.Token);
                 Status("Cloud security settings updated.");
             });
-            Action("Disconnect this device", async () =>
+            AdvancedAction("Disconnect this device", async () =>
             {
                 if (MessageBox.Show(d, "Keep your local vault and encrypted cloud backups, and disconnect this device? Keep the connection code on another trusted device before disconnecting.", "Disconnect cloud", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return;
                 var signedIn = await Refresh(); await auth.SignOut(signedIn.AccessToken, cancellation.Token);
                 EnsureCurrent(); store.Forget(); profile.Clear(); profile = null;
                 Setup(); Status("This cloud session was signed out. Previously issued access tokens expire on their normal schedule. Your local vault is unchanged.");
             });
-            Action("Forget local cloud settings (offline)", () =>
+            AdvancedAction("Forget local cloud settings (offline)", () =>
             {
                 if (MessageBox.Show(d, "Forget this device's recovery key and saved sign-in? This does not revoke the server session or remove cloud backups. Keep your connection code elsewhere first.", "Forget cloud settings", MessageBoxButton.OKCancel) == MessageBoxResult.OK)
                 { store.Forget(); profile!.Clear(); profile = null; Setup(); Status("Local cloud settings forgotten. Server sessions were not revoked."); }
                 return Task.CompletedTask;
             });
+            d.Body.Children.Add(new Expander {
+                Header = "Security & advanced cloud options",
+                Content = advanced, IsExpanded = false, Margin = new Thickness(0, 12, 0, 12) });
             Status("Ready. Your vault stays usable without Internet.");
         }
         void Setup()
@@ -177,6 +197,11 @@ internal static class CloudSyncDialog
             Action("Start a new cloud vault", () => Connect(false), true);
             Action("Join this vault's existing cloud", () => Connect(true));
         }
+        d.Loaded += (_, _) =>
+        {
+            if (openPairing && addDeviceButton != null)
+                addDeviceButton.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+        };
         d.Closed += (_, _) => { closed = true; cancellation.Cancel(); profile?.Clear(); ClearPage(); };
         try { profile = store.Load(vaultId); if (profile == null) Setup(); else Connected(); }
         catch (Exception ex) when (ex is VaultException or IOException or UnauthorizedAccessException)
