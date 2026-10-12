@@ -140,8 +140,8 @@ public final class MainActivity extends Activity {
         syncStatus=Ui.text(this,"Cloud · checking when connected",11,Ui.MUTED,false);root.addView(syncStatus);
         LinearLayout nav=Ui.bottomNavigation(this,
             new String[]{"Vault","Sync","Backup","Settings"},
-            new int[]{R.drawable.ic_nav_vault,R.drawable.ic_nav_sync,
-                R.drawable.ic_nav_backup,R.drawable.ic_nav_settings},
+            new int[]{Ui.drawableId(this,"ic_nav_vault"),Ui.drawableId(this,"ic_nav_sync"),
+                Ui.drawableId(this,"ic_nav_backup"),Ui.drawableId(this,"ic_nav_settings")},
             0,new Runnable[]{this::showVault,this::syncHub,this::backupHub,this::settings});
         root.addView(nav,new LinearLayout.LayoutParams(-1,-2));
     }
