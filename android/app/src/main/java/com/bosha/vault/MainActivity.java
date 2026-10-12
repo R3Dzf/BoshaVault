@@ -223,6 +223,7 @@ public final class MainActivity extends Activity {
     private void syncHub(){
         if(!engine.isOpen()||busy)return;
         LinearLayout b=Ui.column(this);
+        final AlertDialog[] hub={null};
         boolean connected=false;String email="",last="";
         JSONObject local=null;
         try{
@@ -234,16 +235,16 @@ public final class MainActivity extends Activity {
         card.addView(Ui.text(this,connected?"Account: "+email+"\nAutomatic encrypted sync is available.":"Connect once to sync logins securely between your devices.",13,Ui.MUTED,false));
         if(connected)card.addView(Ui.text(this,last.isEmpty()?"No successful sync yet.":"Last synced: "+last,12,Ui.MUTED,false));
         b.addView(card);
-        b.addView(Ui.button(this,"Cloud Sync · status & sync now",true,this::cloud));
-        b.addView(Ui.button(this,"Add new device · scan secure QR",false,()->connectToPc("")));
+        b.addView(Ui.button(this,"Cloud Sync · status & sync now",true,()->{if(hub[0]!=null)hub[0].dismiss();cloud();}));
+        b.addView(Ui.button(this,"Add new device · scan secure QR",false,()->{if(hub[0]!=null)hub[0].dismiss();connectToPc("");}));
         b.addView(Ui.text(this,"On Windows choose Sync & Devices → Add new device. Scan the temporary QR, compare six digits and approve on the PC.",12,Ui.MUTED,false));
         LinearLayout advanced=Ui.column(this);advanced.setVisibility(View.GONE);
-        advanced.addView(Ui.button(this,"Transfer over private Wi-Fi (offline)",false,()->showPairing(true)));
+        advanced.addView(Ui.button(this,"Transfer over private Wi-Fi (offline)",false,()->{if(hub[0]!=null)hub[0].dismiss();showPairing(true);}));
         advanced.addView(Ui.text(this,"Only use offline Wi-Fi transfer when cloud sync is unavailable. Your vault remains encrypted during transfer.",12,Ui.MUTED,false));
         b.addView(Ui.button(this,"Offline transfer & advanced options ▾",false,
             ()->advanced.setVisibility(advanced.getVisibility()==View.GONE?View.VISIBLE:View.GONE)));
         b.addView(advanced);
-        dialog("Sync & Devices",b);
+        hub[0]=dialog("Sync & Devices",b);
     }
 
     private void backupHub(){
