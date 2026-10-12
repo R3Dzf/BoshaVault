@@ -5,6 +5,7 @@ import android.content.*;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.StateListDrawable;
 import android.os.Build;
 import android.text.InputType;
 import android.view.*;
@@ -30,7 +31,26 @@ final class Ui {
     }
     static LinearLayout card(Context c,int color){LinearLayout l=column(c);int p=dp(c,18);l.setPadding(p,p,p,p);l.setBackground(shape(color,dp(c,17)));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=dp(c,12);l.setLayoutParams(lp);return l;}
     static Button button(Context c,String s,boolean primary,Runnable r){Button b=new Button(c);b.setText(s);b.setTextSize(13);b.setAllCaps(false);b.setTextColor(primary?Color.WHITE:PURPLE);b.setTypeface(null,Typeface.BOLD);b.setBackground(shape(primary?PURPLE:SOFT,dp(c,12)));b.setMinHeight(dp(c,46));b.setPadding(dp(c,12),dp(c,10),dp(c,12),dp(c,10));LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2);p.topMargin=dp(c,10);b.setLayoutParams(p);b.setOnClickListener(v->r.run());return b;}
-    static EditText field(LinearLayout parent,String label,String value,boolean secret,int max){Context c=parent.getContext();parent.addView(text(c,label,12,MUTED,false));EditText e=new EditText(c);e.setText(value);e.setTextSize(14);e.setTextColor(INK);e.setSingleLine(true);e.setInputType(secret?InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD:InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);e.setImeOptions(EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING|EditorInfo.IME_ACTION_NEXT);e.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(max)});e.setBackground(shape(Color.WHITE,dp(c,10)));e.setPadding(dp(c,12),dp(c,10),dp(c,12),dp(c,10));LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,dp(c,46));p.topMargin=dp(c,7);p.bottomMargin=dp(c,15);e.setShowSoftInputOnFocus(true);e.setOnClickListener(v->showKeyboard(e));parent.addView(e,p);return e;}
+    private static GradientDrawable fieldShape(Context c,int fill,int border,int width){
+        GradientDrawable background=shape(fill,dp(c,12));background.setStroke(dp(c,width),border);return background;
+    }
+    static EditText field(LinearLayout parent,String label,String value,boolean secret,int max){
+        Context c=parent.getContext();TextView caption=text(c,label,13,INK,true);parent.addView(caption);
+        EditText e=new EditText(c);e.setId(View.generateViewId());caption.setLabelFor(e.getId());
+        e.setText(value);e.setTextSize(16);e.setTextColor(INK);e.setHintTextColor(Color.rgb(103,95,123));e.setSingleLine(true);
+        e.setInputType(secret?InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD:InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        e.setImeOptions(EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING|EditorInfo.IME_ACTION_NEXT);
+        e.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(max)});
+        StateListDrawable background=new StateListDrawable();
+        background.addState(new int[]{android.R.attr.state_enabled,android.R.attr.state_focused},fieldShape(c,Color.WHITE,PURPLE,2));
+        background.addState(new int[]{-android.R.attr.state_enabled},fieldShape(c,Color.rgb(241,239,248),Color.rgb(187,181,206),1));
+        background.addState(new int[]{},fieldShape(c,Color.WHITE,Color.rgb(139,131,166),1));
+        e.setBackgroundTintList(null);e.setBackground(background);e.setMinHeight(dp(c,56));
+        e.setPadding(dp(c,14),dp(c,14),dp(c,14),dp(c,14));
+        // Let text and multiline editors grow with the user's system font size.
+        LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2);p.topMargin=dp(c,7);p.bottomMargin=dp(c,16);
+        e.setShowSoftInputOnFocus(true);e.setOnClickListener(v->showKeyboard(e));parent.addView(e,p);return e;
+    }
     static LinearLayout screen(Activity a){a.getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE,WindowManager.LayoutParams.FLAG_SECURE);a.getWindow().setStatusBarColor(BG);a.getWindow().setNavigationBarColor(BG);LinearLayout root=column(a);root.setBackgroundColor(BG);root.setPadding(dp(a,23),dp(a,25),dp(a,23),dp(a,26));ScrollView s=new ScrollView(a);s.setFillViewport(true);s.addView(root);a.setContentView(s);if(Build.VERSION.SDK_INT>=35)s.setOnApplyWindowInsetsListener((v,insets)->{android.graphics.Insets sys=insets.getInsets(WindowInsets.Type.systemBars());s.setPadding(sys.left,sys.top,sys.right,sys.bottom);return insets;});return root;}
     static LinearLayout fixedScreen(Activity a){
         a.getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE,WindowManager.LayoutParams.FLAG_SECURE);a.getWindow().setStatusBarColor(BG);a.getWindow().setNavigationBarColor(BG);
