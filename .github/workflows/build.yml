@@ -5,7 +5,7 @@ on:
     branches: [main, 'feat/browser-autofill-seamless-host']
     tags: ['v*']
   pull_request:
-    branches: [main]
+    branches: [main, 'feat/browser-safe-quickfill']
   workflow_dispatch:
     inputs:
       signed_release:
