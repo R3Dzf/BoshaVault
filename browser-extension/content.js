@@ -97,13 +97,14 @@
     div.textContent=text;
     panel.append(div);
   }
-  function button(text,action,primary=false) {
+  function button(text,action,primary=false,container=panel) {
     const el=document.createElement("button");
     el.type="button";el.textContent=text;
     if(primary)el.className="primary";
     el.addEventListener("pointerdown",e=>e.preventDefault());
     el.addEventListener("click",e=>{e.stopPropagation();action();});
-    panel.append(el);
+    container.append(el);
+    return el;
   }
   function message(text) {if(!panel)return;panel.replaceChildren();line(text);}
   function assign(input,value) {
@@ -133,7 +134,7 @@
   }
   async function fill(ctx,id) {
     const at=origin;
-    message("Confirm this login in the Lockvyn Windows window…");
+    message("Approve the small Lockvyn confirmation, without reopening the full vault…");
     try {
       const answer=await chrome.runtime.sendMessage({op:"fill",entryId:id});
       if(at!==location.origin || focus?.anchor!==ctx.anchor ||
@@ -227,40 +228,55 @@
     } catch {message("Could not save. Keep this page open and retry after starting Lockvyn.");}
   }
   function render(ctx,reply) {
-    if(!(ctx.pass?.isConnected || ctx.user?.isConnected) || !focus || focus.anchor!==ctx.anchor || location.origin!==origin)return;
+    if(!(ctx.pass?.isConnected || ctx.user?.isConnected) ||
+       !focus || focus.anchor!==ctx.anchor || location.origin!==origin)return;
     if(ctx.pass && liveDraft(ctx)){showDraft(ctx,false);return;}
     title(ctx);
     if(typeof reply?.warning==="string" && reply.warning.length>0)
       line("⚠️ "+reply.warning);
-    savedMatches=reply?.status==="ok" && Array.isArray(reply.accounts) ? reply.accounts.slice(0,10) : [];
+    savedMatches=reply?.status==="ok" && Array.isArray(reply.accounts)
+      ? reply.accounts.slice(0,10) : [];
+    const more=document.createElement("div");
+    more.style.display="none";
+    let extraCount=0;
     if(reply?.status==="ok" && Array.isArray(reply.accounts)) {
-      for(const account of reply.accounts.slice(0,20)){
-        if(!account || typeof account.id!=="string" || typeof account.username!=="string")continue;
-        const exact = account.related !== true;
-        const savedHost = typeof account.website === "string" ? account.website : "";
-        const hint = exact ? "✓ Exact match" : "↗ Related domain · Review before filling";
-        button(hint+" · "+(account.title||"Saved login")+" · "+account.username+
-          (exact?"":" · saved: "+savedHost),()=>fill(ctx,account.id),exact);
+      const exact=reply.accounts.filter(a=>a && a.related!==true);
+      const related=reply.accounts.filter(a=>a && a.related===true);
+      for(const account of exact.slice(0,10)) {
+        if(typeof account.id!=="string" || typeof account.username!=="string")continue;
+        button((account.title||"Saved login")+" · "+account.username,
+          ()=>fill(ctx,account.id),true);
       }
-      if(reply.accounts.some(x=>x?.related===true)){
-        line("Related accounts are from another subdomain of this site's registrable domain. " +
-          "Only fill after checking both URLs in the Windows confirmation.","sub");
+      for(const account of related.slice(0,10)) {
+        if(typeof account.id!=="string" || typeof account.username!=="string")continue;
+        const savedHost=typeof account.website==="string"?account.website:"";
+        button("Other site: "+savedHost+" · "+account.username,
+          ()=>fill(ctx,account.id),false,more);
+        extraCount++;
       }
-      if(reply.accounts.length)line("Creating a different account?","sub");
-      else line("No saved accounts for this HTTPS host. Try saving this website, or check the saved website address.","sub");
-    } else if(reply?.status==="locked"){
-      button("Unlock Lockvyn on Windows",async()=>{
-        message("Unlock in Lockvyn, then focus the password field again.");
+      if(!reply.accounts.length)line("No saved login on this website.","sub");
+    } else if(reply?.status==="locked") {
+      button("Unlock Lockvyn",async()=>{
+        message("Unlock the vault once, then choose the login here.");
         await chrome.runtime.sendMessage({op:"open"}).catch(()=>{});
-      });
+      },true);
     } else if(reply?.status==="unavailable"){
-      line("Windows vault is disconnected. Generating still works, but saving needs Lockvyn running.");
+      line("Lockvyn on Windows is not connected.","sub");
     }
-    button("Save current website in Lockvyn",()=>capture(ctx),!ctx.pass);
+    if(ctx.pass)button("Generate strong password",()=>generate(ctx,24,true));
+    if(reply?.status==="ok" && !reply.accounts?.length)
+      button("Save current website",()=>capture(ctx));
+    else {button("Save current website",()=>capture(ctx),false,more);extraCount++;}
     if(ctx.pass) {
-      button("Generate strong password · 24 characters",()=>generate(ctx,24,true),true);
-      button("Generate extra-long password · 32 characters",()=>generate(ctx,32,true));
-      button("Generate without symbols · 24 characters",()=>generate(ctx,24,false));
+      button("Generate 32-character password",()=>generate(ctx,32,true),false,more);
+      button("Generate without symbols",()=>generate(ctx,24,false),false,more);
+      extraCount+=2;
+    }
+    if(extraCount) {
+      button("More options"+(extraCount>0?" ▾":""),()=>{
+        more.style.display=more.style.display==="none"?"block":"none";
+      });
+      panel.append(more);
     }
     position(ctx.anchor);
   }
