@@ -86,7 +86,8 @@ public final class MainActivity extends Activity {
         if(!exists)root.addView(Ui.button(this,"Receive from your Windows app",false,()->showPairing(false)));
         if(!exists)root.addView(Ui.button(this,"Connect to my PC · secure QR",false,()->connectToPc("")));
         if(!exists)root.addView(Ui.button(this,"Restore from cloud · legacy recovery code",false,()->joinCloud("")));
-        Ui.gap(root,25);root.addView(Ui.text(this,"Works offline without an account.\nA lost passphrase cannot be reset. Keep an encrypted backup.",11,Ui.MUTED,false));
+        Ui.gap(root,16);String installedVersion="";try{installedVersion=AndroidUpdater.installed(this).versionName;}catch(Exception ignored){}
+        root.addView(Ui.text(this,"Lockvyn v"+installedVersion+" · works offline\nA lost passphrase cannot be reset. Keep an encrypted backup.",11,Ui.MUTED,false));
         if(pendingImport!=null)handler.post(()->importPrompt(pendingImport));
     }
     private void showVault(){
@@ -97,7 +98,7 @@ public final class MainActivity extends Activity {
         LinearLayout heading=new LinearLayout(this);heading.setGravity(Gravity.CENTER_VERTICAL);
         String title=filter.equals("trash")?"Your trash":filter.equals("favorites")?"Your favorites":filter.equals("health")?"Review":"Your Vault";
         heading.addView(Ui.text(this,title,27,Ui.INK,true),new LinearLayout.LayoutParams(0,-2,1));
-        Button options=Ui.button(this,"Options",false,this::options);options.setLayoutParams(new LinearLayout.LayoutParams(-2,-2));heading.addView(options);root.addView(heading);
+        Button options=Ui.button(this,"Tools",false,this::options);options.setLayoutParams(new LinearLayout.LayoutParams(-2,-2));heading.addView(options);root.addView(heading);
         vaultStats=Ui.text(this,"",12,Ui.MUTED,false);Ui.gap(root,8);root.addView(vaultStats);
         Button add=Ui.button(this,"+ Add login",true,()->edit(null));root.addView(add);Ui.gap(root,8);
         EditText find=Ui.field(root,"Search your vault",search,false,200);find.setHint("Name, username or website");find.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int a,int c,int f){}public void onTextChanged(CharSequence s,int a,int b,int c){search=s.toString();renderList();}public void afterTextChanged(Editable e){}});
@@ -122,7 +123,7 @@ public final class MainActivity extends Activity {
             JSONArray entries=engine.snapshot().getJSONArray("entries");for(int i=0;i<entries.length();i++){JSONObject entry=entries.getJSONObject(i);if(entry.getString("id").equals(id)&&entry.getBoolean("deleted")&&!entry.optBoolean("purged")){JSONObject copy=new JSONObject(entry.toString());copy.put("deleted",false);engine.upsert(copy);return;}}
         },()->{undoEntryId=null;showVault();}));root.addView(undo);handler.postDelayed(()->{if(id.equals(undoEntryId)&&SystemClock.elapsedRealtime()>=undoUntil){undoEntryId=null;undo.setVisibility(View.GONE);}},Math.max(1,undoUntil-SystemClock.elapsedRealtime()));}
         syncStatus=Ui.text(this,"Cloud · checking when connected",11,Ui.MUTED,false);root.addView(syncStatus);
-        LinearLayout nav=new LinearLayout(this);nav.setGravity(Gravity.CENTER);String[] names={"Vault","Sync","Settings"};Runnable[] actions={this::showVault,this::cloud,this::settings};
+        LinearLayout nav=new LinearLayout(this);nav.setGravity(Gravity.CENTER);String[] names={"Vault","Sync","Backup","Settings"};Runnable[] actions={this::showVault,this::syncHub,this::backupHub,this::settings};
         for(int i=0;i<names.length;i++){Button button=Ui.button(this,names[i],i==0,actions[i]);button.setLayoutParams(new LinearLayout.LayoutParams(0,Ui.dp(this,48),1));nav.addView(button);}
         root.addView(nav);
     }
@@ -144,7 +145,8 @@ public final class MainActivity extends Activity {
         b.addView(Ui.button(this,"+ Add login",true,()->{d.dismiss();edit(null);}));
         b.addView(Ui.button(this,"Generate password",false,()->{d.dismiss();generator();}));
         b.addView(Ui.button(this,"Folders",false,()->{d.dismiss();folders();}));
-        b.addView(Ui.button(this,"Devices & encrypted backup",false,()->{d.dismiss();devices();}));
+        b.addView(Ui.button(this,"Sync & Devices",false,()->{d.dismiss();syncHub();}));
+        b.addView(Ui.button(this,"Backup & Restore",false,()->{d.dismiss();backupHub();}));
         b.addView(Ui.button(this,"Settings & Autofill",false,()->{d.dismiss();settings();}));
     }
     private void appUpdates(){
@@ -220,7 +222,47 @@ public final class MainActivity extends Activity {
     private CheckBox check(LinearLayout body,String label,boolean enabled){CheckBox c=new CheckBox(this);c.setText(label);c.setChecked(enabled);body.addView(c);return c;}
     private void copy(String value){ClipboardManager c=(ClipboardManager)getSystemService(CLIPBOARD_SERVICE);ClipData data=ClipData.newPlainText("Lockvyn",value);if(Build.VERSION.SDK_INT>=33){PersistableBundle extras=new PersistableBundle();extras.putBoolean(ClipDescription.EXTRA_IS_SENSITIVE,true);data.getDescription().setExtras(extras);}c.setPrimaryClip(data);clipboard=value;clipboardUntil=SystemClock.elapsedRealtime()+20000;handler.postDelayed(()->{if(SystemClock.elapsedRealtime()>=clipboardUntil)clearClipboard();},20000);toast("Copied. Clipboard clears in 20 seconds. Paste into the intended app.");}
     private void clearClipboard(){try{ClipboardManager c=(ClipboardManager)getSystemService(CLIPBOARD_SERVICE);ClipData d=c.getPrimaryClip();if(clipboard!=null&&d!=null&&d.getItemCount()>0&&clipboard.contentEquals(d.getItemAt(0).coerceToText(this)))c.clearPrimaryClip();clipboard=null;}catch(Exception ignored){}}
-    private void devices(){LinearLayout b=Ui.column(this);b.addView(Ui.text(this,"Transfer encrypted data only. Both devices stay usable offline. Keep a backup away from this phone.",13,Ui.MUTED,false));b.addView(Ui.button(this,"Export encrypted backup",true,()->{try{exportBytes=engine.export();startActivityForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT).setType("application/octet-stream").addCategory(Intent.CATEGORY_OPENABLE).putExtra(Intent.EXTRA_TITLE,"Lockvyn.boshavault"),11);}catch(Exception e){Ui.error(this,e);}}));b.addView(Ui.button(this,"Import / merge encrypted backup",false,this::chooseImport));b.addView(Ui.button(this,"Connect to Windows over Wi-Fi",false,()->showPairing(true)));b.addView(Ui.button(this,"Connect to my PC · secure cloud QR",true,()->connectToPc("")));b.addView(Ui.button(this,"Optional encrypted cloud sync",false,this::cloud));dialog("Devices & encrypted backup",b);}
+    private void devices(){syncHub();} // Preserve old navigation callbacks without duplicating screens.
+
+    private void syncHub(){
+        if(!engine.isOpen()||busy)return;
+        LinearLayout b=Ui.column(this);
+        boolean connected=false;String email="",last="";
+        JSONObject local=null;
+        try{
+            local=new CloudSettingsStore(this).load(engine.snapshot().getString("vaultId"));
+            if(local!=null){connected=true;email=local.optString("email");last=local.optString("lastSyncUtc");}
+        }catch(Exception ignored){}finally{CloudSettingsStore.clear(local);}
+        LinearLayout card=Ui.card(this,connected?Ui.GREEN:Ui.SOFT);
+        card.addView(Ui.text(this,connected?"● Cloud connected":"○ Cloud not connected",18,Ui.INK,true));
+        card.addView(Ui.text(this,connected?"Account: "+email+"\nAutomatic encrypted sync is available.":"Connect once to sync logins securely between your devices.",13,Ui.MUTED,false));
+        if(connected)card.addView(Ui.text(this,last.isEmpty()?"No successful sync yet.":"Last synced: "+last,12,Ui.MUTED,false));
+        b.addView(card);
+        b.addView(Ui.button(this,"Cloud Sync · status & sync now",true,this::cloud));
+        b.addView(Ui.button(this,"Add new device · scan secure QR",false,()->connectToPc("")));
+        b.addView(Ui.text(this,"On Windows choose Sync & Devices → Add new device. Scan the temporary QR, compare six digits and approve on the PC.",12,Ui.MUTED,false));
+        LinearLayout advanced=Ui.column(this);advanced.setVisibility(View.GONE);
+        advanced.addView(Ui.button(this,"Transfer over private Wi-Fi (offline)",false,()->showPairing(true)));
+        advanced.addView(Ui.text(this,"Only use offline Wi-Fi transfer when cloud sync is unavailable. Your vault remains encrypted during transfer.",12,Ui.MUTED,false));
+        b.addView(Ui.button(this,"Offline transfer & advanced options ▾",false,
+            ()->advanced.setVisibility(advanced.getVisibility()==View.GONE?View.VISIBLE:View.GONE)));
+        b.addView(advanced);
+        dialog("Sync & Devices",b);
+    }
+
+    private void backupHub(){
+        if(!engine.isOpen()||busy)return;
+        LinearLayout b=Ui.column(this);
+        b.addView(Ui.text(this,"Export a private encrypted backup to a location you control. Import safely merges a backup instead of silently overwriting your current vault.",14,Ui.MUTED,false));
+        b.addView(Ui.button(this,"Export encrypted backup",true,()->{
+            try{exportBytes=engine.export();startActivityForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT).setType("application/octet-stream")
+                .addCategory(Intent.CATEGORY_OPENABLE).putExtra(Intent.EXTRA_TITLE,"Lockvyn.boshavault"),11);}
+            catch(Exception e){Ui.error(this,e);}
+        }));
+        b.addView(Ui.button(this,"Import / restore encrypted backup",false,this::chooseImport));
+        b.addView(Ui.text(this,"Save a copy away from this phone. A lost master passphrase cannot be recovered by support.",12,Ui.MUTED,false));
+        dialog("Backup & Restore",b);
+    }
 
     private void cloudTask(TextView status,Work action,Runnable done){
         if(busy){toast("A vault operation is already running.");return;}
