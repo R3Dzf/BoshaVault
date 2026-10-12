@@ -32,6 +32,9 @@ public partial class App : Application
         {
             var window = new MainWindow(); MainWindow = window;
             activation = new InstanceActivationChannel(pipe, () => { if (!Dispatcher.HasShutdownStarted) Dispatcher.BeginInvoke(() => window.BringToFront()); });
+            // Repair only an already-approved native messaging registration after
+            // a new Velopack installation path. No profile installs or policy changes.
+            BrowserNativeHostRepair.TryRepair(AppContext.BaseDirectory);
             autofill = new BrowserAutofillServer(Dispatcher, window.HandleBrowserAutofill);
             window.InitializeLaunch(background);
         }
