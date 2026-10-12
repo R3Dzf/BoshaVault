@@ -56,6 +56,42 @@ jobs:
         env:
           VPK_TOKEN: ${{ github.token }}
         run: ./tools/Package-Windows.ps1 -Repository '${{ github.repository }}'
+      - name: Verify real published-baseline delta before public release
+        shell: pwsh
+        run: |
+          # Validate the actual old official package -> new package delta, rather
+          # than only the synthetic 9.0.0 -> 9.0.1 acceptance fixture.
+          $feedPath='dist/velopack/releases.win.json'
+          $index=Get-Content $feedPath -Raw | ConvertFrom-Json
+          $assets=@($index.Assets)
+          $current=[version]$env:LOCKVYN_VERSION
+          $previous=@($assets | Where-Object {
+            $_.PackageId -eq 'Lockvyn' -and $_.Type -eq 'Full' -and
+            [version]$_.Version -lt $current
+          } | Sort-Object { [version]$_.Version } -Descending)
+          if (!$previous.Count) {
+            Write-Host 'No prior Windows release; first-release full-package validation applies.'
+          } else {
+            $candidate=$previous[0]
+            $delta=@($assets | Where-Object {
+              $_.PackageId -eq 'Lockvyn' -and $_.Type -eq 'Delta' -and
+              [version]$_.Version -eq $current
+            })
+            if ($delta.Count -ne 1) { throw 'Exactly one delta is required for the target version.' }
+            $oldPackage=Join-Path 'dist/velopack' $candidate.FileName
+            $targetPackage=Join-Path 'dist/velopack' ("Lockvyn-$env:LOCKVYN_VERSION-full.nupkg")
+            if (!(Test-Path $oldPackage) -or !(Test-Path $targetPackage)) {
+              throw 'Real old or new package is missing; refusing to publish an untested delta.'
+            }
+            dotnet restore tools/Lockvyn.UpdateChecks --locked-mode
+            if ($LASTEXITCODE) { throw 'Pinned update-check dependencies failed to restore.' }
+            dotnet build tools/Lockvyn.UpdateChecks -c Release --no-restore
+            if ($LASTEXITCODE) { throw 'Update-check tool failed to build.' }
+            $testRoot=Join-Path $env:RUNNER_TEMP ('release-delta-'+[guid]::NewGuid().ToString('N'))
+            dotnet tools/Lockvyn.UpdateChecks/bin/Release/net10.0/Lockvyn.UpdateChecks.dll --published-release-delta 'dist/velopack' $testRoot $oldPackage
+            if ($LASTEXITCODE) { throw 'Real release delta reconstruction failed. Nothing was published.' }
+            Write-Host "Verified real Windows delta: $($candidate.Version) -> $env:LOCKVYN_VERSION"
+          }
       - name: Upload installer, complete package, differences and update feed
         shell: pwsh
         env:
