@@ -455,7 +455,12 @@ public partial class MainWindow : Window
     {
         if (session == null) return;
         var d = new FormDialog(this, "Sync & Devices", 540);
-        bool connected = new CloudProfileStore(root).Exists;
+        CloudProfile? summaryProfile = null;
+        try { summaryProfile = new CloudProfileStore(root).Load(Guid.Parse(session.Data.VaultId)); }
+        catch (Exception ex) when (ex is VaultException or IOException or UnauthorizedAccessException) { }
+        bool connected = summaryProfile != null;
+        string lastSynced = summaryProfile?.LastSyncUtc ?? "";
+        summaryProfile?.Clear();
         d.Label(connected
             ? "Cloud sync is connected. New passwords sync automatically when Internet is available. Open your vault on other devices to apply changes."
             : "Connect an encrypted cloud account once to sync passwords between your devices automatically.");
@@ -469,7 +474,20 @@ public partial class MainWindow : Window
             : "Your local vault stays available offline. Cloud is optional.",
             Foreground = Brushes.DimGray, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 7, 0, 7) });
         d.Body.Children.Add(cloudCard);
-        d.Action("Cloud Sync", () => { d.Close(); CloudClick(sender, e); }, true, true);
+        if (connected)
+        {
+            d.Label(lastSynced.Length == 0 ? "No successful sync yet." : "Last synced: " + lastSynced);
+            var hubStatus = new TextBlock { Foreground = Brushes.DimGray,
+                TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 3, 0, 5) };
+            d.Action("Sync Now", async () =>
+            {
+                hubStatus.Text = "Synchronizing encrypted changes…";
+                await RunCloudSync();
+                if (d.IsVisible) hubStatus.Text = CloudStatus.Text;
+            }, true, true);
+            d.Body.Children.Add(hubStatus);
+        }
+        d.Action("Cloud Sync · manage account", () => { d.Close(); CloudClick(sender, e); }, false, true);
         d.Action("Add new device · secure QR", () => { d.Close(); OpenCloudSync(true); }, false, true);
         d.Label("First-time pairing displays a two-minute public-key QR and asks you to verify six digits on both devices.");
         d.Action("Offline transfer · private Wi-Fi", () => { d.Close(); OfflineTransferClick(sender, e); }, false, true);
