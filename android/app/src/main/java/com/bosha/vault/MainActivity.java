@@ -73,8 +73,8 @@ public final class MainActivity extends Activity {
     }
     private void toast(String s){Toast.makeText(this,s,Toast.LENGTH_LONG).show();}
     private void showLock(){
-        if(!active)return;root=Ui.screen(this);Ui.gap(root,35);LinearLayout logo=Ui.card(this,Ui.SOFT);logo.addView(Ui.brandIcon(this,64));logo.addView(Ui.text(this,"Your private space.",27,Ui.INK,true));Ui.gap(logo,9);logo.addView(Ui.text(this,"Encrypted. Local. Yours.",14,Ui.MUTED,false));root.addView(logo);Ui.gap(root,25);
-        boolean exists=Store.vault(this).exists();root.addView(Ui.text(this,exists?"Welcome back":"Make yourself at home",25,Ui.INK,true));Ui.gap(root,9);root.addView(Ui.text(this,exists?"Unlock with your master passphrase.":"Choose a unique passphrase with at least 16 characters. A long phrase is easier to remember.",13,Ui.MUTED,false));Ui.gap(root,25);
+        if(!active)return;root=Ui.screen(this);Ui.gap(root,24);LinearLayout logo=Ui.card(this,Ui.SOFT);logo.addView(Ui.brandIcon(this,64));logo.addView(Ui.text(this,"Your private space.",27,Ui.INK,true));Ui.gap(logo,9);logo.addView(Ui.text(this,"Encrypted. Local. Yours.",14,Ui.MUTED,false));root.addView(logo);Ui.gap(root,17);
+        boolean exists=Store.vault(this).exists();root.addView(Ui.text(this,exists?"Welcome back":"Create your private vault",25,Ui.INK,true));Ui.gap(root,9);root.addView(Ui.text(this,exists?"Unlock with your master passphrase.":"Choose a unique passphrase with at least 16 characters. A long phrase is easier to remember.",13,Ui.MUTED,false));Ui.gap(root,25);
         EditText master=Ui.field(root,"Master passphrase","",true,1024),confirm=exists?null:Ui.field(root,"Confirm passphrase","",true,1024);
         root.addView(Ui.button(this,exists?"Unlock vault →":"Create encrypted vault →",true,()->{
             if(SystemClock.elapsedRealtime()<retryAfter){toast("Please wait before trying another passphrase.");return;}String password=master.getText().toString();if(confirm!=null&&!password.equals(confirm.getText().toString())){toast("Passphrases do not match.");return;}master.setText("");if(confirm!=null)confirm.setText("");
@@ -98,24 +98,39 @@ public final class MainActivity extends Activity {
         LinearLayout heading=new LinearLayout(this);heading.setGravity(Gravity.CENTER_VERTICAL);
         String title=filter.equals("trash")?"Your trash":filter.equals("favorites")?"Your favorites":filter.equals("health")?"Review":"Your Vault";
         heading.addView(Ui.text(this,title,27,Ui.INK,true),new LinearLayout.LayoutParams(0,-2,1));
-        Button options=Ui.button(this,"Tools",false,this::options);options.setLayoutParams(new LinearLayout.LayoutParams(-2,-2));heading.addView(options);root.addView(heading);
+        Button options=Ui.button(this,"Tools",false,this::options);
+        LinearLayout.LayoutParams toolParams=new LinearLayout.LayoutParams(-2,Ui.dp(this,48));
+        toolParams.leftMargin=Ui.dp(this,10);heading.addView(options,toolParams);root.addView(heading);
         vaultStats=Ui.text(this,"",12,Ui.MUTED,false);Ui.gap(root,8);root.addView(vaultStats);
-        Button add=Ui.button(this,"+ Add login",true,()->edit(null));root.addView(add);Ui.gap(root,8);
+        Button add=Ui.button(this,"+ Add login",true,()->edit(null));
+        add.setContentDescription("Add a new login to your encrypted vault");
+        root.addView(add);Ui.gap(root,10);
         EditText find=Ui.field(root,"Search your vault",search,false,200);find.setHint("Name, username or website");find.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int a,int c,int f){}public void onTextChanged(CharSequence s,int a,int b,int c){search=s.toString();renderList();}public void afterTextChanged(Editable e){}});
-        LinearLayout tabs=new LinearLayout(this);String[] values={"all","favorites","health","trash"},labels={"All","Favorites","Review","Trash"};
-        for(int i=0;i<4;i++){final String value=values[i];TextView t=Ui.text(this,labels[i],12,filter.equals(value)?Ui.PURPLE:Ui.MUTED,true);t.setGravity(Gravity.CENTER);t.setPadding(0,Ui.dp(this,12),0,Ui.dp(this,12));t.setOnClickListener(v->{filter=value;showVault();});tabs.addView(t,new LinearLayout.LayoutParams(0,-2,1));}root.addView(tabs);
+        LinearLayout tabs=new LinearLayout(this);
+        String[] values={"all","favorites","health","trash"},labels={"All","Favorites","Review","Trash"};
+        for(int i=0;i<4;i++){
+            final String value=values[i];
+            TextView chip=Ui.filterChip(this,labels[i],filter.equals(value),()->{filter=value;showVault();});
+            LinearLayout.LayoutParams chipParams=new LinearLayout.LayoutParams(0,-2,1);
+            chipParams.setMargins(Ui.dp(this,3),0,Ui.dp(this,3),0);
+            tabs.addView(chip,chipParams);
+        }
+        root.addView(tabs);Ui.gap(root,8);
         try{
             List<String> names=new ArrayList<>();names.add("All folders");names.addAll(FolderCatalog.choices(engine.snapshot()));Spinner folders=new Spinner(this);
             folders.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,names));int selected=0;for(int i=1;i<names.size();i++)if(names.get(i).equalsIgnoreCase(folderFilter))selected=i;folders.setSelection(selected);root.addView(folders,new LinearLayout.LayoutParams(-1,Ui.dp(this,44)));
             folders.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener(){public void onItemSelected(AdapterView<?> p,View v,int pos,long id){folderFilter=pos==0?null:names.get(pos);renderList();}public void onNothingSelected(AdapterView<?> p){}});
         }catch(Exception e){Ui.error(this,e);}
-        FrameLayout area=new FrameLayout(this);list=new ListView(this);list.setDivider(null);list.setDividerHeight(0);list.setPadding(0,Ui.dp(this,6),0,0);list.setClipToPadding(false);area.addView(list,new FrameLayout.LayoutParams(-1,-1));
+        FrameLayout area=new FrameLayout(this);list=new ListView(this);list.setDivider(new android.graphics.drawable.ColorDrawable(Ui.BG));
+        list.setDividerHeight(Ui.dp(this,8));list.setPadding(0,Ui.dp(this,6),0,0);list.setClipToPadding(false);area.addView(list,new FrameLayout.LayoutParams(-1,-1));
         TextView empty=Ui.text(this,"No logins here. Change the section, folder or search, or add a login above.",14,Ui.MUTED,false);empty.setGravity(Gravity.CENTER);empty.setPadding(Ui.dp(this,14),Ui.dp(this,14),Ui.dp(this,14),Ui.dp(this,14));area.addView(empty,new FrameLayout.LayoutParams(-1,-1));list.setEmptyView(empty);root.addView(area,new LinearLayout.LayoutParams(-1,0,1));
         entryAdapter=new BaseAdapter(){
             public int getCount(){return displayedEntries.size();}public Object getItem(int position){return displayedEntries.get(position);}public long getItemId(int position){return position;}
             public View getView(int position,View recycled,ViewGroup parent){
                 LinearLayout row;TextView[] text;
-                if(recycled==null){row=Ui.column(MainActivity.this);int pad=Ui.dp(MainActivity.this,15);row.setPadding(pad,pad,pad,pad);row.setBackground(Ui.shape(android.graphics.Color.WHITE,Ui.dp(MainActivity.this,12)));text=new TextView[]{Ui.text(MainActivity.this,"",16,Ui.INK,true),Ui.text(MainActivity.this,"",12,Ui.MUTED,false),Ui.text(MainActivity.this,"",11,Ui.PURPLE,false)};for(TextView t:text){t.setSingleLine(true);t.setEllipsize(TextUtils.TruncateAt.END);row.addView(t);Ui.gap(row,5);}row.setTag(text);}else{row=(LinearLayout)recycled;text=(TextView[])row.getTag();}
+                if(recycled==null){row=Ui.column(MainActivity.this);int pad=Ui.dp(MainActivity.this,15);row.setPadding(pad,pad,pad,pad);android.graphics.drawable.GradientDrawable surface=Ui.shape(Ui.WHITE,Ui.dp(MainActivity.this,14));
+                    surface.setStroke(Math.max(1,Ui.dp(MainActivity.this,1)),Ui.BORDER);
+                    row.setBackground(surface);text=new TextView[]{Ui.text(MainActivity.this,"",16,Ui.INK,true),Ui.text(MainActivity.this,"",12,Ui.MUTED,false),Ui.text(MainActivity.this,"",11,Ui.PURPLE,false)};for(TextView t:text){t.setSingleLine(true);t.setEllipsize(TextUtils.TruncateAt.END);row.addView(t);Ui.gap(row,5);}row.setTag(text);}else{row=(LinearLayout)recycled;text=(TextView[])row.getTag();}
                 JSONObject e=displayedEntries.get(position);text[0].setText(e.optString("title")+(e.optBoolean("favorite")?"   ★":""));text[1].setText(e.optString("username"));text[2].setText(e.optString("folder"));return row;
             }
         };list.setAdapter(entryAdapter);list.setOnItemClickListener((parent,view,position,id)->{if(position<displayedEntries.size())detail(displayedEntries.get(position));});renderList();
@@ -123,9 +138,12 @@ public final class MainActivity extends Activity {
             JSONArray entries=engine.snapshot().getJSONArray("entries");for(int i=0;i<entries.length();i++){JSONObject entry=entries.getJSONObject(i);if(entry.getString("id").equals(id)&&entry.getBoolean("deleted")&&!entry.optBoolean("purged")){JSONObject copy=new JSONObject(entry.toString());copy.put("deleted",false);engine.upsert(copy);return;}}
         },()->{undoEntryId=null;showVault();}));root.addView(undo);handler.postDelayed(()->{if(id.equals(undoEntryId)&&SystemClock.elapsedRealtime()>=undoUntil){undoEntryId=null;undo.setVisibility(View.GONE);}},Math.max(1,undoUntil-SystemClock.elapsedRealtime()));}
         syncStatus=Ui.text(this,"Cloud · checking when connected",11,Ui.MUTED,false);root.addView(syncStatus);
-        LinearLayout nav=new LinearLayout(this);nav.setGravity(Gravity.CENTER);String[] names={"Vault","Sync","Backup","Settings"};Runnable[] actions={this::showVault,this::syncHub,this::backupHub,this::settings};
-        for(int i=0;i<names.length;i++){Button button=Ui.button(this,names[i],i==0,actions[i]);button.setLayoutParams(new LinearLayout.LayoutParams(0,Ui.dp(this,48),1));nav.addView(button);}
-        root.addView(nav);
+        LinearLayout nav=Ui.bottomNavigation(this,
+            new String[]{"Vault","Sync","Backup","Settings"},
+            new int[]{R.drawable.ic_nav_vault,R.drawable.ic_nav_sync,
+                R.drawable.ic_nav_backup,R.drawable.ic_nav_settings},
+            0,new Runnable[]{this::showVault,this::syncHub,this::backupHub,this::settings});
+        root.addView(nav,new LinearLayout.LayoutParams(-1,-2));
     }
     private void renderList(){
         if(list==null||entryAdapter==null||!engine.isOpen())return;
