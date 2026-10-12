@@ -88,7 +88,7 @@ public final class MainActivity extends Activity {
         worker.execute(()->{Exception failure=null;try{action.run();}catch(Exception e){failure=e;}if(!active||stamp!=epoch)engine.close();Exception error=failure;runOnUiThread(()->{busy=false;if(!active||stamp!=epoch)return;if(error!=null)Ui.error(this,error);else{nextCloudCheck=0;done.run();}});});
     }
     private void cancelLocalTransfer(){LocalTransfer current=pendingTransfer;pendingTransfer=null;if(current!=null)current.cancel();}
-    private void lock(){authGraceUntil=0;authenticatorDialogs=0;epoch++;undoEntryId=null;CloudClient running=autoClient;if(running!=null)running.close();cancelLocalTransfer();for(AlertDialog d:new ArrayList<>(dialogs))d.dismiss();dialogs.clear();displayedEntries.clear();list=null;entryAdapter=null;vaultStats=null;syncStatus=null;clearClipboard();worker.execute(()->engine.close());showLock();}
+    private void lock(){authGraceUntil=0;authenticatorDialogs=0;autoSession=null;autoSessionSlot=null;autoSessionUntil=0;epoch++;undoEntryId=null;CloudClient running=autoClient;if(running!=null)running.close();cancelLocalTransfer();for(AlertDialog d:new ArrayList<>(dialogs))d.dismiss();dialogs.clear();displayedEntries.clear();list=null;entryAdapter=null;vaultStats=null;syncStatus=null;clearClipboard();worker.execute(()->engine.close());showLock();}
     private void autoSyncTick(){
         long now=SystemClock.elapsedRealtime();if(cloudOpen||busy||now<nextCloudCheck)return;nextCloudCheck=now+12000;
         int stamp=epoch;cloudWorker.execute(()->{
@@ -342,10 +342,18 @@ public final class MainActivity extends Activity {
         if(view instanceof android.view.ViewGroup){android.view.ViewGroup group=(android.view.ViewGroup)view;for(int i=0;i<group.getChildCount();i++)clearCloudFields(group.getChildAt(i));}
     }
     interface CloudSessionReady {void accept(CloudAuth.Session session);}
+    private void rememberCloudSession(CloudAuth.Session session,JSONObject profile){
+        if(profile==null||session==null||!session.hasSecondFactor())return;
+        if(!session.owner.equals(profile.optString("ownerId")))return;
+        long validSeconds=Math.min(900L,session.expiresUnix-System.currentTimeMillis()/1000L-45L);
+        if(validSeconds<=0)return;
+        autoSession=session;autoSessionSlot=profile.optString("vaultSlot");
+        autoSessionUntil=SystemClock.elapsedRealtime()+validSeconds*1000L;
+    }
     private void cloudAssure(CloudClient client,CloudAuth.Session session,JSONObject profile,CloudSettingsStore store,TextView status,boolean freshCode,CloudSessionReady ready){
         CloudAuth.Factors[] factors={null};
         cloudTask(status,()->factors[0]=client.auth.factors(session),()->{
-            if(!factors[0].requiresChallenge(session)&&!freshCode){ready.accept(session);return;}
+            if(!factors[0].requiresChallenge(session)&&!freshCode){rememberCloudSession(session,profile);ready.accept(session);return;}
             if(factors[0].totp.isEmpty()){status.setText("This account requires an authenticator method this version cannot use.");return;}
             cloudVerify(client,session,profile,store,factors[0].totp,ready);
         });
@@ -358,7 +366,7 @@ public final class MainActivity extends Activity {
             b.addView(Ui.button(this,"Verify & continue",true,()->{
                 String digits=code.getText().toString().trim(),id=((CloudAuth.Factor)device.getSelectedItem()).id;code.setText("");CloudAuth.Session[] next={null};
                 cloudTask(result,()->{next[0]=client.auth.verify(session,id,digits);if(profile!=null)client.saveSession(next[0],profile,store);},()->{
-                    if(!d.isShowing())return;d.dismiss();ready.accept(next[0]);
+                    if(!d.isShowing())return;rememberCloudSession(next[0],profile);d.dismiss();ready.accept(next[0]);
                 });
             }));
             b.addView(Ui.button(this,"Cancel",false,d::dismiss));b.addView(result);
@@ -368,7 +376,18 @@ public final class MainActivity extends Activity {
             });
     }
     private void cloudRefresh(CloudClient client,JSONObject profile,CloudSettingsStore store,TextView status,CloudSessionReady ready){
-        CloudAuth.Session[] signedIn={null};cloudTask(status,()->signedIn[0]=client.refresh(profile,store),()->cloudAssure(client,signedIn[0],profile,store,status,false,ready));
+        // AAL2 is still verified server-side. Reuse only an unexpired in-memory
+        // session for the same owner/vault during the current unlocked period.
+        CloudAuth.Session cached=autoSession;
+        if(cached!=null&&cached.hasSecondFactor()&&cached.usableForSeconds(45)&&
+           SystemClock.elapsedRealtime()<autoSessionUntil &&
+           cached.owner.equals(profile.optString("ownerId")) &&
+           Objects.equals(autoSessionSlot,profile.optString("vaultSlot"))){
+            ready.accept(cached);return;
+        }
+        CloudAuth.Session[] signedIn={null};
+        cloudTask(status,()->signedIn[0]=client.refresh(profile,store),
+            ()->cloudAssure(client,signedIn[0],profile,store,status,false,ready));
     }
     private void cloudSecurity(CloudClient client,CloudAuth.Session session,JSONObject profile,CloudSettingsStore store){
         LinearLayout b=Ui.column(this);TextView status=Ui.text(this,"Loading authenticators…",13,Ui.MUTED,false);b.addView(status);AlertDialog d=dialog("Cloud account security · 2FA",b);
@@ -420,7 +439,7 @@ public final class MainActivity extends Activity {
     }
     private void cloud(){
         if(!engine.isOpen()||busy)return;
-        autoSession=null;
+        // Retain in-memory AAL2 while unlocked to avoid repeated prompts.
         cloudOpen=true;
         final CloudSettingsStore store=new CloudSettingsStore(this);final int stamp=epoch;
         final CloudClient client=new CloudClient(()->{if(!active||stamp!=epoch||!engine.isOpen())throw new IOException("Cloud operation cancelled.");});
