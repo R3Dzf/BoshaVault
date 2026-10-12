@@ -1,12 +1,13 @@
 {
   "manifest_version": 3,
   "name": "Lockvyn Autofill",
-  "version": "0.6.0",
-  "description": "User-approved local autofill through the Lockvyn Windows app. No cloud service.",
+  "version": "0.7.0",
+  "description": "Private HTTPS autofill, with optional quiet mode and user-approved local Lockvyn Windows connection.",
   "permissions": [
     "nativeMessaging",
     "webNavigation",
-    "activeTab"
+    "activeTab",
+    "storage"
   ],
   "host_permissions": [
     "https://*/*"
