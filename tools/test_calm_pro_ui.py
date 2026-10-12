@@ -30,6 +30,11 @@ for action in ("this::showVault", "this::syncHub", "this::backupHub", "this::set
 assert "setMinHeight(dp(c,50))" in android, "Minimum 48dp button target required"
 assert "FLAG_SECURE" in android, "Android private screen protection must stay enabled"
 
+# Autofill must really disable the owned service (not reopen the enable prompt).
+assert "manager.disableAutofillServices()" in main, "Disable Autofill must call Android's owned-service API"
+assert 'AutofillStatus.isEnabled(this)?"Disable Android Autofill":"Enable Android Autofill"' in main
+assert "refreshAutofillSettingsState();" in main, "Return from provider settings must refresh UI state"
+
 wpf = app.read_text()
 xaml = window.read_text()
 for color in ("#171B2E", "#697185", "#6558D9", "#EFEDFF", "#F7F8FC"):
@@ -39,4 +44,4 @@ for nav in ("My Vault", "Sync &amp; Devices", "Backup &amp; Restore", "Settings"
 for name in ("InstalledVersionLabel", "SidebarVersionLabel"):
     assert name in xaml, "Installed version must come from the running assembly"
 assert "BUILT FOR PRIVACY" not in xaml, "Decorative-only dashboard card must remain removed"
-print("PASS Calm Pro styles, flat native controls, vector navigation, WPF XAML, version labels and privacy guards")
+print("PASS Calm Pro UI, Android Autofill state/disable contracts, WPF XAML and privacy guards")
