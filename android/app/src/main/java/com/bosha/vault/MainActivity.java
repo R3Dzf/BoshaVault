@@ -9,6 +9,7 @@ import android.provider.Settings;
 import android.text.*;
 import android.text.InputType;
 import android.view.*;
+import android.view.autofill.AutofillManager;
 import android.widget.*;
 import java.io.*;
 import java.util.*;
@@ -667,14 +668,30 @@ public final class MainActivity extends Activity {
         provider.addView(providerStatus);b.addView(provider);
         autofillSettingsStatus=providerStatus;
         autofillSettingsButton=Ui.button(this,AutofillStatus.isEnabled(this)?"Disable Android Autofill":"Enable Android Autofill",true,()->{
+            if(AutofillStatus.isEnabled(this)){
+                // Only the currently selected Autofill service can disable itself.
+                // This does not delete the vault or change another provider.
+                try{
+                    AutofillManager manager=getSystemService(AutofillManager.class);
+                    if(manager==null)throw new IllegalStateException("Android Autofill is unavailable.");
+                    manager.disableAutofillServices();
+                    refreshAutofillSettingsState();
+                    if(AutofillStatus.isEnabled(this))
+                        toast("Android still reports Lockvyn selected. Check system Autofill settings.");
+                    else toast("Lockvyn Autofill disabled. Saved passwords are unchanged.");
+                }catch(Exception e){
+                    refreshAutofillSettingsState();
+                    toast("Could not disable Autofill here. Select None in Android Autofill settings.");
+                    try{startActivity(new Intent(Settings.ACTION_SETTINGS));}catch(Exception ignored){}
+                }
+                return;
+            }
             try{
-                // Android owns provider selection. This system prompt allows enabling
-                // or changing the active provider; never claim success prematurely.
                 startActivity(new Intent(Settings.ACTION_REQUEST_SET_AUTOFILL_SERVICE,
                     Uri.parse("package:"+getPackageName())));
-            } catch(Exception e) {
-                toast("Change the Autofill provider to None in Android settings to disable it.");
-                startActivity(new Intent(Settings.ACTION_SETTINGS));
+            }catch(Exception e){
+                toast("Choose Lockvyn as your Autofill provider in Android settings.");
+                try{startActivity(new Intent(Settings.ACTION_SETTINGS));}catch(Exception ignored){}
             }
         });
         b.addView(autofillSettingsButton);
