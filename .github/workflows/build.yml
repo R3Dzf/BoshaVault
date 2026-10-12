@@ -2,10 +2,10 @@ name: Build Lockvyn (Windows and Android)
 
 on:
   push:
-    branches: [main, 'feat/browser-safe-quickfill']
+    branches: [main, 'feat/quiet-chrome-passkey-suggestions']
     tags: ['v*']
   pull_request:
-    branches: [main, 'feat/browser-safe-quickfill']
+    branches: [main, 'feat/quiet-chrome-passkey-suggestions']
   workflow_dispatch:
     inputs:
       signed_release:
@@ -146,9 +146,13 @@ jobs:
           node --check browser-extension/content.js
           node --check browser-extension/password-utils.js
           node --check browser-extension/popup.js
+          node --check browser-extension/passkey-conditional.js
+          node --check browser-extension/passkey-restore.js
           node tools/test-browser-generator.cjs
           node tools/test-browser-security.cjs
           node tools/test-browser-content.cjs
+          node tools/test-passkey-controls.cjs
+          node tools/test-passkey-registration.cjs
           Get-Content browser-extension/manifest.json -Raw | ConvertFrom-Json | Out-Null
           $tokens = $null
           $parseErrors = $null
