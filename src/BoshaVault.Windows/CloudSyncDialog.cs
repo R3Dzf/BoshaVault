@@ -95,7 +95,16 @@ internal static class CloudSyncDialog
                 EnsureCurrent();
                 Status($"Cloud is up to date. {result.Conflicts} conflict copies kept.");
             }, true);
-            Action("Show QR & copy connection code", () => {
+            Action("Add device · secure QR approval", async () =>
+            {
+                var signedIn = await Refresh();
+                EnsureCurrent();
+                await DevicePairingWindow.Show(owner, profile!, signedIn, cancellation.Token);
+                EnsureCurrent();
+                Status("Add device session closed. Check the phone for pairing status.");
+            }, true);
+            d.Label("Advanced recovery fallback: this legacy QR contains your permanent cloud recovery key. Use only on devices you control.");
+            Action("Show legacy recovery code / QR", () => {
                 code.Text = CloudPairing.Encode(profile); byte[] png = PairingQr.Render(code.Text);
                 try { using var stream = new MemoryStream(png); var bitmap = new BitmapImage(); bitmap.BeginInit(); bitmap.CacheOption = BitmapCacheOption.OnLoad; bitmap.StreamSource = stream; bitmap.EndInit(); bitmap.Freeze(); qr.Source = bitmap; qr.Visibility = Visibility.Visible; }
                 finally { CryptographicOperations.ZeroMemory(png); }
