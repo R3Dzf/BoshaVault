@@ -82,10 +82,11 @@ internal static class CloudSyncDialog
             var qr = new Image { Width = 260, Height = 260, Visibility = Visibility.Collapsed, Margin = new Thickness(0, 8, 0, 8) }; d.Body.Children.Add(qr);
             d.Label("Legacy recovery exposes a permanent cloud key. Only use it for trusted recovery when normal QR pairing is unavailable.");
             var recovery = new StackPanel { Margin = new Thickness(0, 4, 0, 12) };
+            int recoveryStart = d.Body.Children.Count - 4;
             for (int i = 0; i < 4; i++)
             {
-                var item = d.Body.Children[^4];
-                d.Body.Children.RemoveAt(d.Body.Children.Count - 4);
+                var item = d.Body.Children[recoveryStart];
+                d.Body.Children.RemoveAt(recoveryStart);
                 recovery.Children.Add(item);
             }
             var advanced = new StackPanel();
