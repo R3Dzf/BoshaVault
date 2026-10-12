@@ -48,6 +48,11 @@ function setup({changed=false,tabOrigin=host}={}) {
   assert.equal(scenario.nativeCalls(),1);
 
   scenario=setup({changed:true});
+  reply=await scenario.request({op:"list"});
+  assert.equal(reply.status,"denied","stale document cannot enumerate vault usernames");
+  assert.equal(scenario.nativeCalls(),0,"stale list request never reaches Native Messaging");
+
+  scenario=setup({changed:true});
   reply=await scenario.request({op:"fill",entryId});
   assert.equal(reply.status,"denied","navigated tab must never receive secret");
   assert.equal(reply.password,undefined);
