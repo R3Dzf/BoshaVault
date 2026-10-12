@@ -45,6 +45,13 @@ internal sealed class TrayController : IDisposable
     {
         if (!disposed) icon.ShowBalloonTip(3500, "Lockvyn is in the tray", "Your vault is locked. Click the shield icon or press Ctrl + Alt + P to open it. Right-click for Exit.", Forms.ToolTipIcon.Info);
     }
+    public void ShowUpdateAvailable(string version)
+    {
+        if (disposed) return;
+        icon.ShowBalloonTip(5000, "Lockvyn update available",
+            "Version " + version + " is ready to review. Open Lockvyn to choose Update now, Later or Don't notify me again.",
+            Forms.ToolTipIcon.Info);
+    }
     public void Dispose()
     {
         if (disposed) return; disposed = true; icon.Visible = false; icon.Dispose(); menu.Dispose(); artwork.Dispose();
