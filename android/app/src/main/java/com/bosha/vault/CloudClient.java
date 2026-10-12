@@ -138,6 +138,49 @@ final class CloudClient implements AutoCloseable {
             }finally{Arrays.fill(blob,(byte)0);}
         }finally{Arrays.fill(key,(byte)0);if(response!=null)Arrays.fill(response,(byte)0);}
     }
+    /** Ephemeral device pairing transport. Uses the signed-in account and server RLS;
+     * only public keys and ciphertext ever pass through Supabase. */
+    JSONObject pairingRead(DevicePairing session,CloudAuth.Session signed)throws Exception{
+        byte[] body=request("GET","rest/v1/device_pairing_sessions?select=*&session_id=eq."+session.sessionId+"&limit=1",null,signed.access,8192);
+        try{
+            JSONArray rows=StrictJson.array(new String(body,StandardCharsets.UTF_8));
+            if(rows.length()!=1)throw new Exception("This QR expired or was cancelled on the computer.");
+            JSONObject row=rows.getJSONObject(0);
+            if(!row.getString("owner_id").equals(signed.owner)||
+               !row.getString("initiator_public_key").equals(session.initiatorKey)||
+               !row.getString("session_id").equals(session.sessionId)||
+               Instant.parse(row.getString("expires_at")).toEpochMilli()<=System.currentTimeMillis())
+                throw new Exception("Pairing session does not match your cloud account.");
+            return row;
+        }finally{Arrays.fill(body,(byte)0);}
+    }
+    void pairingRequest(DevicePairing session,CloudAuth.Session signed)throws Exception{
+        JSONObject row=pairingRead(session,signed);
+        if(!row.getString("state").equals("waiting"))throw new Exception("That pairing QR has already been used.");
+        byte[] response=request("PATCH","rest/v1/device_pairing_sessions?session_id=eq."+session.sessionId+"&state=eq.waiting",
+            new JSONObject().put("state","requested").put("joiner_public_key",session.publicKey),signed.access,8192);
+        Arrays.fill(response,(byte)0);
+        JSONObject requested=pairingRead(session,signed);
+        if(!requested.getString("state").equals("requested")||!requested.getString("joiner_public_key").equals(session.publicKey))
+            throw new Exception("Another phone requested this QR. Start a new pairing.");
+    }
+    String pairingSealed(DevicePairing session,CloudAuth.Session signed)throws Exception{
+        JSONObject row=pairingRead(session,signed);
+        String state=row.getString("state");
+        if(!row.getString("joiner_public_key").equals(session.publicKey))
+            throw new Exception("Pairing recipient changed. Please restart pairing.");
+        if(state.equals("requested"))return null;
+        if(!state.equals("approved")&&!state.equals("completed"))
+            throw new Exception("Pairing was cancelled or rejected.");
+        return row.getString("sealed_pairing");
+    }
+    void pairingComplete(DevicePairing session,CloudAuth.Session signed)throws Exception{
+        byte[] response=request("PATCH","rest/v1/device_pairing_sessions?session_id=eq."+session.sessionId+"&state=eq.approved",
+            new JSONObject().put("state","completed"),signed.access,8192);
+        Arrays.fill(response,(byte)0);
+        if(!pairingRead(session,signed).getString("state").equals("completed"))
+            throw new Exception("The pairing acknowledgement was not accepted.");
+    }
     void signOut(CloudAuth.Session signedIn,CloudSettingsStore store)throws Exception{synchronized(GATE){auth.signOut(signedIn);check();store.forget();}}
     private static String hex(byte[] bytes){StringBuilder result=new StringBuilder();for(byte b:bytes)result.append(String.format(Locale.ROOT,"%02x",b&255));return result.toString();}
     @Override public void close(){cancelled=true;if(!persistingRefresh){HttpsURLConnection conn=connection;if(conn!=null)conn.disconnect();}}
