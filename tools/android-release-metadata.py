@@ -37,7 +37,7 @@ def main():
  for old in sorted(previous,key=lambda x:int(x['versionCode']),reverse=True)[:3]:
   old_tag=old.get('tag','')
   old_code=old.get('versionCode')
-  if not isinstance(old_code,int) or old_code<1 or old_code>=v['versionCode'] or not re.fullmatch(r'android-v[0-9]+\\.[0-9]+\\.[0-9]+',old_tag):continue
+  if not isinstance(old_code,int) or old_code<1 or old_code>=v['versionCode'] or not re.fullmatch(r'android-v[0-9]+\.[0-9]+\.[0-9]+',old_tag):continue
   old_url='https://github.com/'+a.repository+'/releases/download/'+old_tag+'/Lockvyn-Android.apk'
   old_size=old.get('size')
   old_sha=old.get('sha256','')
@@ -55,7 +55,7 @@ def main():
     if downloaded!=old_size or hashlib.sha256(base.read_bytes()).hexdigest()!=old_sha:
      raise ValueError('Official APK baseline checksum mismatch.')
     prior_cert_output=subprocess.check_output([str(tools/'apksigner'),'verify','--verbose','--print-certs',str(base)],text=True)
-    fingerprints=re.findall(r'Signer #\\d+ certificate SHA-256 digest: ([a-fA-F0-9]{64})',prior_cert_output)
+    fingerprints=re.findall(r'Signer #\d+ certificate SHA-256 digest: ([a-fA-F0-9]{64})',prior_cert_output)
     if len(fingerprints)!=1 or fingerprints[0].lower()!=cert:
      raise ValueError('Official APK baseline signing certificate changed.')
     filename=f'Lockvyn-Android-from-{old_code}.lvdelta.gz'
