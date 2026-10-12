@@ -52,6 +52,28 @@ public static class CloudAccountTests
         Check(decoded.VaultSlot==profile.VaultSlot&&decoded.RecoveryKey==profile.RecoveryKey,"cloud pairing code shares only vault slot/key and binds account and vault");
         await Reject(()=>{CloudPairing.Decode(code,Guid.NewGuid(),owner);return Task.CompletedTask;},"cloud pairing refuses replacing an unrelated local vault");
         await Reject(()=>{CloudPairing.Decode(code,vault,Guid.NewGuid());return Task.CompletedTask;},"cloud pairing refuses a different signed-in account");
+        using (var inviter = new DevicePairing())
+        using (var phone = new DevicePairing())
+        {
+            string invite = inviter.Invitation();
+            var scanned = DevicePairing.ParseInvitation(invite);
+            Check(scanned.Id == inviter.SessionId && scanned.Key == inviter.PublicKey &&
+                !invite.Contains(profile.RecoveryKey, StringComparison.Ordinal) &&
+                !invite.Contains("BVCLOUD1:", StringComparison.Ordinal),
+                "temporary QR identifies only an expiring public-key session and no vault secrets");
+            var sas = inviter.SecurityCode(phone.PublicKey, inviter.PublicKey);
+            Check(sas.Length == 6 && sas.All(char.IsAsciiDigit),
+                "short authentication code is six decimal digits, derived from ECDH");
+            string sealedPairing = inviter.SealPairing(code, phone.PublicKey);
+            Check(sealedPairing.Length > 120 && !sealedPairing.Contains(profile.RecoveryKey),
+                "cloud recovery key is transferred only in authenticated ciphertext after approval");
+            await Reject(() => { inviter.SealPairing(code, phone.PublicKey); return Task.CompletedTask; },
+                "approved device pairing cannot release the recovery key twice");
+            await Reject(() => { DevicePairing.ParseInvitation("BVPAIR2:invalid"); return Task.CompletedTask; },
+                "invalid temporary QR rejected");
+            await Reject(() => { DevicePairing.ValidatePublicKey("invalid"); return Task.CompletedTask; },
+                "invalid ECDH public key rejected");
+        }
         string folder=Path.Combine(Path.GetTempPath(),"bv-cloud-batch-"+Guid.NewGuid());Directory.CreateDirectory(folder);
         try
         {
