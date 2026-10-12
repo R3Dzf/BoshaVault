@@ -17,6 +17,12 @@ on:
 permissions:
   contents: read
 
+# Do not spend runner minutes on obsolete commits of the same pull request.
+# Keep tag and main runs independent for audited release workflows.
+concurrency:
+  group: lockvyn-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   cloud-interop:
     name: Cloud encryption / .NET and Java compatibility
