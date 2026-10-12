@@ -110,7 +110,8 @@ vm.runInNewContext(fs.readFileSync("browser-extension/content.js","utf8"),env);
   filter.events.input();
   assert.equal(accountButton.style.display,"block","Search finds matching accounts locally");
   const moreButton=panel.children.find(x=>x.tagName==="BUTTON" && x.textContent?.startsWith("More options"));
-  const advanced=panel.children.find(x=>x.tagName==="DIV" && x.style.display==="none");
+  const advanced=panel.children.find(x=>x.tagName==="DIV" && x.style.display==="none" &&
+    x.children?.some(child=>child.tagName==="BUTTON"));
   assert.ok(moreButton&&advanced,"secondary password actions remain collapsed by default");
   moreButton.events.click({stopPropagation(){}});
   assert.equal(advanced.style.display,"block","advanced actions open on explicit user request");
