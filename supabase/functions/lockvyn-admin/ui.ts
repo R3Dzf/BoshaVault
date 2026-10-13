@@ -73,7 +73,7 @@ The user chooses the new password through their own verified email.
 <script nonce="${n}">
 "use strict";
 const PUBLIC_KEY=${JSON.stringify(key)}, RECOVERY=${recovering};
-const base=location.origin;
+const base="https://ghmbcfqiomggoxgwghjs.supabase.co";
 let accessToken="", pendingFactor=null, challengeId="", page=1, accounts=[];
 const get=id=>document.getElementById(id);
 function alertText(message,bad=false){const el=get("alert");el.textContent=message;el.className=bad?"error":"success";}
@@ -90,7 +90,7 @@ async function authFetch(path,body,verb="POST",jwt=""){
   return data;
 }
 async function api(action,params){
-  const res=await fetch(location.pathname.replace(/\/$/,""),{method:"POST",cache:"no-store",
+  const res=await fetch(base+"/functions/v1/lockvyn-admin",{method:"POST",cache:"no-store",
     headers:{"Authorization":"Bearer "+accessToken,"Content-Type":"application/json"},
     body:JSON.stringify({action,...params})});
   const data=await res.json();
