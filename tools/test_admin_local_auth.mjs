@@ -269,6 +269,26 @@ assert.equal(afterWithdrawSnapshot.data.length,1,"Withdrawing inventory consent 
 const retainedDeviceSnapshot=await dataApi(deviceSnapshotPath,"GET",service,null,service);
 assert.equal(retainedDeviceSnapshot.status,200);
 assert.equal(retainedDeviceSnapshot.data.length,1,"Revocation does not delete encrypted data");
+// Phase 04: only bounded metadata from synthetic local identities is visible.
+await denied(owner.aal1,"AAL1 security feed",{action:"securityEvents"});
+await denied(strangerAAL2.aal2,"Nonadmin security feed",{action:"securityEvents"});
+const securityFeed=await admin(freshOwnerToken,{action:"securityEvents",limit:100});
+assert.equal(securityFeed.status,200,"AAL2 allowlisted owner can load security activity: "+JSON.stringify(securityFeed.data));
+assert(Array.isArray(securityFeed.data.events));
+const securityTypes=new Set(securityFeed.data.events.map(event=>event.eventType));
+assert(securityTypes.has("cloud_session_registered"),"Opt-in registration creates a security event");
+assert(securityTypes.has("cloud_session_revoked"),"Session revocation creates a security event");
+assert(securityTypes.has("admin_step_up_denied"),"Verified AAL1 denial creates a bounded security signal");
+assert(securityTypes.has("admin_allowlist_denied"),"Verified nonadmin denial creates a bounded security signal");
+assert(securityFeed.data.alerts.newCloudSessions24h>=2,"Both synthetic cloud sessions appear in 24-hour counts");
+assert(securityFeed.data.alerts.adminStepUpDenials15m>=1);
+assert(securityFeed.data.alerts.adminAllowlistDenials15m>=1);
+const securityJson=JSON.stringify(securityFeed.data);
+assert(!securityJson.includes("@example.invalid"),"Security feed must not expose account email");
+assert(!securityJson.includes(firstClaims.session_id),"Security feed must not expose Auth session identifiers");
+assert(!securityJson.includes("ip_address")&&!securityJson.includes("user_agent"),
+  "Security feed must not expose network metadata");
+console.log("PASS Phase 04 local GoTrue: AAL2 feed, denial signals, opt-in/revocation events and metadata privacy");
 console.log("PASS Phase 03 local GoTrue: opt-in, server heartbeat, admin inventory, fresh-TOTP session revocation, per-session RLS, and ciphertext retention");
 await denied(strangerAAL2.aal2,"Unapproved user recovery",{action:"recover",id:owner.id});
 await denied(owner.aal1,"Owner AAL1 recovery",{action:"recover",id:stranger.id});
