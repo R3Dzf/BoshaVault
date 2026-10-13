@@ -36,9 +36,11 @@ const vm = require("node:vm");
   const byToken = new Map();
   const caseId = "d0000000-0000-4000-8000-000000000004";
   let caseState="pending";
-  const calls = {list:0,adminLookup:0,mail:0,recoveryClaim:0,factors:0,updated:0,prepared:0,claimed:0,finished:0};
-  function token(user,aal="aal2",role="authenticated") {
-    const payload = Buffer.from(JSON.stringify({sub:user.id,aal,role,
+  const calls = {list:0,adminLookup:0,mail:0,recoveryClaim:0,factors:0,updated:0,prepared:0,claimed:0,finished:0,sessionCheck:0};
+  const revokedSessionIds=new Set();
+  let sessionLookupError=false;
+  function token(user,aal="aal2",role="authenticated",sessionId=user.id) {
+    const payload = Buffer.from(JSON.stringify({sub:user.id,aal,role,session_id:sessionId,
       amr:aal==="aal2"?[{method:"totp",timestamp:Math.floor(Date.now()/1000)}]:[]
     })).toString("base64url");
     const value = "aGVhZGVy."+payload+".c2lnbmF0dXJl";
@@ -97,6 +99,12 @@ const vm = require("node:vm");
       };
     },
     rpc:async(name,args)=>{
+      if(name==="lockvyn_auth_session_is_active"){
+        calls.sessionCheck++;
+        assert.equal(args.p_user_id,args.p_session_id);
+        if(sessionLookupError)return {data:null,error:{message:"synthetic lookup failure"}};
+        return {data:!revokedSessionIds.has(args.p_session_id),error:null};
+      }
       assert.equal(args.p_actor,ownerId);
       if(name==="lockvyn_admin_directory"){
         calls.list++;
@@ -199,6 +207,21 @@ const vm = require("node:vm");
   assert.equal(good.data.matching,3);
   assert.equal(good.data.stats.mfaEnabled,1);
   assert.equal(calls.list,1);
+  const beforeSessionDenial=calls.list;
+  revokedSessionIds.add(ownerId);
+  const revoked=await call({jwt:ownerAal2});
+  assert.equal(revoked.status,401,"revoked session cannot use privileged admin API");
+  assert.match(revoked.data.error,/session/i);
+  assert.equal(calls.list,beforeSessionDenial,"revoked JWT must not load admin data");
+  revokedSessionIds.delete(ownerId);
+  sessionLookupError=true;
+  const lookupFailure=await call({jwt:ownerAal2});
+  assert.equal(lookupFailure.status,503,"session checker failure must fail closed");
+  assert.equal(calls.list,beforeSessionDenial,"session lookup errors must not load admin data");
+  sessionLookupError=false;
+  const noSession=token(owner,"aal2","authenticated",null);
+  const missingSession=await call({jwt:noSession});
+  assert.equal(missingSession.status,401,"JWT without a valid session_id is rejected");
   const filtered=await call({jwt:ownerAal2,search:"OWNER"});
   assert.equal(filtered.status,200);
   assert.equal(filtered.data.matching,1);
