@@ -41,13 +41,13 @@
       "number": "04",
       "issue": 22,
       "name": "Security Center",
-      "status": "in_progress"
+      "status": "waived"
     },
     {
       "number": "05",
       "issue": 23,
       "name": "Encrypted sync & quotas",
-      "status": "queued"
+      "status": "in_progress"
     },
     {
       "number": "06",
