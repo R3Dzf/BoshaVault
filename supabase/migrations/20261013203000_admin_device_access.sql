@@ -33,6 +33,9 @@ begin
     raise exception 'Verified AAL2 is required to revoke cloud device access' using errcode = '42501';
   end if;
 
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(v_owner::text || ':' || v_actor_session::text, 69331)
+  );
   if (
     select count(*) >= 10
     from lockvyn_private.cloud_device_audit a
