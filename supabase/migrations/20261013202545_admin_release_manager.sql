@@ -142,27 +142,30 @@ begin
   end if;
 
   if p_platform='windows' then
-    if (p_candidate_tag is not null and
-        p_candidate_tag !~ '^windows-v(0|[1-9][0-9]{0,5})(\.(0|[1-9][0-9]{0,5})){2}$') or
-       p_minimum_version !~ '^(0|[1-9][0-9]{0,5})(\.(0|[1-9][0-9]{0,5})){2}$' or
-       (p_candidate_tag is not null and
-        string_to_array(p_minimum_version,'.')::integer[] >
-        string_to_array(regexp_replace(p_candidate_tag,'^windows-v',''),'.')::integer[])
+    if (p_candidate_tag is not null and p_candidate_tag !~ '^windows-v(0|[1-9][0-9]{0,5})(\.(0|[1-9][0-9]{0,5})){2}$') or
+       p_minimum_version !~ '^(0|[1-9][0-9]{0,5})(\.(0|[1-9][0-9]{0,5})){2}$'
     then
       raise exception 'Invalid Windows candidate or minimum version'
         using errcode='22023';
     end if;
-  else
-    if (p_candidate_tag is not null and
-        p_candidate_tag !~ '^android-v(0|[1-9][0-9]{0,5})(\.(0|[1-9][0-9]{0,5})){2}$') or
-       p_minimum_version !~ '^(0|[1-9][0-9]{0,9})$' or
-       case
-         when p_minimum_version ~ '^(0|[1-9][0-9]{0,9})$'
-           then p_minimum_version::numeric > 2147483647
-         else true
-       end
+    if p_candidate_tag is not null and
+       string_to_array(p_minimum_version,'.')::integer[] >
+       string_to_array(regexp_replace(p_candidate_tag,'^windows-v',''),'.')::integer[]
     then
-      raise exception 'Invalid Android candidate or minimum version'
+      raise exception 'Windows minimum version exceeds the selected candidate'
+        using errcode='22023';
+    end if;
+  else
+    if p_candidate_tag is not null and p_candidate_tag !~ '^android-v(0|[1-9][0-9]{0,5})(\.(0|[1-9][0-9]{0,5})){2}$' then
+      raise exception 'Invalid Android candidate tag'
+        using errcode='22023';
+    end if;
+    if p_minimum_version !~ '^(0|[1-9][0-9]{0,9})$' then
+      raise exception 'Invalid Android minimum version'
+        using errcode='22023';
+    end if;
+    if p_minimum_version::numeric > 2147483647 then
+      raise exception 'Android minimum version is out of range'
         using errcode='22023';
     end if;
   end if;
