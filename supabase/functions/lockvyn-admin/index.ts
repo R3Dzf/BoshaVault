@@ -326,6 +326,8 @@ Deno.serve(async (request) => {
       ?eligible.find(x=>x.tag===input.candidateTag)
       :eligible[0];
     if(!selected)return result({error:"The selected stable release is not published"},409);
+    if(selected.checks?.state!=="success"||!Number.isSafeInteger(selected.checks.total)||selected.checks.total<1)
+      return result({error:"Release CI checks must pass before a candidate can be selected"},409);
     if(input.platform==="windows"&&eligible[0]?.tag!==selected.tag)
       return result({error:"Windows updater follows the latest stable feed; older candidates are held"},409);
     const names=new Set((selected.assets||[]).map(x=>x.name));
@@ -333,10 +335,12 @@ Deno.serve(async (request) => {
       return result({error:"The Windows release is missing its installer or stable update feed"},409);
     if(input.platform==="android"){
       const manifest=selected.androidManifest;
+      const latestManifest=eligible[0]?.androidManifest;
       if(!names.has("Lockvyn-Android.apk")||!names.has("android-update.json")||
          !manifest||!Number.isSafeInteger(manifest.versionCode)||
+         !latestManifest||manifest.signerSha256!==latestManifest.signerSha256||
          Number(input.minimumVersion)>manifest.versionCode)
-        return result({error:"The Android release metadata or minimum version could not be verified"},409);
+        return result({error:"Android package, signer continuity, or minimum version could not be verified"},409);
     }
     if(input.platform==="windows"){
       const selectedVersion=selected.tag.slice("windows-v".length);
