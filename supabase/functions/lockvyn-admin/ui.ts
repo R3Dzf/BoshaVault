@@ -862,7 +862,7 @@ function renderSecurityEvents(data){
 }
 
 function renderReleaseCatalog(data){
-  window.releaseCatalog=data.releases;
+  window.releaseCatalog=data.releases;window.releasePolicies=data.policies;
   const rows=get("release-rows");rows.replaceChildren();
   for(const release of data.releases){
     const row=document.createElement("tr");
@@ -904,18 +904,36 @@ function renderReleaseCatalog(data){
       " · rollout "+(Number.isSafeInteger(p.rolloutPercent)?p.rolloutPercent:"—")+"%";
   }).join(" | ");
   populateReleaseCandidates(data.releases);
+  applyReleasePolicyFields(data.policies);
   get("save-release-policy").disabled=false;
+}
+function applyReleasePolicyFields(policies){
+  const platform=get("release-platform").value,p=policies?.[platform]||{};
+  get("release-minimum-label").firstChild.textContent=platform==="android"?"Minimum Android versionCode":"Minimum Windows version";
+  get("release-minimum").value=typeof p.minimumVersion==="string"?p.minimumVersion:(platform==="android"?"0":"0.0.0");
+  get("release-rollout").value=Number.isSafeInteger(p.rolloutPercent)?String(p.rolloutPercent):"100";
+  const candidate=p.candidateTag||"";
+  const select=get("release-candidate");
+  if([...select.options].some(x=>x.value===candidate))select.value=candidate;
+  get("release-confirm-tag").value="";
+  get("release-confirm-tag").placeholder=candidate||"LATEST";
 }
 function populateReleaseCandidates(releases){
   const platform=get("release-platform").value;
   const select=get("release-candidate"),selected=select.value;
   select.replaceChildren();
   const latest=document.createElement("option");latest.value="";latest.textContent="Latest stable feed";select.append(latest);
-  for(const release of releases.filter(x=>x.platform===platform)){
+  const platformReleases=releases.filter(x=>x.platform===platform);
+  const visible=platform==="windows"?platformReleases.slice(0,1):platformReleases;
+  for(const release of visible){
     const option=document.createElement("option");option.value=release.tag;
     option.textContent=release.tag+" · "+dateTime(release.publishedAt);select.append(option);
   }
   if([...select.options].some(x=>x.value===selected))select.value=selected;
+  else if(window.releasePolicies?.[platform]?.candidateTag)
+    select.value=window.releasePolicies[platform].candidateTag;
+  const tag=select.value;get("release-confirm-tag").value="";
+  get("release-confirm-tag").placeholder=tag||"LATEST";
 }
 async function loadReleaseManager(){
   const state=get("release-manager-state");state.textContent="Loading published release metadata and CI…";
@@ -933,9 +951,11 @@ async function loadReleaseManager(){
 get("refresh-releases").addEventListener("click",()=>{if(accessToken)loadReleaseManager()});
 get("release-platform").addEventListener("change",()=>{
   populateReleaseCandidates(window.releaseCatalog||[]);
-  const android=get("release-platform").value==="android";
-  get("release-minimum-label").firstChild.textContent=android?"Minimum Android versionCode":"Minimum Windows version";
-  get("release-minimum").value=android?"0":"0.0.0";
+  applyReleasePolicyFields(window.releasePolicies||{});
+});
+get("release-candidate").addEventListener("change",()=>{
+  const tag=get("release-candidate").value;
+  get("release-confirm-tag").value="";get("release-confirm-tag").placeholder=tag||"LATEST";
 });
 get("release-policy-form").addEventListener("submit",async e=>{
   e.preventDefault();alertText("");
