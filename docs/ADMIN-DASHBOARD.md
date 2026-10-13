@@ -34,5 +34,11 @@ The allowlist is empty by default. Do **not** use a public email comparison, a h
 ## Important limitation
 The vault master passphrase is not the cloud account password. Admins cannot reset or reveal it. The only honest recovery options are an unlocked trusted device or a user-held encrypted backup and its decryption credentials. Supabase service operators can see account metadata and ciphertext, not the plaintext vault.
 
+## Security Center
+- The admin dashboard shows a bounded 90-day feed of first-party cloud-session, support, recovery and verified-user admin access-denial events.
+- Event details are enumerated metadata with actor/subject UUIDs and server timestamps; password/OTP failures, emails, IP addresses, user agents, tokens and vault data are not copied into the feed.
+- The feed requires the same confirmed-user, AAL2, live-session and allowlist checks as other admin routes. The private SQL table is not directly exposed to client roles.
+- No customer-wide MFA enforcement or Supabase Auth provider rate-limit setting is changed by this feature. See [Phase 04 security-center rollout notes](ADMIN-PHASE-04.md) for the retention and rollback boundary.
+
 ## Browser HTML hosting
 Supabase Edge Functions serve HTML as text on their default project domain. The login page is served through a dedicated Cloudflare Worker (`infra/cloudflare/lockvyn-admin-ui.js`) that renders HTML with a strict nonce-based CSP. The browser signs in directly with Supabase Auth and sends only authorized admin API requests to the Edge Function from the explicitly allowed Cloudflare origin. No administrative service-role secret is shipped to the Worker or browser.
