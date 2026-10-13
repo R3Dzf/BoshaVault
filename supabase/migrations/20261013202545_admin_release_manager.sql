@@ -1,0 +1,2 @@
+-- Phase 06 Release Manager schema; generated with the Supabase CLI.
+-- Filled with the reviewed migration after the generated path is captured.
