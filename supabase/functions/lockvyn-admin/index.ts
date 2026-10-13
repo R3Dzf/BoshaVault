@@ -80,9 +80,9 @@ async function releaseChecks(tag){
     const checks=Array.isArray(data.check_runs)?data.check_runs.slice(0,30):[];
     const failed=checks.some(x=>["failure","cancelled","timed_out","action_required"].includes(x.conclusion));
     const pending=checks.some(x=>!x.completed_at);
-    const passed=checks.filter((x:any)=>["success","neutral","skipped"].includes(x.conclusion)).length;
+    const passed=checks.filter($1=>["success","neutral","skipped"].includes(x.conclusion)).length;
     return {state:failed?"failed":pending?"pending":checks.length?"success":"unknown",
-      passed,total:checks.length,checks:checks.slice(0,8).map((x:any)=>({
+      passed,total:checks.length,checks:checks.slice(0,8).map($1=>({
         name:String(x.name||"Check").slice(0,120),
         conclusion:typeof x.conclusion==="string"?x.conclusion:"pending",
       }))};
@@ -112,14 +112,14 @@ async function androidReleaseManifest(assetId,tag){
       minSdk:data.minSdk};
   }catch{return null;}
 }
-async function loadReleaseCatalog():Promise<unknown[]>{
+async function loadReleaseCatalog(){
   if(Date.now()-releaseCatalogCache.at<300000&&releaseCatalogCache.value.length)return releaseCatalogCache.value;
   const releases=await githubJson("releases?per_page=30",512*1024);
   if(!Array.isArray(releases))throw new Error("Invalid release catalog");
   const stable=releases.filter(r=>r&&!r.draft&&!r.prerelease&&
     typeof r.tag_name==="string"&&
     (validCandidateTag("windows",r.tag_name)||validCandidateTag("android",r.tag_name))).slice(0,12);
-  const output=await Promise.all(stable.map(async (r:any)=>{
+  const output=await Promise.all(stable.map(async $1=>{
     const tag=r.tag_name;
     const platform=validCandidateTag("windows",tag)?"windows":"android";
     const rawAssets=Array.isArray(r.assets)?r.assets.slice(0,40):[];
@@ -128,7 +128,7 @@ async function loadReleaseCatalog():Promise<unknown[]>{
         sha256:typeof a.digest==="string"&&/^sha256:[a-f0-9]{64}$/i.test(a.digest)
           ?a.digest.slice(7).toLowerCase():null}))
       .slice(0,24);
-    const manifestAsset=platform==="android"?rawAssets.find((a:any)=>a?.name==="android-update.json"):null;
+    const manifestAsset=platform==="android"?rawAssets.find($1=>a?.name==="android-update.json"):null;
     const [checks,manifest]=await Promise.all([
       releaseChecks(tag),
       manifestAsset?androidReleaseManifest(manifestAsset.id,tag):Promise.resolve(null),
@@ -150,7 +150,7 @@ async function currentReleasePolicies(){
   const pairs=await Promise.all(platforms.map(async platform=>{
     const {data,error}=await service.rpc("lockvyn_release_policy_public",{p_platform:platform});
     if(error||!data||typeof data!=="object")throw new Error("Release policy unavailable");
-    return [platform,data] as const;
+    return [platform,data];
   }));
   return Object.fromEntries(pairs);
 }
