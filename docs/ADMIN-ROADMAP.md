@@ -14,8 +14,8 @@
 | Phase | Area | Issue | State |
 | --- | --- | --- | --- |
 | 00 | Foundation & security gates | [#18](https://github.com/R3Dzf/BoshaVault/issues/18) | Completed |
-| 01 | Overview & account directory | [#19](https://github.com/R3Dzf/BoshaVault/issues/19) | In progress |
-| 02 | Account support actions | [#20](https://github.com/R3Dzf/BoshaVault/issues/20) | Queued |
+| 01 | Overview & account directory | [#19](https://github.com/R3Dzf/BoshaVault/issues/19) | Completed |
+| 02 | Account support actions | [#20](https://github.com/R3Dzf/BoshaVault/issues/20) | In progress |
 | 03 | Device inventory & access | [#21](https://github.com/R3Dzf/BoshaVault/issues/21) | Queued |
 | 04 | Security Center | [#22](https://github.com/R3Dzf/BoshaVault/issues/22) | Queued |
 | 05 | Encrypted sync & quotas | [#23](https://github.com/R3Dzf/BoshaVault/issues/23) | Queued |
