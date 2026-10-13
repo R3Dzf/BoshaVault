@@ -150,7 +150,10 @@ Deno.serve(async (request) => {
   }
   if (body.action === "supportPrepare" || body.action === "supportExecute") {
     const executing = body.action === "supportExecute";
-    if (!validSupportRequest(body) || (executing && !validCaseConfirmation(body))) {
+    if (!validSupportRequest(body) || (executing && !validCaseConfirmation(body)) ||
+        typeof body.id !== "string" || typeof body.kind !== "string" ||
+        typeof body.reason !== "string" ||
+        (executing && (typeof body.caseId !== "string" || typeof body.confirmEmail !== "string"))) {
       return result({ error: "Invalid support request" }, 400);
     }
     // Never permit a support action on the authenticated Owner, or on any
