@@ -78,7 +78,7 @@ final class AndroidUpdater {
         }
         boolean mandatory=installedVersion<minimumVersion;
         // The rollout bucket is sampled locally for this check; no device ID or usage data is sent.
-        if(!mandatory&&(rolloutPercent==0||java.security.ThreadLocalRandom.current().nextInt(100)>=rolloutPercent))return null;
+        if(!mandatory&&(rolloutPercent==0||java.util.concurrent.ThreadLocalRandom.current().nextInt(100)>=rolloutPercent))return null;
         best.requireUpgrade(c.getPackageName(),installedVersion,signer(current),Build.VERSION.SDK_INT);return best;
     }
     private HttpURLConnection open(String url)throws Exception{
