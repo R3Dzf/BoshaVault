@@ -80,9 +80,9 @@ async function releaseChecks(tag){
     const checks=Array.isArray(data.check_runs)?data.check_runs.slice(0,30):[];
     const failed=checks.some(x=>["failure","cancelled","timed_out","action_required"].includes(x.conclusion));
     const pending=checks.some(x=>!x.completed_at);
-    const passed=checks.filter($1=>["success","neutral","skipped"].includes(x.conclusion)).length;
+    const passed=checks.filter(x=>["success","neutral","skipped"].includes(x.conclusion)).length;
     return {state:failed?"failed":pending?"pending":checks.length?"success":"unknown",
-      passed,total:checks.length,checks:checks.slice(0,8).map($1=>({
+      passed,total:checks.length,checks:checks.slice(0,8).map(x=>({
         name:String(x.name||"Check").slice(0,120),
         conclusion:typeof x.conclusion==="string"?x.conclusion:"pending",
       }))};
