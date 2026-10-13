@@ -241,6 +241,9 @@ begin
       using errcode='BV002';
   end if;
 
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(v_owner::text||':'||v_session::text,50207)
+  );
   update lockvyn_private.cloud_device_registry
      set last_sync_attempt_at=clock_timestamp(),
          last_sync_outcome=p_outcome,
@@ -249,8 +252,13 @@ begin
          last_sync_at=case when p_outcome='success' then clock_timestamp() else last_sync_at end
    where owner_id=v_owner
      and auth_session_id=v_session
-     and revoked_at is null;
-  if not found then
+     and revoked_at is null
+     and (last_sync_attempt_at is null
+          or last_sync_attempt_at<statement_timestamp()-interval '1 minute');
+  if not found and not exists(
+    select 1 from lockvyn_private.cloud_device_registry
+    where owner_id=v_owner and auth_session_id=v_session and revoked_at is null
+  ) then
     raise exception 'This Auth session has no active opted-in sync record' using errcode='42501';
   end if;
   return true;
@@ -452,5 +460,46 @@ revoke all on function public.lockvyn_admin_set_cloud_sync_suspension(uuid,uuid,
   from public, anon, authenticated;
 grant execute on function public.lockvyn_admin_set_cloud_sync_suspension(uuid,uuid,text,boolean,uuid,boolean,text,text)
   to service_role;
+
+-- Mirror cloud-only sync controls into the existing 90-day Security Center feed.
+alter table lockvyn_private.lockvyn_admin_security_events
+  drop constraint lockvyn_admin_security_events_event_type_check,
+  drop constraint lockvyn_admin_security_events_detail_code_check;
+alter table lockvyn_private.lockvyn_admin_security_events
+  add constraint lockvyn_admin_security_events_event_type_check check (event_type in (
+    'account_recovery_requested','cloud_device_unregistered','cloud_session_registered',
+    'cloud_session_revoked','support_case_opened','support_action_completed',
+    'support_action_failed','support_review_pending','admin_step_up_denied',
+    'admin_allowlist_denied','admin_inactive_session','cloud_sync_suspended',
+    'cloud_sync_resumed'
+  )),
+  add constraint lockvyn_admin_security_events_detail_code_check
+    check (detail_code is null or detail_code in (
+      'recovery_requested','cloud_device_unregistered','suspend_24h','restore_login',
+      'session_review','mfa_review','deletion_review','support_review',
+      'suspected_compromise'
+    ));
+
+create or replace function lockvyn_private.capture_cloud_sync_admin_event()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $phase05_event$
+begin
+  perform lockvyn_private.write_admin_security_event(
+    new.actor_id,new.target_id,
+    case when new.event_type='sync_suspended'
+      then 'cloud_sync_suspended' else 'cloud_sync_resumed' end,
+    new.reason_code
+  );
+  return new;
+end;
+$phase05_event$;
+revoke all on function lockvyn_private.capture_cloud_sync_admin_event()
+  from public, anon, authenticated, service_role;
+create trigger lockvyn_capture_cloud_sync_security_event
+  after insert on lockvyn_private.cloud_sync_admin_audit
+  for each row execute function lockvyn_private.capture_cloud_sync_admin_event();
 
 commit;
