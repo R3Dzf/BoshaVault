@@ -25,6 +25,66 @@ public sealed class SupabaseSnapshotTransport(HttpClient http, Uri projectUrl,
     public sealed record RemoteEncryptedSnapshot(Guid DeviceSlot,byte[] Blob);
     public sealed record RemoteSnapshotMetadata(Guid DeviceSlot,string Digest);
 
+    private async Task<byte[]> InventoryRpcAsync(string function, object body, CancellationToken ct)
+    {
+        using var req = await MakeRequest(HttpMethod.Post, "rest/v1/rpc/" + function, ct);
+        req.Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
+        using var res = await http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+        if (!res.IsSuccessStatusCode) throw new VaultException("Cloud session inventory could not be updated.");
+        return await SupabaseCloudAccount.ReadBounded(res.Content, 8192, ct);
+    }
+
+    public async Task<Guid> RegisterCloudDeviceAsync(string platform, string osVersion,
+        string appVersion, string displayName, CancellationToken ct = default)
+    {
+        static bool Valid(string value, int max) =>
+            value.Length is > 0 && value.Length <= max && !value.Any(char.IsControl) && !string.IsNullOrWhiteSpace(value);
+        if (platform is not ("windows" or "android" or "macos" or "ios" or "linux" or "other") ||
+            !Valid(osVersion, 64) || !Valid(appVersion, 64) || !Valid(displayName, 80))
+            throw new VaultException("Invalid cloud session metadata.");
+        byte[] response = await InventoryRpcAsync("lockvyn_register_cloud_device", new
+        {
+            p_consent = true, p_platform = platform, p_os_version = osVersion,
+            p_app_version = appVersion, p_display_name = displayName, p_schema_version = 1
+        }, ct);
+        try
+        {
+            using var json = JsonDocument.Parse(response, new JsonDocumentOptions { MaxDepth = 2 });
+            if (json.RootElement.ValueKind != JsonValueKind.String ||
+                !json.RootElement.TryGetGuid(out Guid id) || id == Guid.Empty)
+                throw new VaultException("Cloud returned invalid session inventory metadata.");
+            return id;
+        }
+        catch (JsonException ex) { throw new VaultException("Cloud returned invalid session inventory metadata.", ex); }
+        finally { CryptographicOperations.ZeroMemory(response); }
+    }
+
+    public async Task RecordCloudDeviceSyncAsync(CancellationToken ct = default)
+    {
+        byte[] response = await InventoryRpcAsync("lockvyn_record_cloud_device_sync", new { }, ct);
+        try
+        {
+            using var json = JsonDocument.Parse(response, new JsonDocumentOptions { MaxDepth = 2 });
+            if (json.RootElement.ValueKind != JsonValueKind.True)
+                throw new VaultException("Cloud did not accept the session sync timestamp.");
+        }
+        catch (JsonException ex) { throw new VaultException("Cloud returned an invalid session sync response.", ex); }
+        finally { CryptographicOperations.ZeroMemory(response); }
+    }
+
+    public async Task UnregisterCloudDeviceAsync(CancellationToken ct = default)
+    {
+        byte[] response = await InventoryRpcAsync("lockvyn_unregister_cloud_device", new { }, ct);
+        try
+        {
+            using var json = JsonDocument.Parse(response, new JsonDocumentOptions { MaxDepth = 2 });
+            if (json.RootElement.ValueKind != JsonValueKind.True)
+                throw new VaultException("Cloud did not accept the session inventory withdrawal.");
+        }
+        catch (JsonException ex) { throw new VaultException("Cloud returned an invalid session inventory response.", ex); }
+        finally { CryptographicOperations.ZeroMemory(response); }
+    }
+
     public async Task<IReadOnlyList<RemoteSnapshotMetadata>> ListMetadataAsync(Guid vaultSlot, CancellationToken ct = default)
     {
         if (vaultSlot == Guid.Empty) throw new VaultException("Invalid cloud vault identifier.");

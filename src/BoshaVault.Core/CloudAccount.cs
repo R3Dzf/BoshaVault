@@ -24,7 +24,9 @@ public sealed class CloudProfile
     public string RecoveryKey { get; set; } = "";
     public string LastSyncUtc { get; set; } = "";
     public bool AutoSync { get; set; } = true;
-    public long KeyEpoch { get; set; }
+    public bool DeviceInventoryConsent { get; set; }
+    public string DeviceInventoryState { get; set; } = "";
+    public long KeyEpoch { get; set;}
     public string LastUploadedHash { get; set; } = "";
     public string LastOuterHash { get; set; } = "";
     public string DownloadedStamp { get; set; } = "";
@@ -35,7 +37,8 @@ public sealed class CloudProfile
         if (Email == null || RefreshToken == null || LastSyncUtc == null ||
             Version != 1 || OwnerId == Guid.Empty || VaultId != vaultId ||
             VaultSlot == Guid.Empty || DeviceSlot == Guid.Empty || Email.Length > 320 ||
-            RefreshToken.Length is < 10 or > 8192 || RefreshToken.Any(char.IsControl) || LastSyncUtc.Length > 50)
+            RefreshToken.Length is < 10 or > 8192 || RefreshToken.Any(char.IsControl) ||
+            LastSyncUtc.Length > 50 || DeviceInventoryState == null || DeviceInventoryState.Length > 64)
             throw new VaultException("Cloud settings do not match this vault. Connect again.");
         byte[] key = CloudSnapshotCodec.ParseRecoveryKey(RecoveryKey);
         CryptographicOperations.ZeroMemory(key);

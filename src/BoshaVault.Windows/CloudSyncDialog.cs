@@ -111,6 +111,49 @@ internal static class CloudSyncDialog
             var auto = new CheckBox { Content = "Sync automatically on this device", IsChecked = profile.AutoSync, Margin = new Thickness(0, 8, 0, 8) };
             auto.Click += (_, _) => { profile.AutoSync = auto.IsChecked == true; store.Save(profile); Status(profile.AutoSync ? "Automatic sync is on. Offline changes retry when connected." : "Automatic sync is paused on this device."); };
             d.Body.Children.Add(auto);
+            d.Label("Optional session list: when enabled, your cloud account shows this signed-in app session, self-reported Windows/software versions, and the last successful sync. It does not verify physical hardware. Remove it any time; cloud sync and offline vault data remain available.");
+            var inventory = new CheckBox {
+                Content = "Show this Windows app session in my cloud session list",
+                IsChecked = profile.DeviceInventoryConsent,
+                Margin = new Thickness(0, 4, 0, 8)
+            };
+            d.Body.Children.Add(inventory);
+            Action("Apply session visibility choice", async () =>
+            {
+                bool enabled = inventory.IsChecked == true;
+                if (enabled == profile.DeviceInventoryConsent)
+                { Status(enabled ? "This signed-in session is already opted in." : "This signed-in session is not listed."); return; }
+                string message = enabled
+                    ? "Show this signed-in Windows app session, its software versions, and server-recorded sync time in your cloud account's session list? This does not identify physical hardware."
+                    : "Remove this session's metadata from your cloud account list? Cloud sync and the offline vault remain available.";
+                if (MessageBox.Show(d, message, "Session visibility", MessageBoxButton.OKCancel) != MessageBoxResult.OK)
+                { inventory.IsChecked = profile.DeviceInventoryConsent; return; }
+                if (enabled)
+                {
+                    profile.DeviceInventoryConsent = true;
+                    profile.DeviceInventoryState = "pending";
+                    store.Save(profile);
+                    Status("Session visibility enabled. This app session appears after its next successful cloud sync.");
+                    return;
+                }
+                try
+                {
+                    var signedIn = await Refresh();
+                    var transport = new SupabaseSnapshotTransport(http, new Uri(CloudProject.Url),
+                        CloudProject.PublishableKey, _ => Task.FromResult(signedIn.AccessToken));
+                    await transport.UnregisterCloudDeviceAsync(cancellation.Token);
+                    EnsureCurrent();
+                    profile.DeviceInventoryConsent = false;
+                    profile.DeviceInventoryState = "";
+                    store.Save(profile);
+                    Status("Session metadata removed. Cloud sync and offline vault data remain available.");
+                }
+                catch
+                {
+                    inventory.IsChecked = true;
+                    throw;
+                }
+            }, inBody: true);
             Action("Sync now", async () =>
             {
                 var signedIn = await Refresh();
@@ -120,7 +163,12 @@ internal static class CloudSyncDialog
                     () => { EnsureCurrent(); return Task.FromResult(vault.ExportEncrypted()); },
                     store.ReadPending, store.WritePending, () => store.Save(profile), cancellation.Token);
                 EnsureCurrent();
-                Status($"Cloud is up to date. {result.Conflicts} conflict copies kept.");
+                string visibility = profile.DeviceInventoryConsent
+                    ? profile.DeviceInventoryState == "visible"
+                        ? " This app session is listed in your cloud account."
+                        : " Session listing will retry on the next successful sync."
+                    : "";
+                Status($"Cloud is up to date. {result.Conflicts} conflict copies kept.{visibility}");
             }, true, inBody: true);
             addDeviceButton = Action("Add new device · secure QR", async () =>
             {

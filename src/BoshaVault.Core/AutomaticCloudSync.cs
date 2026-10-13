@@ -94,6 +94,24 @@ public static class AutomaticCloudSync
                 }
                 finally { CryptographicOperations.ZeroMemory(key); CryptographicOperations.ZeroMemory(outer); }
             }
+            if (profile.DeviceInventoryConsent)
+            {
+                try
+                {
+                    string appVersion = typeof(CloudProject).Assembly.GetName().Version?.ToString() ?? "unknown";
+                    await transport.RegisterCloudDeviceAsync("windows", Environment.OSVersion.VersionString,
+                        appVersion, "Windows app session", ct);
+                    await transport.RecordCloudDeviceSyncAsync(ct);
+                    profile.DeviceInventoryState = "visible";
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex) when (ex is VaultException or System.Net.Http.HttpRequestException or System.IO.IOException)
+                {
+                    // Snapshot sync succeeded. Keep its result and retry this optional metadata update later.
+                    profile.DeviceInventoryState = "pending";
+                }
+                save();
+            }
             if (uploaded || downloaded || profile.LastSyncUtc.Length == 0 || !DateTimeOffset.TryParse(profile.LastSyncUtc, out var last) || DateTimeOffset.UtcNow - last > TimeSpan.FromMinutes(1)) { profile.LastSyncUtc = DateTimeOffset.UtcNow.ToString("O"); save(); }
             return new(uploaded, downloaded, conflicts, profile.DownloadedStamp != profile.MergedStamp);
         }

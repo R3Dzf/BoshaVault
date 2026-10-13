@@ -65,7 +65,18 @@ async function totpChallenge(user) {
   const aal2=verified.data.access_token;
   const body=JSON.parse(Buffer.from(aal2.split(".")[1],"base64url").toString("utf8"));
   assert.equal(body.aal,"aal2","Actual GoTrue needs to issue AAL2");
-  return {...user,aal2};
+  return {...user,aal2,totpSecret:secret,factorId:factor};
+}
+async function verifyExistingTotp(user,token){
+  const challenged=await invoke("/auth/v1/factors/"+encodeURIComponent(user.factorId)+"/challenge",
+    "POST",anon,token,{});
+  assert.equal(challenged.status,200,"Challenge existing synthetic factor");
+  const verified=await invoke("/auth/v1/factors/"+encodeURIComponent(user.factorId)+"/verify",
+    "POST",anon,token,{challenge_id:challenged.data.id,code:totp(user.totpSecret)});
+  assert.equal(verified.status,200,"Fresh TOTP verification: "+JSON.stringify(verified.data));
+  const claims=JSON.parse(Buffer.from(verified.data.access_token.split(".")[1],"base64url").toString("utf8"));
+  assert.equal(claims.aal,"aal2","Fresh factor must issue AAL2");
+  return verified.data.access_token;
 }
 function fromBase32(input) {
   const alphabet="ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
@@ -135,6 +146,9 @@ const strangerAAL2=await totpChallenge(stranger);
 const grant=await invoke("/rest/v1/lockvyn_admins","POST",service,service,
   {user_id:owner.id});
 assert([201,204].includes(grant.status),"Local allowlist grant failed: "+JSON.stringify(grant.data));
+const protectedGrant=await invoke("/rest/v1/lockvyn_admins","POST",service,service,
+  {user_id:pending.data.id});
+assert([201,204].includes(protectedGrant.status),"Synthetic protected admin grant failed");
 await denied(owner.aal1,"Owner without completing MFA");
 await denied(strangerAAL2.aal2,"Verified 2FA user without admin role");
 await denied(stranger.aal1,"Nonadmin AAL1");
@@ -176,6 +190,86 @@ const invalid=await admin(ownerAAL2.aal2,{
 assert.equal(invalid.status,400,"Reject unauthorized filter values");
 assert.equal(gotOwner.isSelf,true,"Admin owner shown as self");
 assert.equal(gotStranger.isSelf,false,"Nonadmin not labelled self");
+
+// Phase 03: opted-in device metadata and per-Auth-session cloud revocation.
+// Two separate local GoTrue sessions prove that revoking one does not block the other.
+const registrationPayload={
+  p_consent:true,p_platform:"windows",p_os_version:"11",p_app_version:"3.1.0",
+  p_display_name:"Synthetic laptop",p_schema_version:1,
+};
+const refusedConsent=await dataApi("rpc/lockvyn_register_cloud_device","POST",strangerAAL2.aal2,
+  {...registrationPayload,p_consent:false});
+assert([400,403].includes(refusedConsent.status),"Registry must require explicit opt-in");
+const registeredOne=await dataApi("rpc/lockvyn_register_cloud_device","POST",strangerAAL2.aal2,
+  registrationPayload);
+assert.equal(registeredOne.status,200,"Register first opted-in session: "+JSON.stringify(registeredOne.data));
+assert.match(registeredOne.data,/^[a-f0-9-]{36}$/i,"Registry returns an opaque record id");
+const firstClaims=JSON.parse(Buffer.from(strangerAAL2.aal2.split(".")[1],"base64url").toString("utf8"));
+assert.match(firstClaims.session_id,/^[a-f0-9-]{36}$/i);
+const syncHeartbeat=await dataApi("rpc/lockvyn_record_cloud_device_sync","POST",strangerAAL2.aal2,{});
+assert.equal(syncHeartbeat.status,200,"Successful cloud sync records a server timestamp");
+const secondSignIn=await invoke("/auth/v1/token?grant_type=password","POST",anon,null,
+  {email:stranger.email,password});
+assert.equal(secondSignIn.status,200,"Create a second synthetic Auth session");
+const secondAAL2=await verifyExistingTotp(strangerAAL2,secondSignIn.data.access_token);
+const registeredTwo=await dataApi("rpc/lockvyn_register_cloud_device","POST",secondAAL2,
+  {...registrationPayload,p_display_name:"Synthetic second laptop"});
+assert.equal(registeredTwo.status,200,"Register second independent Auth session");
+assert.notEqual(registeredOne.data,registeredTwo.data,"Separate Auth sessions have separate registry IDs");
+const deviceVaultSlot=randomUUID(),deviceSlot=randomUUID();
+const syntheticCipher=Buffer.alloc(102,0x5a).toString("base64");
+const deviceSnapshotPath="opaque_device_snapshots?select=owner_id,vault_slot&owner_id=eq."+
+  stranger.id+"&vault_slot=eq."+deviceVaultSlot;
+const deviceSnapshotBody={owner_id:stranger.id,vault_slot:deviceVaultSlot,device_slot:deviceSlot,
+  ciphertext_base64:syntheticCipher,
+  ciphertext_sha256:createHash("sha256").update(syntheticCipher).digest("hex")};
+const deviceSnapshot=await dataApi(deviceSnapshotPath,"POST",strangerAAL2.aal2,deviceSnapshotBody);
+assert.equal(deviceSnapshot.status,201,"Synthetic encrypted snapshot is accessible before revocation");
+const inventory=await admin(ownerAAL2.aal2,{action:"deviceList",id:stranger.id});
+assert.equal(inventory.status,200,"Allowlisted admin can list opted-in sessions: "+JSON.stringify(inventory.data));
+assert.equal(inventory.data.devices.length,2,"Only explicitly registered sessions appear");
+assert(inventory.data.devices.some(d=>d.device_id===registeredOne.data&&d.last_sync_at),
+  "Inventory includes session metadata and server-recorded last sync");
+assert(!JSON.stringify(inventory.data.devices).includes(firstClaims.session_id),
+  "Inventory never exposes Auth session identifiers");
+const selfInventory=await admin(ownerAAL2.aal2,{action:"deviceList",id:owner.id});
+assert.equal(selfInventory.status,403,"Administrator's own account is protected");
+const protectedInventory=await admin(ownerAAL2.aal2,{action:"deviceList",id:pending.data.id});
+assert.equal(protectedInventory.status,403,"Another administrator's inventory is denied");
+await denied(owner.aal1,"AAL1 device inventory",{action:"deviceList",id:stranger.id});
+const wrongDeviceEmail=await admin(ownerAAL2.aal2,{action:"deviceRevoke",id:stranger.id,
+  deviceId:registeredOne.data,confirmEmail:"wrong@example.invalid"});
+assert.equal(wrongDeviceEmail.status,409,"Typed target email is checked before revocation");
+const freshOwnerToken=await verifyExistingTotp(ownerAAL2,owner.aal1);
+const revokeOne=await admin(freshOwnerToken,{action:"deviceRevoke",id:stranger.id,
+  deviceId:registeredOne.data,confirmEmail:stranger.email});
+assert.equal(revokeOne.status,200,"Fresh AAL2 + TOTP admin revocation succeeds: "+JSON.stringify(revokeOne.data));
+assert.equal(revokeOne.data.revoked,true);
+const deviceAfter=await admin(freshOwnerToken,{action:"deviceList",id:stranger.id});
+assert.equal(deviceAfter.status,200);
+assert(deviceAfter.data.devices.find(d=>d.device_id===registeredOne.data)?.revoked_at,
+  "Revoked session remains visible in inventory");
+assert.equal(deviceAfter.data.devices.find(d=>d.device_id===registeredTwo.data)?.revoked_at,null,
+  "Revoking one session leaves the other active");
+const blockedOldSession=await dataApi(deviceSnapshotPath,"GET",strangerAAL2.aal2,null);
+assert.equal(blockedOldSession.status,200);
+assert.equal(blockedOldSession.data.length,0,"Revoked signed session can no longer read snapshots");
+const activeSecondSession=await dataApi(deviceSnapshotPath,"GET",secondAAL2,null);
+assert.equal(activeSecondSession.status,200);
+assert.equal(activeSecondSession.data.length,1,"Second session still reads the account's encrypted snapshot");
+const withdrewConsent=await dataApi("rpc/lockvyn_unregister_cloud_device","POST",secondAAL2,{});
+assert.equal(withdrewConsent.status,200,"Second session can withdraw its inventory consent");
+assert.equal(withdrewConsent.data,true);
+const afterWithdrawInventory=await admin(freshOwnerToken,{action:"deviceList",id:stranger.id});
+assert.equal(afterWithdrawInventory.status,200);
+assert.equal(afterWithdrawInventory.data.devices.length,1,"Withdrawing consent removes only that session's registry metadata");
+const afterWithdrawSnapshot=await dataApi(deviceSnapshotPath,"GET",secondAAL2,null);
+assert.equal(afterWithdrawSnapshot.status,200);
+assert.equal(afterWithdrawSnapshot.data.length,1,"Withdrawing inventory consent leaves cloud sync access intact");
+const retainedDeviceSnapshot=await dataApi(deviceSnapshotPath,"GET",service,null,service);
+assert.equal(retainedDeviceSnapshot.status,200);
+assert.equal(retainedDeviceSnapshot.data.length,1,"Revocation does not delete encrypted data");
+console.log("PASS Phase 03 local GoTrue: opt-in, server heartbeat, admin inventory, fresh-TOTP session revocation, per-session RLS, and ciphertext retention");
 await denied(strangerAAL2.aal2,"Unapproved user recovery",{action:"recover",id:owner.id});
 await denied(owner.aal1,"Owner AAL1 recovery",{action:"recover",id:stranger.id});
 // Phase 02: real free/local GoTrue and Postgres support action tests.
@@ -219,6 +313,21 @@ console.log("PASS real local GoTrue AAL1/AAL2 JWT verification, admin allowlist 
 console.log("PASS recovery rejected for nonadmin and AAL1; no recovery messages sent");
 
 
+const dashboardPage=await fetch(endpoint,{method:"GET",redirect:"manual"});
+assert.equal(dashboardPage.status,200,"Local admin dashboard HTML is served");
+assert.match(dashboardPage.headers.get("content-security-policy")||"",/script-src 'nonce-/);
+const dashboardHtml=await dashboardPage.text();
+for(const required of [
+  "Registered cloud sessions",
+  "Only sessions the user explicitly opted in appear here",
+  "self-reported; they do not prove a physical device",
+  "Fresh code from your own authenticator app",
+  "It does not erase offline vault data or invalidate the Auth refresh token",
+  "deviceRevoke",
+]){
+  assert(dashboardHtml.includes(required),"Admin session UI must include: "+required);
+}
+console.log("PASS local admin inventory UI includes opt-in disclosure, no-hardware-proof caveat, fresh-TOTP confirmation, and cloud-only impact");
 const securePage=await fetch(endpoint+"/security",{method:"GET",redirect:"manual"});
 assert.equal(securePage.status,200,"Isolated user-owned security page is available");
 assert.match(securePage.headers.get("content-security-policy")||"",/script-src 'nonce-/);
@@ -241,10 +350,10 @@ const oldClaims=JSON.parse(Buffer.from(oldAccessToken.split(".")[1],"base64url")
 assert.match(oldClaims.session_id,/^[a-f0-9-]{36}$/i,"JWT needs a session_id for revocation checks");
 const cipher=Buffer.alloc(102,0x5a).toString("base64");
 assert.equal(cipher.length,136,"synthetic ciphertext fixture meets minimum opaque length");
-const vaultSlot=randomUUID(),deviceSlot=randomUUID();
-const snapshotPath="opaque_device_snapshots?select=owner_id,vault_slot&owner_id=eq."+owner.id+"&vault_slot=eq."+vaultSlot;
+const logoutVaultSlot=randomUUID(),logoutDeviceSlot=randomUUID();
+const snapshotPath="opaque_device_snapshots?select=owner_id,vault_slot&owner_id=eq."+owner.id+"&vault_slot=eq."+logoutVaultSlot;
 const snapshotBody={
-  owner_id:owner.id,vault_slot:vaultSlot,device_slot:deviceSlot,
+  owner_id:owner.id,vault_slot:logoutVaultSlot,device_slot:logoutDeviceSlot,
   ciphertext_base64:cipher,ciphertext_sha256:createHash("sha256").update(cipher).digest("hex")
 };
 const savedSnapshot=await dataApi(snapshotPath,"POST",oldAccessToken,snapshotBody);
