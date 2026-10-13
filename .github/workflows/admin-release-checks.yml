@@ -18,6 +18,8 @@ jobs:
           python-version: '3.11'
       - name: Check security and release contracts
         run: python tools/test_admin_release.py
+      - name: Check verified admin AAL2 and allowlist decisions
+        run: node tools/test-admin-access.cjs
       - name: Verify admin roadmap order
         run: python tools/test_admin_phases.py
       - name: Verify unauthorized admin requests are rejected
