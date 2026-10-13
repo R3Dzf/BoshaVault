@@ -50,7 +50,7 @@ async function recordSecuritySignal(actorId: string, signal: string): Promise<vo
 
 
 
-function publicPolicyResponse(data: unknown, status=200): Response {
+function publicPolicyResponse(data,status=200) {
   return new Response(JSON.stringify(data), {status, headers: {
     "Content-Type":"application/json; charset=utf-8",
     "Cache-Control":"public, max-age=30, stale-while-revalidate=30",
@@ -61,8 +61,8 @@ function publicPolicyResponse(data: unknown, status=200): Response {
   }});
 }
 
-let releaseCatalogCache: { at:number; value:unknown[] } = {at:0,value:[]};
-async function githubJson(path:string, limit=512*1024): Promise<any> {
+let releaseCatalogCache = {at:0,value:[]};
+async function githubJson(path,limit=512*1024) {
   const response=await fetch("https://api.github.com/repos/R3Dzf/BoshaVault/"+path,{
     headers:{Accept:"application/vnd.github+json","User-Agent":"Lockvyn-Release-Manager"},
     signal:AbortSignal.timeout(8000),
@@ -74,12 +74,12 @@ async function githubJson(path:string, limit=512*1024): Promise<any> {
   if(body.length>limit)throw new Error("GitHub response too large");
   return JSON.parse(body);
 }
-async function releaseChecks(tag:string):Promise<Record<string,unknown>>{
+async function releaseChecks(tag){
   try{
     const data=await githubJson("commits/"+encodeURIComponent(tag)+"/check-runs?per_page=30",128*1024);
     const checks=Array.isArray(data.check_runs)?data.check_runs.slice(0,30):[];
-    const failed=checks.some((x:any)=>["failure","cancelled","timed_out","action_required"].includes(x.conclusion));
-    const pending=checks.some((x:any)=>!x.completed_at);
+    const failed=checks.some(x=>["failure","cancelled","timed_out","action_required"].includes(x.conclusion));
+    const pending=checks.some(x=>!x.completed_at);
     const passed=checks.filter((x:any)=>["success","neutral","skipped"].includes(x.conclusion)).length;
     return {state:failed?"failed":pending?"pending":checks.length?"success":"unknown",
       passed,total:checks.length,checks:checks.slice(0,8).map((x:any)=>({
@@ -88,7 +88,7 @@ async function releaseChecks(tag:string):Promise<Record<string,unknown>>{
       }))};
   }catch{return {state:"unknown",passed:0,total:0,checks:[]};}
 }
-async function androidReleaseManifest(assetId:unknown,tag:string):Promise<Record<string,unknown>|null>{
+async function androidReleaseManifest(assetId,tag){
   if(typeof assetId!=="number"||!Number.isSafeInteger(assetId)||assetId<=0)return null;
   try{
     const response=await fetch("https://api.github.com/repos/R3Dzf/BoshaVault/releases/assets/"+assetId,{
@@ -116,15 +116,15 @@ async function loadReleaseCatalog():Promise<unknown[]>{
   if(Date.now()-releaseCatalogCache.at<300000&&releaseCatalogCache.value.length)return releaseCatalogCache.value;
   const releases=await githubJson("releases?per_page=30",512*1024);
   if(!Array.isArray(releases))throw new Error("Invalid release catalog");
-  const stable=releases.filter((r:any)=>r&&!r.draft&&!r.prerelease&&
+  const stable=releases.filter(r=>r&&!r.draft&&!r.prerelease&&
     typeof r.tag_name==="string"&&
     (validCandidateTag("windows",r.tag_name)||validCandidateTag("android",r.tag_name))).slice(0,12);
   const output=await Promise.all(stable.map(async (r:any)=>{
-    const tag=r.tag_name as string;
+    const tag=r.tag_name;
     const platform=validCandidateTag("windows",tag)?"windows":"android";
     const rawAssets=Array.isArray(r.assets)?r.assets.slice(0,40):[];
-    const assets=rawAssets.filter((a:any)=>a&&typeof a.name==="string"&&a.name.length<=160)
-      .map((a:any)=>({name:a.name,size:Number.isSafeInteger(a.size)?a.size:null,
+    const assets=rawAssets.filter(a=>a&&typeof a.name==="string"&&a.name.length<=160)
+      .map(a=>({name:a.name,size:Number.isSafeInteger(a.size)?a.size:null,
         sha256:typeof a.digest==="string"&&/^sha256:[a-f0-9]{64}$/i.test(a.digest)
           ?a.digest.slice(7).toLowerCase():null}))
       .slice(0,24);
@@ -145,8 +145,8 @@ async function loadReleaseCatalog():Promise<unknown[]>{
   releaseCatalogCache={at:Date.now(),value:output};
   return output;
 }
-async function currentReleasePolicies():Promise<Record<string,unknown>>{
-  const platforms=["windows","android"] as const;
+async function currentReleasePolicies(){
+  const platforms=["windows","android"];
   const pairs=await Promise.all(platforms.map(async platform=>{
     const {data,error}=await service.rpc("lockvyn_release_policy_public",{p_platform:platform});
     if(error||!data||typeof data!=="object")throw new Error("Release policy unavailable");
@@ -297,9 +297,11 @@ Deno.serve(async (request) => {
     }
   }
   if (body.action === "releasePolicySet") {
-    const input={platform:body.platform,candidateTag:body.candidateTag??null,
-      minimumVersion:body.minimumVersion,rolloutPercent:body.rolloutPercent,
-      reasonCode:body.reasonCode};
+    const input={platform:typeof body.platform==="string"?body.platform:"",
+      candidateTag:typeof body.candidateTag==="string"?body.candidateTag:null,
+      minimumVersion:typeof body.minimumVersion==="string"?body.minimumVersion:"",
+      rolloutPercent:typeof body.rolloutPercent==="number"?body.rolloutPercent:Number.NaN,
+      reasonCode:typeof body.reasonCode==="string"?body.reasonCode:""};
     const invalid=validateReleasePolicy(input);
     const confirmation=input.candidateTag??"LATEST";
     if(invalid||body.confirmTag!==confirmation)
@@ -309,7 +311,7 @@ Deno.serve(async (request) => {
     let catalog:unknown[];
     try{catalog=await loadReleaseCatalog();}
     catch{return result({error:"Unable to verify the published release. Retry later."},502);}
-    const candidates=catalog as Array<Record<string,any>>;
+    const candidates=catalog;
     const eligible=candidates.filter(x=>x.platform===input.platform);
     const selected=input.candidateTag
       ?eligible.find(x=>x.tag===input.candidateTag)
@@ -321,7 +323,7 @@ Deno.serve(async (request) => {
     if(input.platform==="android"){
       const manifest=selected.androidManifest;
       if(!names.has("Lockvyn-Android.apk")||!names.has("android-update.json")||
-         !manifest||String(manifest.versionCode)!==String(manifest.versionCode)||
+         !manifest||!Number.isSafeInteger(manifest.versionCode)||
          Number(input.minimumVersion)>manifest.versionCode)
         return result({error:"The Android release metadata or minimum version could not be verified"},409);
     }
