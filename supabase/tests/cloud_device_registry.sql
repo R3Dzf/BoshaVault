@@ -82,9 +82,34 @@ end $$;
 insert into public.opaque_device_snapshots(owner_id,vault_slot,device_slot,ciphertext_base64,ciphertext_sha256)
 values ('00000000-0000-4000-8000-000000000d02','20000000-0000-4000-8000-000000000d02','30000000-0000-4000-8000-000000000d02',repeat('B',136),repeat('1',64));
 
--- The owner's AAL2 session revokes the selected Auth session and creates one audit record.
+-- The server caps revocation at 10 actions per minute per actor Auth session.
+reset role;
+insert into lockvyn_private.cloud_device_audit(owner_id,device_id,actor_session_id,target_session_id,action)
+select '00000000-0000-4000-8000-000000000d01',
+       current_setting('lockvyn.test.device_target')::uuid,
+       '10000000-0000-4000-8000-000000000d02',
+       ('50000000-0000-4000-8000-' || lpad(g::text,12,'0'))::uuid,
+       'cloud_session_revoked'
+from generate_series(1,10) as g;
+set local role authenticated;
 select set_config('request.jwt.claims','{"sub":"00000000-0000-4000-8000-000000000d01","role":"authenticated","aal":"aal2","session_id":"10000000-0000-4000-8000-000000000d02"}',true);
-do $$ begin
+do $ begin
+  begin
+    perform public.lockvyn_revoke_cloud_device(current_setting('lockvyn.test.device_target')::uuid);
+    raise exception 'Revocation rate limit was not enforced';
+  exception when sqlstate '54000' then null;
+  end;
+end $;
+reset role;
+delete from lockvyn_private.cloud_device_audit
+where owner_id='00000000-0000-4000-8000-000000000d01'
+  and actor_session_id='10000000-0000-4000-8000-000000000d02'
+  and device_id=current_setting('lockvyn.test.device_target')::uuid
+  and action='cloud_session_revoked';
+set local role authenticated;
+select set_config('request.jwt.claims','{"sub":"00000000-0000-4000-8000-000000000d01","role":"authenticated","aal":"aal2","session_id":"10000000-0000-4000-8000-000000000d02"}',true);
+-- The owner's AAL2 session revokes the selected Auth session and creates one audit record.
+do $ begin
   if not public.lockvyn_revoke_cloud_device(current_setting('lockvyn.test.device_target')::uuid) then
     raise exception 'Owner AAL2 revocation failed';
   end if;
@@ -130,6 +155,16 @@ do $$ declare n integer; begin
     insert into public.device_pairing_sessions(session_id,owner_id,initiator_public_key)
     values ('40000000-0000-4000-8000-000000000d01','00000000-0000-4000-8000-000000000d01',repeat('A',120));
     raise exception 'Revoked session could create pairing data';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    perform public.lockvyn_register_cloud_device(true,'windows','11','3.1.0',null,1::smallint);
+    raise exception 'Revoked Auth session registered again';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    perform public.lockvyn_record_cloud_device_sync();
+    raise exception 'Revoked Auth session recorded a sync heartbeat';
   exception when insufficient_privilege then null;
   end;
   begin
