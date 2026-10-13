@@ -50,6 +50,7 @@ export function shouldOfferRelease({platform, currentVersion, availableVersion, 
       !Number.isSafeInteger(sample) || sample < 0 || sample > 99) return false;
   if (candidateTag && candidateTag !== availableTag) return false;
   const cmp = compareReleaseVersions(platform, availableVersion, currentVersion);
+  // Never offer a downgrade, even during rollback or a forced minimum-version update.
   if (cmp === null || cmp <= 0) return false;
   const belowFloor = compareReleaseVersions(platform, currentVersion, minimumVersion) < 0;
   return belowFloor || sample < rolloutPercent;
