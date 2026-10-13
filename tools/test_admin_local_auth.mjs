@@ -252,6 +252,10 @@ assert.equal(savedSnapshot.status,201,"live owner session can store opaque encry
 const snapshotBefore=await dataApi(snapshotPath,"GET",oldAccessToken,null);
 assert.equal(snapshotBefore.status,200);
 assert.equal(snapshotBefore.data.length,1,"owner can read their own snapshot before logout");
+const directSessionProbe=await dataApi("rpc/lockvyn_auth_session_is_active","POST",oldAccessToken,{
+  p_user_id:owner.id,p_session_id:oldClaims.session_id
+});
+assert.notEqual(directSessionProbe.status,200,"authenticated users cannot call the service-only session checker");
 const pairingId=randomUUID();
 const pairingPath="device_pairing_sessions?select=session_id,state&session_id=eq."+pairingId;
 const pairingBody={session_id:pairingId,owner_id:owner.id,initiator_public_key:"A".repeat(120)};
