@@ -506,7 +506,7 @@ public final class MainActivity extends Activity {
                             ?"This signed-in app session will appear after its next successful cloud sync."
                             :"Session metadata removed. Cloud sync and offline vault data remain available.");
                         if(enabled)nextCloudCheck=0;
-                    }))))
+                    })))
                     .show();
             });
             b.addView(Ui.button(this,"Sync now",true,()->cloudRefresh(client,profile,store,status,signedIn->{int[] conflicts={0};cloudTask(status,()->conflicts[0]=client.sync(engine,profile,store,signedIn),()->{String listing=profile.optBoolean("deviceInventoryConsent",false)
