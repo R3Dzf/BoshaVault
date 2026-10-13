@@ -1,0 +1,66 @@
+name: Local Supabase Auth staging
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: free-admin-auth-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  staging:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Prepare disposable local Supabase configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f supabase/config.toml ]; then
+            supabase init --force
+          fi
+      - name: Start local self-hosted Supabase Auth (no cloud project)
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase start
+          supabase status -o json > "$RUNNER_TEMP/local-supabase.json"
+          node -e 'const x=require(process.argv[1]);if(!x.API_URL?.startsWith("http://127.0.0.1:"))process.exit(1)' "$RUNNER_TEMP/local-supabase.json"
+      - name: Apply admin-only schema to ephemeral database
+        shell: bash
+        run: |
+          set -euo pipefail
+          container="$(docker ps --filter name=supabase_db_ --format '{{.ID}}' | head -n 1)"
+          if [ -z "$container" ]; then echo 'No local Postgres container'; exit 1; fi
+          docker exec -i "$container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 < supabase/migrations/20261013123000_admin_console.sql
+      - name: Start real local Edge Function
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase functions serve lockvyn-admin --no-verify-jwt > "$RUNNER_TEMP/local-edge.log" 2>&1 &
+          echo "$!" > "$RUNNER_TEMP/local-edge.pid"
+          for n in $(seq 1 50); do
+            status="$(curl --max-time 2 --silent --output /dev/null --write-out '%{http_code}' 'http://127.0.0.1:54321/functions/v1/lockvyn-admin' || true)"
+            if [ "$status" = "200" ]; then echo "Local function ready"; exit 0; fi
+            sleep 2
+          done
+          echo 'Local function did not start'
+          sed -E 's/(Bearer |service_role[ =:]+)[^ ]+/\1[REDACTED]/g' "$RUNNER_TEMP/local-edge.log" | tail -n 60
+          exit 1
+      - name: Test real user + verified MFA access against local GoTrue
+        shell: bash
+        run: node tools/test_admin_local_auth.mjs "$RUNNER_TEMP/local-supabase.json"
+      - name: Tear down free local containers
+        if: always()
+        shell: bash
+        run: |
+          if [ -f "$RUNNER_TEMP/local-edge.pid" ]; then
+            kill "$(cat "$RUNNER_TEMP/local-edge.pid")" || true
+          fi
+          supabase stop --no-backup || true
