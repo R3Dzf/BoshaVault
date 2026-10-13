@@ -157,6 +157,15 @@ async function currentReleasePolicies(){
 
 Deno.serve(async (request) => {
   const url = new URL(request.url);
+  if(request.method==="OPTIONS"&&url.pathname.endsWith("/lockvyn-admin/release-policy")){
+    return new Response(null,{status:204,headers:{
+      "Access-Control-Allow-Origin":"*",
+      "Access-Control-Allow-Methods":"GET, OPTIONS",
+      "Access-Control-Allow-Headers":"apikey, content-type",
+      "Access-Control-Max-Age":"600",
+      "Cache-Control":"public, max-age=600",
+    }});
+  }
   if (request.method === "GET" && url.pathname.endsWith("/lockvyn-admin/release-policy")) {
     const platform=url.searchParams.get("platform");
     if(platform!=="windows"&&platform!=="android")
@@ -317,6 +326,8 @@ Deno.serve(async (request) => {
       ?eligible.find(x=>x.tag===input.candidateTag)
       :eligible[0];
     if(!selected)return result({error:"The selected stable release is not published"},409);
+    if(input.platform==="windows"&&eligible[0]?.tag!==selected.tag)
+      return result({error:"Windows updater follows the latest stable feed; older candidates are held"},409);
     const names=new Set((selected.assets||[]).map(x=>x.name));
     if(input.platform==="windows"&&(!names.has("Lockvyn-win-Setup.exe")||!names.has("releases.win.json")))
       return result({error:"The Windows release is missing its installer or stable update feed"},409);
