@@ -118,6 +118,21 @@ Deno.serve(async (request) => {
   } catch { return result({ error: "Unauthorized" }, 401); }
   const denied = verifiedUserGate(verified.user, claims);
   if (denied) return result(denied.body, denied.status);
+  // Supabase refresh-token revocation does not invalidate an already-issued
+  // JWT by itself. Check the Auth session row before any privileged action.
+  const sessionId = claims.session_id;
+  if (typeof sessionId !== "string" ||
+      !/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(sessionId)) {
+    return result({ error: "Unauthorized" }, 401);
+  }
+  const { data: sessionActive, error: sessionError } = await service.rpc(
+    "lockvyn_auth_session_is_active",
+    { p_user_id: verified.user.id, p_session_id: sessionId },
+  );
+  if (sessionError || typeof sessionActive !== "boolean") {
+    return result({ error: "Unable to validate active session" }, 503);
+  }
+  if (!sessionActive) return result({ error: "Session is no longer active" }, 401);
   const { data: admin, error: permissionError } = await service
     .from("lockvyn_admins").select("user_id").eq("user_id", verified.user.id).maybeSingle();
   if (permissionError) return result({ error: "Administration is not configured" }, 503);

@@ -2,7 +2,7 @@
 // Real Supabase Auth + deployed-function contract, against a disposable LOCAL stack.
 // No production projects, real customer records, email sends or paid infrastructure.
 import { readFileSync } from "node:fs";
-import { createHmac, randomUUID } from "node:crypto";
+import { createHmac, createHash, randomUUID } from "node:crypto";
 import assert from "node:assert/strict";
 
 const status = JSON.parse(readFileSync(process.argv[2], "utf8"));
@@ -97,6 +97,22 @@ async function admin(token,body,origin=root) {
   let data;
   try{data=await r.json()}catch{data={error:"No JSON"}}
   return {status:r.status,data};
+}
+async function dataApi(path,method,token,body,apiKey=anon){
+  const response=await fetch(base+"/rest/v1/"+path,{
+    method,
+    headers:{
+      apikey:apiKey,Authorization:"Bearer "+token,
+      ...(body?{"Content-Type":"application/json"}:{}),
+      Prefer:"return=representation",
+    },
+    body:body?JSON.stringify(body):undefined,
+    redirect:"manual",
+  });
+  const raw=await response.text();
+  let data=null;
+  if(raw){try{data=JSON.parse(raw)}catch{data={error:raw.slice(0,500)}}}
+  return {status:response.status,data};
 }
 async function denied(token,label,body={action:"list",page:1},origin=root){
   const a=await admin(token,body,origin);
@@ -220,7 +236,35 @@ const alternate2=await invoke("/auth/v1/token?grant_type=password","POST",anon,n
 assert.equal(alternate1.status,200,"Synthetic login 1");
 assert.equal(alternate2.status,200,"Synthetic login 2");
 assert(alternate1.data.refresh_token && alternate2.data.refresh_token);
-const revoked=await invoke("/auth/v1/logout?scope=global","POST",anon,ownerAAL2.aal2,null);
+const oldAccessToken=ownerAAL2.aal2;
+const oldClaims=JSON.parse(Buffer.from(oldAccessToken.split(".")[1],"base64url").toString("utf8"));
+assert.match(oldClaims.session_id,/^[a-f0-9-]{36}$/i,"JWT needs a session_id for revocation checks");
+const cipher=Buffer.alloc(102,0x5a).toString("base64");
+assert.equal(cipher.length,136,"synthetic ciphertext fixture meets minimum opaque length");
+const vaultSlot=randomUUID(),deviceSlot=randomUUID();
+const snapshotPath="opaque_device_snapshots?select=owner_id,vault_slot&owner_id=eq."+owner.id+"&vault_slot=eq."+vaultSlot;
+const snapshotBody={
+  owner_id:owner.id,vault_slot:vaultSlot,device_slot:deviceSlot,
+  ciphertext_base64:cipher,ciphertext_sha256:createHash("sha256").update(cipher).digest("hex")
+};
+const savedSnapshot=await dataApi(snapshotPath,"POST",oldAccessToken,snapshotBody);
+assert.equal(savedSnapshot.status,201,"live owner session can store opaque encrypted sync fixture: "+JSON.stringify(savedSnapshot.data));
+const snapshotBefore=await dataApi(snapshotPath,"GET",oldAccessToken,null);
+assert.equal(snapshotBefore.status,200);
+assert.equal(snapshotBefore.data.length,1,"owner can read their own snapshot before logout");
+const directSessionProbe=await dataApi("rpc/lockvyn_auth_session_is_active","POST",oldAccessToken,{
+  p_user_id:owner.id,p_session_id:oldClaims.session_id
+});
+assert.notEqual(directSessionProbe.status,200,"authenticated users cannot call the service-only session checker");
+const pairingId=randomUUID();
+const pairingPath="device_pairing_sessions?select=session_id,state&session_id=eq."+pairingId;
+const pairingBody={session_id:pairingId,owner_id:owner.id,initiator_public_key:"A".repeat(120)};
+const savedPairing=await dataApi(pairingPath,"POST",oldAccessToken,pairingBody);
+assert.equal(savedPairing.status,201,"live owner session can create ephemeral pairing row: "+JSON.stringify(savedPairing.data));
+const pairingBefore=await dataApi(pairingPath,"GET",oldAccessToken,null);
+assert.equal(pairingBefore.status,200);
+assert.equal(pairingBefore.data.length,1,"owner can read their own pairing row before logout");
+const revoked=await invoke("/auth/v1/logout?scope=global","POST",anon,oldAccessToken,null);
 assert([200,204].includes(revoked.status),"Local GoTrue global logout must succeed");
 for(const oldRefresh of [alternate1.data.refresh_token,alternate2.data.refresh_token]){
   const attempted=await invoke("/auth/v1/token?grant_type=refresh_token","POST",anon,null,
@@ -228,4 +272,27 @@ for(const oldRefresh of [alternate1.data.refresh_token,alternate2.data.refresh_t
   assert([400,401,403].includes(attempted.status),
     "Previously active session refresh must fail after global logout");
 }
+const staleAdmin=await admin(oldAccessToken,{action:"list",page:1});
+assert([401,403].includes(staleAdmin.status),"global logout blocks stale access JWTs from admin operations");
+assert.equal(staleAdmin.data.users,undefined,"revoked admin JWT must not list users");
+const snapshotAfter=await dataApi(snapshotPath,"GET",oldAccessToken,null);
+assert.equal(snapshotAfter.status,200,"signed-but-revoked JWT remains parseable by PostgREST");
+assert.equal(snapshotAfter.data.length,0,"revoked access JWT cannot read encrypted cloud snapshots");
+const pairingAfter=await dataApi(pairingPath,"GET",oldAccessToken,null);
+assert.equal(pairingAfter.status,200);
+assert.equal(pairingAfter.data.length,0,"revoked access JWT cannot read device-pairing data");
+const blockedInsert=await dataApi("opaque_device_snapshots?select=vault_slot","POST",oldAccessToken,{
+  owner_id:owner.id,vault_slot:randomUUID(),device_slot:randomUUID(),
+  ciphertext_base64:cipher,ciphertext_sha256:createHash("sha256").update(cipher).digest("hex")
+});
+assert.equal(blockedInsert.status,403,"revoked access JWT cannot insert cloud snapshots");
+const retainedSnapshot=await dataApi(snapshotPath,"GET",service,null,service);
+assert.equal(retainedSnapshot.status,200);
+assert.equal(retainedSnapshot.data.length,1,"revocation blocks access without deleting encrypted data");
+const retainedPairing=await dataApi(pairingPath,"GET",service,null,service);
+assert.equal(retainedPairing.status,200);
+assert.equal(retainedPairing.data.length,1,"revocation does not mutate pairing data");
+await dataApi(snapshotPath,"DELETE",service,null,service);
+await dataApi(pairingPath,"DELETE",service,null,service);
+console.log("PASS global logout blocks stale access JWTs from admin, encrypted snapshot, and device-pairing operations while preserving data");
 console.log("PASS real local GoTrue global logout revokes refresh across devices (JWT expiry caveat retained)");
