@@ -9,6 +9,7 @@ const vm = require("node:vm");
 (async () => {
   const file = path.join(__dirname,"../supabase/functions/lockvyn-admin/index.ts");
   const authFile = await import("../supabase/functions/lockvyn-admin/access.mjs");
+  const supportPolicy=await import("../supabase/functions/lockvyn-admin/support.mjs");
   let source = readFileSync(file,"utf8");
   // The single TS-only type annotation does not affect runtime semantics.
   source = source.replace(/^import .*;\s*$/gm,"")
@@ -33,9 +34,13 @@ const vm = require("node:vm");
     [targetId,{id:targetId,email:"target@example.invalid",email_confirmed_at:"2026-01-01T00:00:00Z"}],
   ]);
   const byToken = new Map();
-  const calls = {list:0,adminLookup:0,mail:0,recoveryClaim:0,factors:0};
+  const caseId = "d0000000-0000-4000-8000-000000000004";
+  let caseState="pending";
+  const calls = {list:0,adminLookup:0,mail:0,recoveryClaim:0,factors:0,updated:0,prepared:0,claimed:0,finished:0};
   function token(user,aal="aal2",role="authenticated") {
-    const payload = Buffer.from(JSON.stringify({sub:user.id,aal,role})).toString("base64url");
+    const payload = Buffer.from(JSON.stringify({sub:user.id,aal,role,
+      amr:aal==="aal2"?[{method:"totp",timestamp:Math.floor(Date.now()/1000)}]:[]
+    })).toString("base64url");
     const value = "aGVhZGVy."+payload+".c2lnbmF0dXJl";
     byToken.set(value,user);
     return value;
@@ -61,6 +66,10 @@ const vm = require("node:vm");
             calls.factors++;
             return {data:{factors:userId===ownerId?[{status:"verified"}]:[]},error:null};
           }
+        },
+        updateUserById:async (id,options)=>{
+          assert.equal(id,targetId);assert.deepEqual(options,{ban_duration:"24h"});
+          calls.updated++;return {data:{},error:null};
         },
         getUserById:async id=>{
           calls.adminLookup++;
@@ -105,6 +114,19 @@ const vm = require("node:vm");
         return {data:{page:args.p_page,perPage:30,total:full.length,matching:rows.length,
           stats:{verified:3,mfaEnabled:1,active30Days:1},users:rows},error:null};
       }
+      if(name==="lockvyn_admin_support_prepare"){
+        calls.prepared++;return {data:caseId,error:null};
+      }
+      if(name==="lockvyn_admin_support_claim"){
+        calls.claimed++;
+        if(caseState!=="pending"||args.p_email!=="target@example.invalid")return {data:false,error:null};
+        caseState="running";return {data:true,error:null};
+      }
+      if(name==="lockvyn_admin_support_finish"){
+        calls.finished++;assert.equal(caseState,"running");caseState=args.p_status;
+        return {data:true,error:null};
+      }
+      if(name==="lockvyn_admin_support_recent")return {data:[],error:null};
       assert.equal(name,"lockvyn_claim_recovery");
       assert.equal(args.p_target,targetId);
       calls.recoveryClaim++;
@@ -116,6 +138,11 @@ const vm = require("node:vm");
     createClient:()=>service,html:()=>"<html></html>",
     verifiedUserGate:authFile.verifiedUserGate,
     adminMembershipGate:authFile.adminMembershipGate,
+    validSupportRequest:supportPolicy.validSupportRequest,
+    validCaseConfirmation:supportPolicy.validCaseConfirmation,
+    freshVerifiedTotp:supportPolicy.freshVerifiedTotp,
+    safeTarget:supportPolicy.safeTarget,
+    isAutomaticAction:supportPolicy.isAutomaticAction,
     Deno:{
       env:{get:name=>({
         SUPABASE_URL:"https://example.supabase.co",
@@ -129,11 +156,11 @@ const vm = require("node:vm");
   };
   vm.runInNewContext(source,context,{filename:file,timeout:2000});
   assert.equal(typeof handler,"function");
-  async function call({jwt,action="list",id=targetId,page=1,search="",emailState="all",mfaState="all",originHeader=origin,contentType="application/json",method="POST"}={}){
+  async function call({jwt,action="list",id=targetId,page=1,search="",emailState="all",mfaState="all",originHeader=origin,contentType="application/json",method="POST",kind,reason,caseId:requestCaseId,confirmEmail}={}){
     const headers={Origin:originHeader,"Content-Type":contentType};
     if(jwt)headers.Authorization="Bearer "+jwt;
     const request=new Request(endpoint,{method,headers,
-      body:method==="POST"?JSON.stringify({action,id,page,search,emailState,mfaState}):undefined});
+      body:method==="POST"?JSON.stringify({action,id,page,search,emailState,mfaState,kind,reason,caseId:requestCaseId,confirmEmail}):undefined});
     const res=await handler(request);
     return {status:res.status,data:await res.json()};
   }
@@ -182,6 +209,32 @@ const vm = require("node:vm");
   assert.equal(calls.mail,1,"only synthetic mock email sent");
   assert.equal(calls.recoveryClaim,1,"recovery is audited/rate-limited through mock RPC");
   assert.equal(calls.adminLookup,1);
+  // Phase 02: dangerous operations must be rejected before any Auth mutation.
+  const beforeSupport={...calls};
+  const deniedSupport=await call({jwt:ownerAal1,action:"supportPrepare",kind:"suspend_24h",reason:"lost_device"});
+  assert.equal(deniedSupport.status,403);
+  assert.equal(calls.prepared,beforeSupport.prepared);
+  const denyNonAdmin=await call({jwt:nonAdminAal2,action:"supportPrepare",kind:"suspend_24h",reason:"lost_device"});
+  assert.equal(denyNonAdmin.status,403);
+  const self=await call({jwt:ownerAal2,action:"supportPrepare",id:ownerId,kind:"suspend_24h",reason:"lost_device"});
+  assert.equal(self.status,403,"Owner cannot suspend own account");
+  const invalidKind=await call({jwt:ownerAal2,action:"supportPrepare",kind:"delete_now",reason:"lost_device"});
+  assert.equal(invalidKind.status,400);
+  const requested=await call({jwt:ownerAal2,action:"supportPrepare",kind:"suspend_24h",reason:"lost_device"});
+  assert.equal(requested.status,200);assert.equal(requested.data.caseId,caseId);
+  assert.equal(calls.updated,0,"Preparing support must never change Auth");
+  const wrong=await call({jwt:ownerAal2,action:"supportExecute",kind:"suspend_24h",reason:"lost_device",caseId:caseId,confirmEmail:"wrong@example.invalid"});
+  assert.equal(wrong.status,409);
+  assert.equal(calls.updated,0,"Wrong account confirmation cannot update Auth");
+  const execute=await call({jwt:ownerAal2,action:"supportExecute",kind:"suspend_24h",reason:"lost_device",caseId:caseId,confirmEmail:"target@example.invalid"});
+  assert.equal(execute.status,200);
+  assert.equal(execute.data.status,"completed");
+  assert.equal(calls.updated,1);
+  assert.equal(calls.finished,1);
+  const replay=await call({jwt:ownerAal2,action:"supportExecute",kind:"suspend_24h",reason:"lost_device",caseId:caseId,confirmEmail:"target@example.invalid"});
+  assert.equal(replay.status,409,"Confirm must be single use");
+  assert.equal(calls.updated,1);
+  console.log("PASS Phase 02: owner/nonadmin denied, no changes before confirmation, one-time Auth action audited");
   console.log("PASS actual Edge Function AAL1/nonadmin denial, owner AAL2 list and synthetic recovery");
   console.log("PASS all checks are isolated in memory; zero network/database/email activity");
 })().catch(e=>{console.error(e);process.exitCode=1;});
