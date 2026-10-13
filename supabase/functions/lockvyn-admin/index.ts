@@ -1,5 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2.58.0";
 import { html } from "./ui.ts";
+import { validCandidateTag, validateReleasePolicy, compareReleaseVersions } from "./release.mjs";
 import { securityHtml } from "./security.ts";
 import { verifiedUserGate, adminMembershipGate } from "./access.mjs";
 import { validSupportRequest, validCaseConfirmation, freshVerifiedTotp, safeTarget, isAutomaticAction, cloudLoginStatus } from "./support.mjs";
@@ -47,8 +48,124 @@ async function recordSecuritySignal(actorId: string, signal: string): Promise<vo
   }
 }
 
+
+
+function publicPolicyResponse(data: unknown, status=200): Response {
+  return new Response(JSON.stringify(data), {status, headers: {
+    "Content-Type":"application/json; charset=utf-8",
+    "Cache-Control":"public, max-age=30, stale-while-revalidate=30",
+    "Access-Control-Allow-Origin":"*",
+    "X-Content-Type-Options":"nosniff",
+    "Referrer-Policy":"no-referrer",
+    "X-Frame-Options":"DENY",
+  }});
+}
+
+let releaseCatalogCache: { at:number; value:unknown[] } = {at:0,value:[]};
+async function githubJson(path:string, limit=512*1024): Promise<any> {
+  const response=await fetch("https://api.github.com/repos/R3Dzf/BoshaVault/"+path,{
+    headers:{Accept:"application/vnd.github+json","User-Agent":"Lockvyn-Release-Manager"},
+    signal:AbortSignal.timeout(8000),
+  });
+  if(!response.ok)throw new Error("GitHub release metadata unavailable");
+  const length=Number(response.headers.get("content-length")||0);
+  if(length>limit)throw new Error("GitHub response too large");
+  const body=await response.text();
+  if(body.length>limit)throw new Error("GitHub response too large");
+  return JSON.parse(body);
+}
+async function releaseChecks(tag:string):Promise<Record<string,unknown>>{
+  try{
+    const data=await githubJson("commits/"+encodeURIComponent(tag)+"/check-runs?per_page=30",128*1024);
+    const checks=Array.isArray(data.check_runs)?data.check_runs.slice(0,30):[];
+    const failed=checks.some((x:any)=>["failure","cancelled","timed_out","action_required"].includes(x.conclusion));
+    const pending=checks.some((x:any)=>!x.completed_at);
+    const passed=checks.filter((x:any)=>["success","neutral","skipped"].includes(x.conclusion)).length;
+    return {state:failed?"failed":pending?"pending":checks.length?"success":"unknown",
+      passed,total:checks.length,checks:checks.slice(0,8).map((x:any)=>({
+        name:String(x.name||"Check").slice(0,120),
+        conclusion:typeof x.conclusion==="string"?x.conclusion:"pending",
+      }))};
+  }catch{return {state:"unknown",passed:0,total:0,checks:[]};}
+}
+async function androidReleaseManifest(assetId:unknown,tag:string):Promise<Record<string,unknown>|null>{
+  if(typeof assetId!=="number"||!Number.isSafeInteger(assetId)||assetId<=0)return null;
+  try{
+    const response=await fetch("https://api.github.com/repos/R3Dzf/BoshaVault/releases/assets/"+assetId,{
+      headers:{Accept:"application/octet-stream","User-Agent":"Lockvyn-Release-Manager"},
+      signal:AbortSignal.timeout(8000),
+    });
+    if(!response.ok||!["api.github.com","github.com"].includes(new URL(response.url).hostname)&&
+       !new URL(response.url).hostname.endsWith(".githubusercontent.com"))return null;
+    const length=Number(response.headers.get("content-length")||0);
+    if(length>16384)return null;
+    const body=await response.text();
+    if(body.length>16384)return null;
+    const data=JSON.parse(body);
+    if(data.tag!==tag||data.packageName!=="com.lockvyn.app"||
+       !Number.isSafeInteger(data.versionCode)||data.versionCode<1||
+       !/^[a-f0-9]{64}$/i.test(data.signerSha256||"")||
+       !/^[a-f0-9]{64}$/i.test(data.sha256||"")||
+       data.url!=="https://github.com/R3Dzf/BoshaVault/releases/download/"+tag+"/Lockvyn-Android.apk")return null;
+    return {versionName:String(data.versionName||"").slice(0,32),versionCode:data.versionCode,
+      signerSha256:data.signerSha256.toLowerCase(),apkSha256:data.sha256.toLowerCase(),
+      minSdk:data.minSdk};
+  }catch{return null;}
+}
+async function loadReleaseCatalog():Promise<unknown[]>{
+  if(Date.now()-releaseCatalogCache.at<300000&&releaseCatalogCache.value.length)return releaseCatalogCache.value;
+  const releases=await githubJson("releases?per_page=30",512*1024);
+  if(!Array.isArray(releases))throw new Error("Invalid release catalog");
+  const stable=releases.filter((r:any)=>r&&!r.draft&&!r.prerelease&&
+    typeof r.tag_name==="string"&&
+    (validCandidateTag("windows",r.tag_name)||validCandidateTag("android",r.tag_name))).slice(0,12);
+  const output=await Promise.all(stable.map(async (r:any)=>{
+    const tag=r.tag_name as string;
+    const platform=validCandidateTag("windows",tag)?"windows":"android";
+    const rawAssets=Array.isArray(r.assets)?r.assets.slice(0,40):[];
+    const assets=rawAssets.filter((a:any)=>a&&typeof a.name==="string"&&a.name.length<=160)
+      .map((a:any)=>({name:a.name,size:Number.isSafeInteger(a.size)?a.size:null,
+        sha256:typeof a.digest==="string"&&/^sha256:[a-f0-9]{64}$/i.test(a.digest)
+          ?a.digest.slice(7).toLowerCase():null}))
+      .slice(0,24);
+    const manifestAsset=platform==="android"?rawAssets.find((a:any)=>a?.name==="android-update.json"):null;
+    const [checks,manifest]=await Promise.all([
+      releaseChecks(tag),
+      manifestAsset?androidReleaseManifest(manifestAsset.id,tag):Promise.resolve(null),
+    ]);
+    return {platform,tag,name:String(r.name||tag).slice(0,160),
+      publishedAt:typeof r.published_at==="string"?r.published_at:null,
+      changelog:typeof r.body==="string"?r.body.slice(0,4000):"",
+      url:"https://github.com/R3Dzf/BoshaVault/releases/tag/"+encodeURIComponent(tag),
+      assets,checks,androidManifest:manifest,
+      windowsSignature:platform==="windows"?"Unsigned · Authenticode publisher signing is not configured":null,
+      androidSignature:platform==="android"?(manifest?
+        "Signing fingerprint published; clients enforce continuity":"Signing metadata unavailable"):null};
+  }));
+  releaseCatalogCache={at:Date.now(),value:output};
+  return output;
+}
+async function currentReleasePolicies():Promise<Record<string,unknown>>{
+  const platforms=["windows","android"] as const;
+  const pairs=await Promise.all(platforms.map(async platform=>{
+    const {data,error}=await service.rpc("lockvyn_release_policy_public",{p_platform:platform});
+    if(error||!data||typeof data!=="object")throw new Error("Release policy unavailable");
+    return [platform,data] as const;
+  }));
+  return Object.fromEntries(pairs);
+}
+
 Deno.serve(async (request) => {
   const url = new URL(request.url);
+  if (request.method === "GET" && url.pathname.endsWith("/lockvyn-admin/release-policy")) {
+    const platform=url.searchParams.get("platform");
+    if(platform!=="windows"&&platform!=="android")
+      return publicPolicyResponse({error:"Invalid platform"},400);
+    if(!apiUrl||!serviceKey)return publicPolicyResponse({error:"Policy unavailable"},503);
+    const {data,error}=await service.rpc("lockvyn_release_policy_public",{p_platform:platform});
+    if(error||!data)return publicPolicyResponse({error:"Policy unavailable"},503);
+    return publicPolicyResponse(data);
+  }
   if (request.method === "OPTIONS" &&
       url.pathname.endsWith("/lockvyn-admin") &&
       request.headers.get("origin") === dashboardOrigin) {
@@ -169,6 +286,65 @@ Deno.serve(async (request) => {
     if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") throw new Error();
     body = parsed;
   } catch { return result({ error: "Invalid request" }, 400); }
+
+
+  if (body.action === "releaseManager") {
+    try {
+      const [policies,releases]=await Promise.all([currentReleasePolicies(),loadReleaseCatalog()]);
+      return result({policies,releases});
+    } catch {
+      return result({error:"Unable to load verified release metadata"},502);
+    }
+  }
+  if (body.action === "releasePolicySet") {
+    const input={platform:body.platform,candidateTag:body.candidateTag??null,
+      minimumVersion:body.minimumVersion,rolloutPercent:body.rolloutPercent,
+      reasonCode:body.reasonCode};
+    const invalid=validateReleasePolicy(input);
+    const confirmation=input.candidateTag??"LATEST";
+    if(invalid||body.confirmTag!==confirmation)
+      return result({error:invalid||"Type the selected release tag to confirm the change"},400);
+    if(!freshVerifiedTotp(claims,Math.floor(Date.now()/1000)))
+      return result({error:"Verify a fresh authenticator code before changing release policy"},403);
+    let catalog:unknown[];
+    try{catalog=await loadReleaseCatalog();}
+    catch{return result({error:"Unable to verify the published release. Retry later."},502);}
+    const candidates=catalog as Array<Record<string,any>>;
+    const eligible=candidates.filter(x=>x.platform===input.platform);
+    const selected=input.candidateTag
+      ?eligible.find(x=>x.tag===input.candidateTag)
+      :eligible[0];
+    if(!selected)return result({error:"The selected stable release is not published"},409);
+    const names=new Set((selected.assets||[]).map((x:any)=>x.name));
+    if(input.platform==="windows"&&(!names.has("Lockvyn-win-Setup.exe")||!names.has("releases.win.json")))
+      return result({error:"The Windows release is missing its installer or stable update feed"},409);
+    if(input.platform==="android"){
+      const manifest=selected.androidManifest;
+      if(!names.has("Lockvyn-Android.apk")||!names.has("android-update.json")||
+         !manifest||String(manifest.versionCode)!==String(manifest.versionCode)||
+         Number(input.minimumVersion)>manifest.versionCode)
+        return result({error:"The Android release metadata or minimum version could not be verified"},409);
+    }
+    if(input.platform==="windows"&&input.candidateTag){
+      const selectedVersion=input.candidateTag.slice("windows-v".length);
+      if(compareReleaseVersions("windows",input.minimumVersion,selectedVersion)>0)
+        return result({error:"Minimum version cannot exceed the selected release"},400);
+    }
+    const {data,error}=await service.rpc("lockvyn_admin_set_release_policy",{
+      p_actor:verified.user.id,p_actor_session:sessionId,p_actor_aal:claims.aal,
+      p_fresh_totp:true,p_platform:input.platform,p_candidate_tag:input.candidateTag,
+      p_minimum_version:input.minimumVersion,p_rollout_percent:input.rolloutPercent,
+      p_reason_code:input.reasonCode,
+    });
+    if(error){
+      if(error.code==="54000")return result({error:"Release policy rate limit reached. Wait before trying again."},429);
+      if(error.code==="42501")return result({error:"A fresh active administrator session is required"},403);
+      if(error.code==="22023")return result({error:"The release policy is invalid"},400);
+      return result({error:"Unable to save release policy"},502);
+    }
+    return result({policy:data,rollbackSafe:true,
+      note:input.rolloutPercent===0?"Optional rollout stopped. Installed clients and encrypted vaults are unchanged.":"Policy saved. No client data or encrypted vault contents were accessed."});
+  }
 
   if (body.action === "securityEvents") {
     const limit = body.limit ?? 50;
