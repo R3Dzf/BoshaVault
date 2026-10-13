@@ -13,7 +13,7 @@
 
 | Phase | Area | Issue | State |
 | --- | --- | --- | --- |
-| 00 | Foundation & security gates | [#18](https://github.com/R3Dzf/BoshaVault/issues/18) | In progress |
+| 00 | Foundation & security gates | [#18](https://github.com/R3Dzf/BoshaVault/issues/18) | Completed |
 | 01 | Overview & account directory | [#19](https://github.com/R3Dzf/BoshaVault/issues/19) | Queued |
 | 02 | Account support actions | [#20](https://github.com/R3Dzf/BoshaVault/issues/20) | Queued |
 | 03 | Device inventory & access | [#21](https://github.com/R3Dzf/BoshaVault/issues/21) | Queued |
@@ -68,4 +68,4 @@ All 11 phase issues closed with tests and verified deployments; one final
 security/threat-model review; docs, rollback procedures and support playbook
 updated; all published Windows and Android versions remain updatable.
 
-**Status:** Phase 00 is being worked on. Phases 01–10 are not done.
+**Status:** Phase 00 completed after local GoTrue AAL1/AAL2 integration tests and full cross-platform CI. Phase 01 is next; phases 01–10 are not done.
