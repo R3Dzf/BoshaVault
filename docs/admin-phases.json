@@ -1,0 +1,81 @@
+{
+  "schema": 1,
+  "updated_at": "2026-10-13",
+  "rules": [
+    "sequential",
+    "passing_ci",
+    "authorization_review",
+    "staging_acceptance",
+    "rollback_documented",
+    "production_verification",
+    "issue_checklist_complete"
+  ],
+  "phases": [
+    {
+      "number": "00",
+      "issue": 18,
+      "name": "Foundation & security gates",
+      "status": "in_progress"
+    },
+    {
+      "number": "01",
+      "issue": 19,
+      "name": "Overview & account directory",
+      "status": "queued"
+    },
+    {
+      "number": "02",
+      "issue": 20,
+      "name": "Account support actions",
+      "status": "queued"
+    },
+    {
+      "number": "03",
+      "issue": 21,
+      "name": "Device inventory & access",
+      "status": "queued"
+    },
+    {
+      "number": "04",
+      "issue": 22,
+      "name": "Security Center",
+      "status": "queued"
+    },
+    {
+      "number": "05",
+      "issue": 23,
+      "name": "Encrypted sync & quotas",
+      "status": "queued"
+    },
+    {
+      "number": "06",
+      "issue": 24,
+      "name": "Release Manager",
+      "status": "queued"
+    },
+    {
+      "number": "07",
+      "issue": 25,
+      "name": "Announcements & notices",
+      "status": "queued"
+    },
+    {
+      "number": "08",
+      "issue": 26,
+      "name": "Support tickets",
+      "status": "queued"
+    },
+    {
+      "number": "09",
+      "issue": 27,
+      "name": "Privacy-conscious analytics",
+      "status": "queued"
+    },
+    {
+      "number": "10",
+      "issue": 28,
+      "name": "Roles, operations & sign-off",
+      "status": "queued"
+    }
+  ]
+}
