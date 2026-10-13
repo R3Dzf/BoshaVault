@@ -19,6 +19,9 @@ for(const name of ["id=\"dashboard\"","Account directory","id=\"verified-stat\""
   "id=\"empty\"","id=\"prev\"","id=\"next\""]){
   assert(html.includes(name),"Missing current dashboard element: "+name);
 }
+for(const marker of ['class="skip-link"','href="#directory-section"','id="directory-heading"', 'id="retry-directory"', 'role="region"', 'aria-busy="false"']) {
+  assert(html.includes(marker),"Missing accessible directory feature: "+marker);
+}
 assert(html.includes("Master Passphrases cannot be reset"),"Vault safety disclosure missing");
 assert(!html.includes("SUPABASE_SERVICE_ROLE_KEY"),"Admin secrets must not be in HTML");
 console.log("PASS published dashboard HTML, filters, statistics, CSP and safety disclosure");
