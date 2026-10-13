@@ -25,6 +25,28 @@ jobs:
           if [ ! -f supabase/config.toml ]; then
             supabase init --force
           fi
+          # The local stack has TOTP disabled by default. Enable it ONLY in
+          # this disposable runner so real AAL2 sessions can be tested.
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          config = Path("supabase/config.toml")
+          source = config.read_text()
+          section = re.search(r"(?ms)^\\[auth\\.mfa\\.totp\\]\\s*\\n(.*?)(?=^\\[|\\Z)", source)
+          if section:
+              updated = section.group(0)
+              for key in ("enroll_enabled", "verify_enabled"):
+                  if re.search(rf"(?m)^{key}\\s*=", updated):
+                      updated = re.sub(rf"(?m)^({key}\\s*=).*$", r"\\g<1> true", updated)
+                  else:
+                      updated += f"\\n{key} = true\\n"
+              source = source[:section.start()] + updated + source[section.end():]
+          else:
+              source += "\\n[auth.mfa.totp]\\nenroll_enabled = true\\nverify_enabled = true\\n"
+          config.write_text(source)
+          assert "[auth.mfa.totp]" in source
+          print("Enabled TOTP only in disposable local staging")
+          PY
       - name: Start local self-hosted Supabase Auth (no cloud project)
         shell: bash
         run: |
