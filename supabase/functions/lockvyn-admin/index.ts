@@ -113,33 +113,32 @@ Deno.serve(async (request) => {
 
   if (body.action === "list") {
     const page = body.page;
-    if (typeof page !== "number" || !Number.isSafeInteger(page) || page < 1 || page > 10000) {
-      return result({ error: "Invalid page" }, 400);
+    const search = body.search ?? "";
+    const emailState = body.emailState ?? "all";
+    const mfaState = body.mfaState ?? "all";
+    if (typeof page !== "number" || !Number.isSafeInteger(page) ||
+        page < 1 || page > 10000 ||
+        typeof search !== "string" || search.length > 120 ||
+        typeof emailState !== "string" ||
+        !["all","verified","pending"].includes(emailState) ||
+        typeof mfaState !== "string" ||
+        !["all","enabled","disabled"].includes(mfaState)) {
+      return result({ error: "Invalid directory filters" }, 400);
     }
-    const { data, error } = await service.auth.admin.listUsers({ page, perPage: 30 });
-    if (error || !data) return result({ error: "Unable to load accounts" }, 502);
-    // listUsers() does not reliably return MFA factors. Fetch the account's
-    // verified enrollment status explicitly from Supabase Auth Admin.
-    // Bound concurrency and return null (Unknown), never false (Off), on failure.
-    const users = [];
-    for (let offset = 0; offset < data.users.length; offset += 5) {
-      const batch = await Promise.all(data.users.slice(offset, offset + 5).map(async (user) => {
-        const { data: factors, error: factorsError } =
-          await service.auth.admin.mfa.listFactors({ userId: user.id });
-        const mfa = factorsError || !Array.isArray(factors?.factors)
-          ? null
-          : factors.factors.some((factor) => factor.status === "verified");
-        return {
-          id: user.id, email: user.email ?? "", createdAt: user.created_at,
-          lastSignInAt: user.last_sign_in_at ?? null,
-          confirmed: Boolean(user.email_confirmed_at),
-          isSelf: user.id === verified.user.id,
-          mfa,
-        };
-      }));
-      users.push(...batch);
+    // Database owns global totals and filters: do not report page-only
+    // percentages as platform-wide data.
+    const { data, error } = await service.rpc("lockvyn_admin_directory", {
+      p_actor: verified.user.id,
+      p_page: page,
+      p_search: search.trim(),
+      p_email_state: emailState,
+      p_mfa_state: mfaState,
+    });
+    if (error || !data || !Array.isArray(data.users) ||
+        typeof data.total !== "number" || typeof data.matching !== "number") {
+      return result({ error: "Unable to load account directory" }, 502);
     }
-    return result({ page, total: data.total ?? null, users });
+    return result(data);
   }
   if (body.action === "recover") {
     if (recoveryRedirect !== dashboardOrigin + "/recover") {
