@@ -35,13 +35,13 @@
       "number": "03",
       "issue": 21,
       "name": "Device inventory & access",
-      "status": "in_progress"
+      "status": "waived"
     },
     {
       "number": "04",
       "issue": 22,
       "name": "Security Center",
-      "status": "queued"
+      "status": "in_progress"
     },
     {
       "number": "05",
