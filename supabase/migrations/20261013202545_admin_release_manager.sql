@@ -101,7 +101,7 @@ begin
      p_actor is null or p_actor_session is null or
      p_actor_aal is distinct from 'aal2' or p_fresh_totp is distinct from true or
      not exists(select 1 from public.lockvyn_admins where user_id=p_actor) or
-     not public.lockvyn_auth_session_is_active(p_actor,p_actor_session)
+     public.lockvyn_auth_session_is_active(p_actor,p_actor_session) is distinct from true
   then
     raise exception 'A fresh active administrator session is required'
       using errcode='42501';
