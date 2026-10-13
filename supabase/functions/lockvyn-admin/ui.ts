@@ -142,7 +142,7 @@ function display(){
     td(row,user.email);td(row,date(user.createdAt));td(row,date(user.lastSignInAt));
     td(row,user.confirmed?"Verified":"Pending");td(row,user.mfa===true?"Enabled":user.mfa===false?"Off":"Unknown");
     const action=document.createElement("td"),btn=document.createElement("button");
-    btn.textContent="Send recovery email";btn.disabled=!user.confirmed;
+    btn.textContent=user.isSelf?"Reset my cloud password":"Send recovery email";btn.disabled=!user.confirmed;
     btn.addEventListener("click",()=>sendRecovery(user));action.append(btn);row.append(action);body.append(row);
   }
 }
@@ -156,8 +156,11 @@ async function loadPage(n){
   }catch(error){alertText(error.message,true);}
 }
 async function sendRecovery(user){
-  if(!confirm("Send a cloud password recovery email to "+user.email+"? This will not change their master passphrase."))return;
-  try{await api("recover",{id:user.id});alertText("Recovery email requested for "+user.email);}
+  const message=user.isSelf
+    ? "Send yourself a cloud account password reset email? Your encrypted vault master passphrase will not change."
+    : "Send a cloud account password recovery email to "+user.email+"? This will not change their master passphrase.";
+  if(!confirm(message))return;
+  try{await api("recover",{id:user.id});alertText("Recovery email requested for "+user.email+". Check the inbox and spam folder.");}
   catch(error){alertText(error.message,true);}
 }
 get("search").addEventListener("input",display);
