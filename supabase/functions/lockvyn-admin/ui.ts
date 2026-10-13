@@ -646,7 +646,7 @@ function renderSecurityEvents(data){
   for(const item of data.events){
     const row=document.createElement("li");
     const title=document.createElement("strong");
-    title.textContent=SECURITY_EVENT_LABELS[item.eventType]||"Security activity";
+    title.textContent=Object.hasOwn(SECURITY_EVENT_LABELS,item.eventType)?SECURITY_EVENT_LABELS[item.eventType]:"Security activity";
     const meta=document.createElement("p");
     const actor=shortId(item.actorId),subject=shortId(item.subjectId);
     const time=typeof item.occurredAt==="string"&&Number.isFinite(Date.parse(item.occurredAt))
