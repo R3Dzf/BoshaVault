@@ -65,7 +65,9 @@ export function assertSecurityPage(response, html) {
   assert(csp.includes("connect-src 'self' https://"),
     "Security page must restrict network access to its own host and Supabase Auth");
   for (const text of ["Sign out all my cloud sessions", "id=\"sign-in\"",
-    "id=\"verify-otp\"", "id=\"confirm-box\"", "id=\"revoke\"",
+    "id=\"choose-factor\"", "id=\"factor-choice\"", "id=\"start-factor\"",
+    "id=\"verify-otp\"", "id=\"choose-another\"", "id=\"confirm-box\"", "id=\"revoke\"",
+    "Choose an authenticator", "separately enrolled backup authenticator",
     "Authenticator verified. Final consent is required.",
     "Existing access tokens may work until expiry",
     "Your offline vaults remain untouched."]) {

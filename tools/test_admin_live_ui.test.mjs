@@ -20,7 +20,9 @@ function response(body, status = 200, overrides = {}) {
 function securityHtml() {
   return '<!doctype html><html lang="en"><head><style nonce="test_nonce">body{color:#222}</style></head><body>' +
     '<h1>Sign out all my cloud sessions</h1><form id="sign-in"></form>' +
-    '<form id="verify-otp"></form><div id="confirm-box"></div><button id="revoke"></button>' +
+    '<div id="choose-factor"><h2>Choose an authenticator</h2><select id="factor-choice"></select>' +
+    '<button id="start-factor"></button><p>If you have a separately enrolled backup authenticator, you can use it here.</p></div>' +
+    '<form id="verify-otp"></form><button id="choose-another">Use a different authenticator</button><div id="confirm-box"></div><button id="revoke"></button>' +
     '<p>Authenticator verified. Final consent is required.</p>' +
     '<p>Existing access tokens may work until expiry. Your offline vaults remain untouched.</p>' +
     '<script nonce="test_nonce">let accessToken="";</script></body></html>';
