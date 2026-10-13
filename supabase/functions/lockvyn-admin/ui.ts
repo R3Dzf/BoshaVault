@@ -140,7 +140,7 @@ function display(){
   for(const user of accounts.filter(u=>u.email.toLowerCase().includes(search))){
     const row=document.createElement("tr");
     td(row,user.email);td(row,date(user.createdAt));td(row,date(user.lastSignInAt));
-    td(row,user.confirmed?"Verified":"Pending");td(row,user.mfa?"Enabled":"Off");
+    td(row,user.confirmed?"Verified":"Pending");td(row,user.mfa===true?"Enabled":user.mfa===false?"Off":"Unknown");
     const action=document.createElement("td"),btn=document.createElement("button");
     btn.textContent="Send recovery email";btn.disabled=!user.confirmed;
     btn.addEventListener("click",()=>sendRecovery(user));action.append(btn);row.append(action);body.append(row);
