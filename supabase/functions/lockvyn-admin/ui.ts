@@ -54,6 +54,15 @@ footer{font-size:12px;color:#787284;margin-top:20px}
 .skip-link:focus{top:8px}
 #directory-table:focus-visible{outline:3px solid #6a5bd6;outline-offset:3px}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
+/* Phase 02: explicit, accessible, cloud-only support workflow. */
+.support-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.support-grid label{display:grid;gap:7px;font-size:13px;font-weight:650}
+.support-grid select{width:100%;padding:10px;border:1px solid #d9d6e4;border-radius:10px;min-height:44px;background:white;color:#211b38}
+.support-actions{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:16px}
+.support-note{font-size:13px;line-height:1.6;padding:12px;border:1px solid #e4e0f1;border-radius:9px}
+.case-history{list-style:none;padding:0;display:grid;gap:8px}
+.case-history li{padding:12px;border:1px solid #eeeaf7;border-radius:9px;font-size:13px;overflow-wrap:anywhere}
+@media(max-width:620px){.support-grid{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -118,6 +127,55 @@ footer{font-size:12px;color:#787284;margin-top:20px}
     <button id="next" type="button">Next</button>
   </div>
 </section>
+<section id="account-support" hidden aria-labelledby="support-heading">
+  <h2 id="support-heading">Cloud account support</h2>
+  <p id="support-target" class="note"></p>
+  <p class="support-note">All support actions affect the cloud account only, never the encrypted vault on an offline device.
+    A suspended user's existing access token may remain valid until its expiry.
+    2FA recovery and account deletion create review cases only; they never silently change the account.</p>
+  <div class="support-grid">
+    <label>Support action
+      <select id="support-kind">
+        <option value="suspend_24h">Suspend cloud login for 24 hours</option>
+        <option value="restore_login">Restore cloud login</option>
+        <option value="session_review">Request session revocation review</option>
+        <option value="mfa_review">Request 2FA recovery review</option>
+        <option value="deletion_review">Request account deletion review</option>
+      </select>
+    </label>
+    <label>Reason (no passwords or private data)
+      <select id="support-reason">
+        <option value="user_request">Verified user request</option>
+        <option value="lost_device">Lost device</option>
+        <option value="suspected_compromise">Suspected account compromise</option>
+        <option value="access_problem">Access problem</option>
+        <option value="policy_violation">Policy violation</option>
+      </select>
+    </label>
+  </div>
+  <div class="support-actions">
+    <button class="primary" id="prepare-support" type="button">Prepare support action</button>
+    <button id="close-support" type="button">Cancel</button>
+  </div>
+  <div id="support-confirm" hidden>
+    <h2>Final confirmation</h2>
+    <p id="support-summary" class="note"></p>
+    <form id="support-form">
+      <label>Type the affected account's full email to confirm
+        <input id="support-email" type="email" autocomplete="off" required></label>
+      <label>Fresh code from your own authenticator app
+        <input id="support-otp" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required></label>
+      <button class="primary" type="submit">Confirm cloud support action</button>
+    </form>
+  </div>
+</section>
+<section id="support-history-section" aria-labelledby="support-history-heading">
+  <div class="toolbar"><h2 id="support-history-heading">Support activity</h2>
+    <button id="refresh-history" type="button">Refresh history</button></div>
+  <p class="note">Metadata-only audit history. No vault content, recovery codes or session tokens.</p>
+  <div id="support-history-state" role="status" aria-live="polite"></div>
+  <ul class="case-history" id="support-history"></ul>
+</section>
 <section><h2>About account recovery</h2><p>Send a password recovery email for a user's <strong>cloud login account</strong>.
 The user chooses a new cloud password using their own verified email.
 <strong>Master Passphrases cannot be reset by the administrator</strong>: private vault encryption remains independent.</p></section>
@@ -160,7 +218,7 @@ async function api(action,params){
 function jwtAal(jwt){try{const bits=jwt.split(".")[1].replace(/-/g,"+").replace(/_/g,"/");return JSON.parse(atob(bits)).aal||"";}catch{return "";}}
 async function openDashboard(){
   visible("login",false);visible("mfa",false);visible("dashboard",true);visible("logout",true);
-  await loadPage(1);
+  await loadPage(1);await loadHistory();
 }
 async function setupMfa(){
   const user=await authFetch("user",null,"GET",accessToken);
@@ -214,7 +272,14 @@ function display(){
     btn.textContent=user.isSelf?"Reset my cloud password":"Send recovery email";
     btn.disabled=!user.confirmed;
     btn.addEventListener("click",()=>sendRecovery(user));
-    action.append(btn);row.append(action);body.append(row);
+    action.append(btn);
+    if(!user.isSelf){
+      const manage=document.createElement("button");
+      manage.type="button";manage.textContent="Manage";manage.style.marginLeft="8px";
+      manage.addEventListener("click",()=>openSupport(user));
+      action.append(manage);
+    }
+    row.append(action);body.append(row);
   }
   visible("empty",accounts.length===0);
 }
@@ -273,6 +338,82 @@ async function sendRecovery(user){
   catch(error){alertText(error.message,true);}
 }
 get("retry-directory").addEventListener("click",()=>{if(accessToken)loadPage(page)});
+let supportTarget=null,pendingSupport=null;
+function openSupport(user){
+  supportTarget={id:user.id,email:user.email,isSelf:user.isSelf};
+  pendingSupport=null;visible("support-confirm",false);
+  get("support-target").textContent="Selected: "+user.email;
+  visible("account-support",true);
+  get("account-support").scrollIntoView({block:"start",behavior:"instant"});
+}
+function closeSupport(){
+  supportTarget=null;pendingSupport=null;
+  get("support-email").value="";get("support-otp").value="";
+  visible("support-confirm",false);visible("account-support",false);
+}
+get("close-support").addEventListener("click",closeSupport);
+get("support-kind").addEventListener("change",()=>{pendingSupport=null;visible("support-confirm",false)});
+get("support-reason").addEventListener("change",()=>{pendingSupport=null;visible("support-confirm",false)});
+get("prepare-support").addEventListener("click",async()=>{
+  if(!supportTarget||supportTarget.isSelf)return;
+  const kind=get("support-kind").value,reason=get("support-reason").value;
+  try{
+    const prepared=await api("supportPrepare",{id:supportTarget.id,kind,reason});
+    pendingSupport={caseId:prepared.caseId,id:supportTarget.id,kind,reason,email:prepared.targetEmail};
+    get("support-summary").textContent="Action: "+kind+". Confirm exactly "+
+      prepared.targetEmail+". This case expires in 5 minutes. No action occurs until confirmation.";
+    visible("support-confirm",true);
+    get("support-email").value="";get("support-otp").value="";
+    alertText("Case prepared. Reconfirm target email and your authenticator code.");
+  }catch(e){alertText(e.message,true);}
+});
+get("support-form").addEventListener("submit",async e=>{
+  e.preventDefault();
+  const selected=pendingSupport;
+  if(!selected){alertText("Prepare a new support case first.",true);return;}
+  if(get("support-email").value.trim().toLowerCase()!==selected.email.toLowerCase()){
+    alertText("The confirmation email does not match.",true);return;
+  }
+  if(!confirm("Confirm "+selected.kind+" for "+selected.email+"? This affects CLOUD access only."))return;
+  const confirmBtn=get("support-form").querySelector('button[type="submit"]');
+  confirmBtn.disabled=true;
+  try{
+    const user=await authFetch("user",null,"GET",accessToken);
+    const factor=(Array.isArray(user.factors)?user.factors:[])
+      .find(x=>x.factor_type==="totp"&&x.status==="verified");
+    if(!factor)throw Error("No verified administrator authenticator factor.");
+    const challenge=await authFetch("factors/"+encodeURIComponent(factor.id)+"/challenge",{},"POST",accessToken);
+    const fresh=await authFetch("factors/"+encodeURIComponent(factor.id)+"/verify",{
+      challenge_id:challenge.id,code:get("support-otp").value.trim(),
+    },"POST",accessToken);
+    get("support-otp").value="";
+    if(jwtAal(fresh.access_token)!=="aal2")throw Error("Fresh MFA verification did not succeed.");
+    accessToken=fresh.access_token;
+    const done=await api("supportExecute",{
+      id:selected.id,kind:selected.kind,reason:selected.reason,
+      caseId:selected.caseId,confirmEmail:get("support-email").value.trim(),
+    });
+    closeSupport();await loadPage(page);await loadHistory();
+    alertText("Support case recorded: "+done.status+". "+done.warning);
+  }catch(error){get("support-otp").value="";alertText(error.message,true);}
+  finally{confirmBtn.disabled=false;}
+});
+async function loadHistory(){
+  const info=get("support-history-state");
+  info.textContent="Loading support cases…";
+  try{
+    const data=await api("supportHistory",{});
+    const list=get("support-history");list.replaceChildren();
+    for(const item of data.cases){
+      const li=document.createElement("li");
+      li.textContent=item.kind+" · "+item.state+" · "+item.reason+" · "+
+        date(item.createdAt)+" · target "+item.targetId;
+      list.append(li);
+    }
+    info.textContent=data.cases.length?"Latest 25 cases":"No support cases yet.";
+  }catch(e){info.textContent="Could not load support cases.";alertText(e.message,true);}
+}
+get("refresh-history").addEventListener("click",()=>{if(accessToken)loadHistory()});
 get("search").addEventListener("input",scheduleSearch);
 get("email-filter").addEventListener("change",()=>{if(accessToken)loadPage(1)});
 get("mfa-filter").addEventListener("change",()=>{if(accessToken)loadPage(1)});
@@ -284,7 +425,8 @@ get("prev").addEventListener("click",()=>{if(page>1&&!get("prev").disabled)loadP
 get("next").addEventListener("click",()=>{if(!get("next").disabled)loadPage(page+1);});
 get("logout").addEventListener("click",()=>{
   ++loadSequence;clearTimeout(searchDelay);
-  accessToken="";accounts=[];matching=0;
+  accessToken="";accounts=[];matching=0;closeSupport();
+  get("support-history").replaceChildren();
   visible("dashboard",false);visible("login",true);
   visible("logout",false);alertText("Signed out.");
 });
