@@ -38,6 +38,15 @@ assert 'ban_duration: body.kind === "suspend_24h" ? "24h" : "none"' in admin
 assert 'action === "supportPrepare"' in admin
 assert 'action === "supportExecute"' in admin
 assert "session_review" in ui and "deletion_review" in ui and "mfa_review" in ui
+security=(root/"supabase/functions/lockvyn-admin/security.ts").read_text()
+assert "logout?scope=global" in security
+assert "auth/v1/" in security
+assert "Supabase Auth" in security
+assert "sessionStorage" not in security and "localStorage" not in security
+assert "SUPABASE_SERVICE_ROLE_KEY" not in security
+assert 'url.pathname.endsWith("/lockvyn-admin/security")' in admin
+assert 'securityHtml(n, publicKey, apiUrl)' in admin
+assert '"/security"' in (root/"infra/cloudflare/lockvyn-admin-ui.js").read_text()
 assert "Master Passphrases cannot be reset" in ui
 assert 'id="email-filter"' in ui and 'id="mfa-filter"' in ui
 assert 'matching' in ui and 'verified-stat' in ui

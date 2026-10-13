@@ -5,9 +5,9 @@ const authOrigin = "https://ghmbcfqiomggoxgwghjs.supabase.co";
 addEventListener('fetch', event => event.respondWith(handle(event.request)));
 async function handle(request) {
     const url = new URL(request.url);
-    if (request.method !== "GET" || !["/", "/recover"].includes(url.pathname))
+    if (request.method !== "GET" || !["/", "/recover", "/security"].includes(url.pathname))
       return new Response("Not found", {status:404});
-    const response = await fetch(upstream + (url.pathname === "/recover" ? "/recover" : ""), {
+    const response = await fetch(upstream + (url.pathname === "/recover" ? "/recover" : url.pathname === "/security" ? "/security" : ""), {
       redirect:"manual", headers:{"Accept":"text/html"}
     });
     if (response.status !== 200) return new Response("Dashboard unavailable", {status:502});

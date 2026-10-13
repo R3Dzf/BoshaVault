@@ -136,6 +136,7 @@ const vm = require("node:vm");
   let handler;
   const context={
     createClient:()=>service,html:()=>"<html></html>",
+    securityHtml:()=>"<html><body>user-owned logout?scope=global</body></html>",
     verifiedUserGate:authFile.verifiedUserGate,
     adminMembershipGate:authFile.adminMembershipGate,
     validSupportRequest:supportPolicy.validSupportRequest,
@@ -186,6 +187,10 @@ const vm = require("node:vm");
     "real handler rejects AAL1 recovery");
   await deny({jwt:nonAdminAal2,action:"recover"},403,
     "real handler rejects non-admin recovery");
+  const securityPage=await handler(new Request(endpoint+"/security",{method:"GET"}));
+  assert.equal(securityPage.status,200,"Public user-owned security page");
+  assert.match(await securityPage.text(),/user-owned logout\?scope=global/);
+  assert.match(securityPage.headers.get("content-security-policy"),/script-src 'nonce-/);
   const good=await call({jwt:ownerAal2});
   assert.equal(good.status,200,"AAL2 admin is allowed");
   assert.equal(good.data.total,3);

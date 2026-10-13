@@ -201,3 +201,31 @@ assert.equal(recoveryEmails,0,"No password reset mails");
 assert.equal(accountWrites,3,"Only disposable local identities were created");
 console.log("PASS real local GoTrue AAL1/AAL2 JWT verification, admin allowlist and read access");
 console.log("PASS recovery rejected for nonadmin and AAL1; no recovery messages sent");
+
+
+const securePage=await fetch(endpoint+"/security",{method:"GET",redirect:"manual"});
+assert.equal(securePage.status,200,"Isolated user-owned security page is available");
+assert.match(securePage.headers.get("content-security-policy")||"",/script-src 'nonce-/);
+const secureHtml=await securePage.text();
+assert(secureHtml.includes("logout?scope=global"));
+assert(!secureHtml.includes("SUPABASE_SERVICE_ROLE_KEY"));
+console.log("PASS self-service security page uses nonce CSP and no service-role credentials");
+
+// Real provider global logout: only the user's JWT authorizes it, never an
+// administrator action or an undocumented write to auth.sessions.
+const alternate1=await invoke("/auth/v1/token?grant_type=password","POST",anon,null,
+  {email:owner.email,password});
+const alternate2=await invoke("/auth/v1/token?grant_type=password","POST",anon,null,
+  {email:owner.email,password});
+assert.equal(alternate1.status,200,"Synthetic login 1");
+assert.equal(alternate2.status,200,"Synthetic login 2");
+assert(alternate1.data.refresh_token && alternate2.data.refresh_token);
+const revoked=await invoke("/auth/v1/logout?scope=global","POST",anon,ownerAAL2.aal2,null);
+assert([200,204].includes(revoked.status),"Local GoTrue global logout must succeed");
+for(const oldRefresh of [alternate1.data.refresh_token,alternate2.data.refresh_token]){
+  const attempted=await invoke("/auth/v1/token?grant_type=refresh_token","POST",anon,null,
+    {refresh_token:oldRefresh});
+  assert([400,401,403].includes(attempted.status),
+    "Previously active session refresh must fail after global logout");
+}
+console.log("PASS real local GoTrue global logout revokes refresh across devices (JWT expiry caveat retained)");

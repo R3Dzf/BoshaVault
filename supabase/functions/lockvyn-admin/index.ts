@@ -1,5 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2.58.0";
 import { html } from "./ui.ts";
+import { securityHtml } from "./security.ts";
 import { verifiedUserGate, adminMembershipGate } from "./access.mjs";
 import { validSupportRequest, validCaseConfirmation, freshVerifiedTotp, safeTarget, isAutomaticAction, cloudLoginStatus } from "./support.mjs";
 
@@ -48,6 +49,26 @@ Deno.serve(async (request) => {
         "Access-Control-Max-Age": "600",
         "Cache-Control": "no-store",
         "Vary": "Origin",
+      },
+    });
+  }
+  // Independent user-owned security page: GET serves public HTML only.
+  // It is not an admin operation; credentials go from the browser directly to
+  // Supabase Auth. No service-role RPC, admin token or vault data is involved.
+  if (request.method === "GET" && url.pathname.endsWith("/lockvyn-admin/security")) {
+    if (!apiUrl || !publicKey) return result({ error: "Service unavailable" }, 503);
+    const n = nonce();
+    return new Response(securityHtml(n, publicKey, apiUrl), {
+      headers: {
+        "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "no-referrer",
+        "X-Frame-Options": "DENY",
+        "Content-Security-Policy":
+          "default-src 'none'; connect-src 'self'; img-src 'self' data:; " +
+          "script-src 'nonce-" + n + "'; style-src 'nonce-" + n + "'; " +
+          "form-action 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'",
       },
     });
   }

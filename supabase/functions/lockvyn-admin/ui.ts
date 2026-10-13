@@ -134,7 +134,7 @@ footer{font-size:12px;color:#787284;margin-top:20px}
   <button id="refresh-support-status" type="button">Refresh cloud login status</button>
   <p class="support-note">All support actions affect the cloud account only, never the encrypted vault on an offline device.
     A suspended user's existing access token may remain valid until its expiry.
-    2FA recovery and account deletion create review cases only; they never silently change the account.</p>
+    2FA recovery and account deletion create review cases only; they never silently change the account. A user can <a href="https://lockvyn-admin-ui.r3dzf-studio.workers.dev/security">revoke their own cloud sessions</a> with their credentials; administrators cannot impersonate them.</p>
   <div class="support-grid">
     <label>Support action
       <select id="support-kind">

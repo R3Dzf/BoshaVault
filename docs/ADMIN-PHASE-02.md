@@ -85,3 +85,39 @@ Remaining Phase 02 acceptance items still block Phase 03.
 
 **Rollback:** revert the Edge Function and HTML UI to the previous deployed
 version; no SQL rollback is required for this read-only enhancement.
+
+## Phase 02 — user-authorized global cloud session sign-out
+
+An independent `/security` page on the **existing** Lockvyn admin UI host
+allows a Lockvyn account owner (not an administrator acting as that user)
+to authenticate with their **own** Supabase cloud credentials, verify a
+registered TOTP factor when enrolled, and explicitly revoke **their own**
+cloud refresh sessions via the supported GoTrue
+`POST /auth/v1/logout?scope=global` endpoint.
+
+- Password/TOTP/access JWT remain only in that browser page's memory. The
+  page talks **directly to Supabase Auth**, not the privileged admin POST API;
+  no service-role credential is embedded in the public HTML, Cloudflare Worker
+  or client state. No tokens are stored in browser local/session storage.
+- A separate final consent click is required. Auth failures report an error,
+  never a fabricated success. The page uses nonce-scoped CSP, no third-party
+  scripts, no analytics, no new service or paid feature.
+- Revoking refresh tokens does **not** invalidate an already-issued access
+  JWT before `exp`. It cannot lock an offline encrypted vault or recover a
+  missing TOTP factor. Clients will need to sign in again after expiry.
+- The admin's `session_review` workflow is still review-only. No admin may
+  impersonate a customer or collect a user's password/JWT to remotely log
+  them out. This is a **self-service mitigation**, not an administrator
+  session revocation endpoint.
+- Integration test: disposable local GoTrue users sign in from two additional
+  sessions, the authenticated user initiates global sign-out, and old refresh
+  tokens are rejected. Existing AAL2 owner, banned-user and AAL1 denial tests
+  remain enabled.
+- No SQL migration and no production user data changes. Roll back by
+  reverting the Edge Function and Cloudflare Worker to their previous
+  versions, leaving user Auth and encrypted vault records intact.
+
+**Remaining Phase 02 gate:** production user acceptance, supported
+identity-proofed 2FA recovery, user-consented deletion with retention, and
+strict session invalidation for all sensitive application operations.
+Do not mark this stage complete or start Phase 03 solely on this change.
