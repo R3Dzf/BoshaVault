@@ -3,7 +3,6 @@
 begin;
 
 create schema if not exists lockvyn_private;
-revoke all on schema lockvyn_private from public, anon, authenticated;
 
 create table lockvyn_private.release_policies (
   platform text primary key check (platform in ('windows','android')),
