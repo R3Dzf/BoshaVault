@@ -13,8 +13,8 @@ comment on table public.lockvyn_admins is
 
 create table if not exists public.lockvyn_admin_audit (
   id bigint generated always as identity primary key,
-  actor_id uuid not null references auth.users(id),
-  target_id uuid not null references auth.users(id),
+  actor_id uuid not null references auth.users(id) on delete cascade,
+  target_id uuid not null references auth.users(id) on delete cascade,
   action text not null check (action in ('recovery_requested')),
   created_at timestamptz not null default now()
 );
