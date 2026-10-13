@@ -13,6 +13,10 @@ assert "service.auth.getUser(token)" in admin
 assert 'assurance !== "aal2"' in admin
 assert '.from("lockvyn_admins")' in admin
 assert 'service.auth.admin.listUsers' in admin
+assert "service.auth.admin.mfa.listFactors({ userId: user.id })" in admin
+assert "mfa = factorsError || !Array.isArray(factors?.factors)" in admin
+assert "mfa: Boolean(user.factors?" not in admin
+assert 'user.mfa===true?"Enabled":user.mfa===false?"Off":"Unknown"' in ui
 assert 'service.auth.resetPasswordForEmail' in admin
 assert 'service.rpc("lockvyn_claim_recovery"' in admin
 assert '[url.origin, dashboardOrigin].includes(request.headers.get("origin")' in admin
