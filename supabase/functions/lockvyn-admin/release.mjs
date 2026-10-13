@@ -2,7 +2,7 @@ export function releaseVersion(platform, value) {
   if (platform === "android") {
     if (typeof value !== "string" || !/^(0|[1-9][0-9]{0,9})$/.test(value)) return null;
     const n = Number(value);
-    return Number.isSafeInteger(n) ? [n] : null;
+    return Number.isSafeInteger(n) && n <= 2147483647 ? [n] : null;
   }
   if (platform !== "windows" || typeof value !== "string" ||
       !/^(0|[1-9][0-9]{0,5})(\.(0|[1-9][0-9]{0,5})){2}$/.test(value)) return null;
