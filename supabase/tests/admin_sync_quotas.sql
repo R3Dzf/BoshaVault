@@ -148,10 +148,38 @@ begin
     perform public.lockvyn_admin_set_cloud_sync_suspension(
       'f5000000-0000-4000-8000-000000000001','f6000000-0000-4000-8000-000000000001',
       'aal2',false,'f5000000-0000-4000-8000-000000000002',true,
+      'support_review','sync-target@example.invalid');
+    raise exception 'AAL2 without fresh TOTP could suspend cloud sync';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    perform public.lockvyn_admin_set_cloud_sync_suspension(
+      'f5000000-0000-4000-8000-000000000001','f6000000-0000-4000-8000-000000000001',
+      'aal2',false,'f5000000-0000-4000-8000-000000000002',true,
       'support_review','wrong@example.invalid');
     raise exception 'Wrong typed target email was accepted';
   exception when insufficient_privilege then null;
   end;
+  insert into lockvyn_private.cloud_sync_admin_audit(
+    actor_id,target_id,actor_session_id,event_type,reason_code
+  )
+  select 'f5000000-0000-4000-8000-000000000001',
+         'f5000000-0000-4000-8000-000000000003',
+         'f6000000-0000-4000-8000-000000000001',
+         'sync_suspended','support_review'
+  from generate_series(1,5);
+  begin
+    perform public.lockvyn_admin_set_cloud_sync_suspension(
+      'f5000000-0000-4000-8000-000000000001','f6000000-0000-4000-8000-000000000001',
+      'aal2',true,'f5000000-0000-4000-8000-000000000003',true,
+      'support_review','sync-other@example.invalid');
+    raise exception 'Cloud sync control rate limit was not enforced';
+  exception when sqlstate '54000' then null;
+  end;
+  delete from lockvyn_private.cloud_sync_admin_audit
+  where actor_id='f5000000-0000-4000-8000-000000000001'
+    and target_id='f5000000-0000-4000-8000-000000000003'
+    and actor_session_id='f6000000-0000-4000-8000-000000000001';
   if not public.lockvyn_admin_set_cloud_sync_suspension(
       'f5000000-0000-4000-8000-000000000001','f6000000-0000-4000-8000-000000000001',
       'aal2',true,'f5000000-0000-4000-8000-000000000002',true,
