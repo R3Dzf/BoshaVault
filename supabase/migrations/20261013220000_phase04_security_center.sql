@@ -35,12 +35,10 @@ create or replace function lockvyn_private.set_admin_security_event_expiry()
 returns trigger
 language plpgsql
 set search_path = ''
-as $
-begin
-  new.expires_at := new.occurred_at + interval '90 days';
+as 'begin
+  new.expires_at := new.occurred_at + interval ''90 days'';
   return new;
-end;
-$;
+end;';
 revoke all on function lockvyn_private.set_admin_security_event_expiry()
   from public, anon, authenticated, service_role;
 create trigger lockvyn_admin_security_event_expiry
