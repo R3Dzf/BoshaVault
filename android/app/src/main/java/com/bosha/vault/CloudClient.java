@@ -65,7 +65,7 @@ final class CloudClient implements AutoCloseable {
             JSONObject latest=store.load(profile.getString("vaultId"));if(latest==null)throw new Exception("Cloud is disconnected on this device.");
             // Keep a token rotated by another foreground action before writing checkpoints.
             profile.put("refreshToken",latest.getString("refreshToken"));
-            for(String field:new String[]{"lastUploadedHash","lastOuterHash","downloadedStamp","mergedStamp","keyEpoch","autoSync"})if(latest.has(field))profile.put(field,latest.get(field));
+            for(String field:new String[]{"lastUploadedHash","lastOuterHash","downloadedStamp","mergedStamp","keyEpoch","autoSync","deviceInventoryConsent","deviceInventoryPlatform","deviceInventoryOsVersion","deviceInventoryAppVersion","deviceInventoryDisplayName"})if(latest.has(field))profile.put(field,latest.get(field));
             String slot=profile.getString("vaultSlot"),device=profile.getString("deviceSlot");byte[] local=null,key=null,outer=null,response=null;
             List<byte[]> snapshots=new ArrayList<>();int conflicts=0;boolean changed=false;
             try{
@@ -113,6 +113,33 @@ final class CloudClient implements AutoCloseable {
                     outer=CloudSnapshot.seal(local,key,slot,device);String outerHash=hex(VaultEngine.sha(outer));JSONObject body=new JSONObject().put("owner_id",session.owner).put("vault_slot",slot).put("device_slot",device).put("ciphertext_base64",Base64.getEncoder().encodeToString(outer)).put("ciphertext_sha256",outerHash);
                     byte[] reply=request("POST","rest/v1/opaque_device_snapshots?on_conflict=owner_id,vault_slot,device_slot",body,session.access,65536);Arrays.fill(reply,(byte)0);
                     profile.put("lastUploadedHash",hash).put("lastOuterHash",outerHash);changed=true;
+                }
+                if(profile.optBoolean("deviceInventoryConsent",false)){
+                    byte[] registered=null,heartbeat=null;
+                    try{
+                        JSONObject consent=new JSONObject()
+                            .put("p_consent",true)
+                            .put("p_platform",profile.optString("deviceInventoryPlatform","android"))
+                            .put("p_os_version",profile.optString("deviceInventoryOsVersion","unknown"))
+                            .put("p_app_version",profile.optString("deviceInventoryAppVersion","unknown"))
+                            .put("p_display_name",profile.optString("deviceInventoryDisplayName","Android app session"))
+                            .put("p_schema_version",1);
+                        registered=request("POST","rest/v1/rpc/lockvyn_register_cloud_device",consent,session.access,1024);
+                        JSONArray idValue=new JSONArray("["+new String(registered,StandardCharsets.UTF_8).trim()+"]");
+                        String registryId=idValue.getString(0);
+                        if(!VaultEngine.id(registryId))throw new Exception("Invalid cloud session registry response.");
+                        profile.put("deviceRegistryId",registryId);
+                        heartbeat=request("POST","rest/v1/rpc/lockvyn_record_cloud_device_sync",new JSONObject(),session.access,1024);
+                        if(!new String(heartbeat,StandardCharsets.UTF_8).trim().equals("true"))
+                            throw new Exception("Cloud session heartbeat was not accepted.");
+                        profile.put("deviceInventoryState","visible");
+                    }catch(Exception inventoryError){
+                        profile.put("deviceInventoryState","pending");
+                    }finally{
+                        if(registered!=null)Arrays.fill(registered,(byte)0);
+                        if(heartbeat!=null)Arrays.fill(heartbeat,(byte)0);
+                    }
+                    changed=true;
                 }
                 Instant now=Instant.now();String previous=profile.optString("lastSyncUtc");
                 try{if(previous.isEmpty()||now.toEpochMilli()-Instant.parse(previous).toEpochMilli()>60000)changed=true;}catch(Exception invalid){changed=true;}
@@ -184,6 +211,12 @@ final class CloudClient implements AutoCloseable {
         finally{Arrays.fill(response,(byte)0);}
         if(!pairingRead(session,signed).getString("state").equals("completed"))
             throw new Exception("The pairing acknowledgement was not accepted.");
+    }
+    void unregisterDeviceInventory(CloudAuth.Session session)throws Exception{
+        byte[] response=request("POST","rest/v1/rpc/lockvyn_unregister_cloud_device",new JSONObject(),session.access,1024);
+        try{if(!new String(response,StandardCharsets.UTF_8).trim().equals("true"))
+            throw new Exception("Device inventory consent could not be removed.");}
+        finally{Arrays.fill(response,(byte)0);}
     }
     void signOut(CloudAuth.Session signedIn,CloudSettingsStore store)throws Exception{synchronized(GATE){auth.signOut(signedIn);check();store.forget();}}
     private static String hex(byte[] bytes){StringBuilder result=new StringBuilder();for(byte b:bytes)result.append(String.format(Locale.ROOT,"%02x",b&255));return result.toString();}
