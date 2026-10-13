@@ -311,7 +311,7 @@ const vm = require("node:vm");
   assert.equal(recovery.data.sent,true);
   assert.equal(calls.mail,1,"only synthetic mock email sent");
   assert.equal(calls.recoveryClaim,1,"recovery is audited/rate-limited through mock RPC");
-  assert.equal(calls.adminLookup,1);
+  assert.equal(calls.adminLookup,3,"Recovery plus both cloud sync confirmations look up only synthetic targets");
   // Phase 02: dangerous operations must be rejected before any Auth mutation.
   const beforeSupport={...calls};
   const deniedSupport=await call({jwt:ownerAal1,action:"supportPrepare",kind:"suspend_24h",reason:"lost_device"});
