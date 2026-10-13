@@ -134,6 +134,7 @@ Deno.serve(async (request) => {
           id: user.id, email: user.email ?? "", createdAt: user.created_at,
           lastSignInAt: user.last_sign_in_at ?? null,
           confirmed: Boolean(user.email_confirmed_at),
+          isSelf: user.id === verified.user.id,
           mfa,
         };
       }));
