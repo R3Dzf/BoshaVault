@@ -1,25 +1,27 @@
 # Phase 03 — opt-in cloud device sessions
 
-## First implementation slice
+## Implementation
 
-Migration `20261013200000_cloud_device_registry.sql` adds a private registry for Lockvyn Auth sessions. A registry row means “this signed-in app session opted in”; it does **not** prove a physical device identity. Multiple sessions on one physical device may appear as separate entries. The client-reported platform, OS/app version, and optional display name are labels, not attested facts.
+Migration `20261013200000_cloud_device_registry.sql` adds a private registry for Lockvyn Auth sessions. A registry row means “this signed-in app session opted in”; it does **not** prove a physical device identity. Multiple sessions on one physical device may appear as separate entries. Client-reported platform, OS/app version, and display name are labels, not attested facts.
 
-The database stores no IP address, MAC address, hardware fingerprint, vault identifier, snapshot contents, passphrase, encryption key, or recovery material. The Auth session ID stays inside the private schema and is not returned by the listing RPC.
+The database stores no IP address, MAC address, hardware fingerprint, vault identifier, snapshot contents, passphrase, encryption key, or recovery material. Auth session IDs stay in the private schema and are not returned by either owner or administrator inventory RPCs.
 
-Clients must first show an explicit consent prompt, then call `lockvyn_register_cloud_device` with consent and versioned metadata. Following a successful sync, an updated client can call `lockvyn_record_cloud_device_sync`; the server timestamps it and limits writes to once per minute. The owner can list their own records. Revocation requires the caller's live AAL2 session, changes the target session's server-side authorization, and rate-limits revocation to 10 actions per minute per actor session, and records the actor/target session IDs in the private audit table.
+Android and Windows now offer a separate session-visibility choice. They register only after the user enables it and the next cloud sync succeeds; successful syncs update a server timestamp. Turning visibility off calls `lockvyn_unregister_cloud_device`, which deletes that session's inventory metadata and leaves cloud sync and offline data available. Sessions without consent remain compatible.
 
-The restrictive RLS policies check the signed `session_id` on encrypted snapshot and temporary pairing routes. Unregistered older sessions remain compatible. Once a session opts in and is revoked, that signed session can no longer use these Lockvyn cloud routes. The session's Supabase access/refresh tokens are not themselves invalidated. Signing in again creates a new Auth session; a newly updated client can opt that new session in. The UI must explain this behavior and must never describe the operation as token revocation.
+Owners can view or revoke their own sessions. The admin dashboard lists consented session metadata for non-admin target accounts. Administrator revocation requires an allowlisted account, an active AAL2 session, a TOTP verification within three minutes, and typing the target email. It rate-limits to 10 actions per minute per actor session and records actor/target session IDs in the private audit table.
 
-Revocation leaves encrypted snapshot rows and every offline vault untouched. It cannot erase local copies or data already downloaded to another device.
+Revocation marks the selected signed Auth session denied on encrypted snapshot and temporary pairing routes. It does not invalidate Supabase access or refresh tokens, erase encrypted snapshots, erase offline vaults, or remove data already downloaded to another device. Signing in again creates a new Auth session that can be opted in separately.
 
-## Local, no-charge verification
+## Local synthetic verification
 
-`supabase/tests/cloud_device_registry.sql` uses synthetic users, synthetic live Auth sessions, dummy ciphertext, and a transaction rollback. It checks explicit consent, version metadata, server heartbeat time, owner isolation, AAL2 revocation, the revocation rate limit, continued use by a separate active session, revoked snapshot/pairing denial, blocked re-registration, audit creation, legacy-session compatibility, and ciphertext retention.
+`supabase/tests/cloud_device_registry.sql` checks consent, metadata validation, owner isolation, heartbeat timestamps, AAL2 revoke, rate limits, per-session RLS, re-registration denial, audit, and ciphertext retention in a transaction that rolls back.
 
-The `Local Supabase Auth staging` GitHub Actions workflow applies the prerequisite schemas and this migration to disposable local Supabase containers only, then runs the SQL fixtures. It does not contact a hosted Supabase project.
+`supabase/tests/admin_device_access.sql` checks administrator allowlisting, protected targets, AAL2 and fresh-TOTP enforcement, email confirmation, cross-target rate limits, per-session access, and ciphertext retention using synthetic users and Auth sessions.
 
-## Rollout and rollback boundary
+The local Auth workflow applies repository migrations to disposable local Supabase containers, runs both SQL fixtures, starts the local Edge Function, then runs `tools/test_admin_local_auth.mjs` with synthetic GoTrue accounts. That integration verifies opt-in, heartbeat, inventory, revocation of one of two separate sessions, continued access by the second session, metadata withdrawal, and retention of encrypted snapshots. It does not use a hosted Supabase project.
 
-This migration is additive and does not auto-register users or require old clients to register. Client consent UI, registration/heartbeat calls, the administrator inventory view, Android/Windows integration, accessibility review, and full production rollout remain open Phase 03 acceptance work.
+## Rollout boundary
 
-Do not roll this migration back after any real session has been revoked: dropping the registry/policies would remove the server-side denial. A production rollback plan must preserve revoked session IDs and denial checks in a forward-compatible guard. No production migration is part of this PR.
+These migrations and client/admin code are repository changes only. No production Supabase migration or app deployment is included. Accessibility and compatibility review, production rollback planning, and the production rollout decision remain Phase 03 follow-up work.
+
+Do not roll back the revocation guard after any real session has been revoked: removing the guard would restore cloud access to those sessions. A rollback must preserve revoked session IDs and denial checks in a forward-compatible guard.
