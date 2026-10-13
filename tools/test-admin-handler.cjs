@@ -16,7 +16,9 @@ const vm = require("node:vm");
     .replace("let body: Record<string, unknown>;","let body;")
     .replace("function result(data: unknown, status = 200): Response {",
              "function result(data, status = 200) {")
-    .replace("function nonce(): string {", "function nonce() {");
+    .replace("function nonce(): string {", "function nonce() {")
+    .replace("async function recordSecuritySignal(actorId: string, signal: string): Promise<void> {",
+             "async function recordSecuritySignal(actorId, signal) {");
   assert(!source.includes("let body: Record<string, unknown>;"),
     "Test must evaluate the real Edge Function body");
 
@@ -36,7 +38,7 @@ const vm = require("node:vm");
   const byToken = new Map();
   const caseId = "d0000000-0000-4000-8000-000000000004";
   let caseState="pending";
-  const calls = {list:0,adminLookup:0,mail:0,recoveryClaim:0,factors:0,updated:0,prepared:0,claimed:0,finished:0,sessionCheck:0};
+  const calls = {list:0,adminLookup:0,mail:0,recoveryClaim:0,factors:0,updated:0,prepared:0,claimed:0,finished:0,sessionCheck:0,securitySignals:[],securityFeed:0};
   const revokedSessionIds=new Set();
   let sessionLookupError=false;
   function token(user,aal="aal2",role="authenticated",sessionId=user.id) {
@@ -105,7 +107,19 @@ const vm = require("node:vm");
         if(sessionLookupError)return {data:null,error:{message:"synthetic lookup failure"}};
         return {data:!revokedSessionIds.has(args.p_session_id),error:null};
       }
+      if(name==="lockvyn_admin_record_security_signal"){
+        assert(["admin_step_up_denied","admin_allowlist_denied","admin_inactive_session"].includes(args.p_signal));
+        calls.securitySignals.push({actor:args.p_actor,signal:args.p_signal});
+        return {data:true,error:null};
+      }
       assert.equal(args.p_actor,ownerId);
+      if(name==="lockvyn_admin_security_feed"){
+        calls.securityFeed++;
+        assert.equal(args.p_actor_session,ownerId);
+        assert.equal(args.p_actor_aal,"aal2");
+        return {data:{events:[],alerts:{adminStepUpDenials15m:0,adminAllowlistDenials15m:0,
+          repeatedDeniedActors15m:0,newCloudSessions24h:0,failedSupportActions24h:0}},error:null};
+      }
       if(name==="lockvyn_admin_directory"){
         calls.list++;
         const full=[
@@ -166,11 +180,11 @@ const vm = require("node:vm");
   };
   vm.runInNewContext(source,context,{filename:file,timeout:2000});
   assert.equal(typeof handler,"function");
-  async function call({jwt,action="list",id=targetId,page=1,search="",emailState="all",mfaState="all",originHeader=origin,contentType="application/json",method="POST",kind,reason,caseId:requestCaseId,confirmEmail}={}){
+  async function call({jwt,action="list",id=targetId,page=1,search="",emailState="all",mfaState="all",limit=50,originHeader=origin,contentType="application/json",method="POST",kind,reason,caseId:requestCaseId,confirmEmail}={}){
     const headers={Origin:originHeader,"Content-Type":contentType};
     if(jwt)headers.Authorization="Bearer "+jwt;
     const request=new Request(endpoint,{method,headers,
-      body:method==="POST"?JSON.stringify({action,id,page,search,emailState,mfaState,kind,reason,caseId:requestCaseId,confirmEmail}):undefined});
+      body:method==="POST"?JSON.stringify({action,id,page,search,emailState,mfaState,limit,kind,reason,caseId:requestCaseId,confirmEmail}):undefined});
     const res=await handler(request);
     return {status:res.status,data:await res.json()};
   }
@@ -185,8 +199,14 @@ const vm = require("node:vm");
     assert.equal(calls.mail,before.mail,name+" must not send email");
   }
   await deny({jwt:ownerAal1},403,"real handler rejects authenticated AAL1 owner");
+  assert.equal(calls.securitySignals[0].signal,"admin_step_up_denied",
+    "verified AAL1 denials create only a bounded metadata signal");
   await deny({jwt:nonAdminAal2},403,"real handler rejects AAL2 non-admin");
+  assert.equal(calls.securitySignals[1].signal,"admin_allowlist_denied");
+  const signalsBeforeUntrusted=calls.securitySignals.length;
   await deny({jwt:otherRole},401,"real handler rejects unexpected role");
+  assert.equal(calls.securitySignals.length,signalsBeforeUntrusted,
+    "invalid identity/role claims are not copied into telemetry");
   await deny({jwt:"not-a-real-token"},401,"real handler rejects invalid token");
   await deny({},401,"real handler rejects anonymous list");
   await deny({jwt:ownerAal2,originHeader:"https://attacker.invalid"},403,
@@ -207,12 +227,20 @@ const vm = require("node:vm");
   assert.equal(good.data.matching,3);
   assert.equal(good.data.stats.mfaEnabled,1);
   assert.equal(calls.list,1);
+  const feed=await call({jwt:ownerAal2,action:"securityEvents"});
+  assert.equal(feed.status,200,"AAL2 administrator can read the security feed");
+  assert.equal(feed.data.events.length,0);
+  assert.equal(calls.securityFeed,1);
+  const invalidFeed=await call({jwt:ownerAal2,action:"securityEvents",limit:101});
+  assert.equal(invalidFeed.status,400,"Security feed page size is bounded");
+  assert.equal(calls.securityFeed,1,"Invalid feed requests must not query audit data");
   const beforeSessionDenial=calls.list;
   revokedSessionIds.add(ownerId);
   const revoked=await call({jwt:ownerAal2});
   assert.equal(revoked.status,401,"revoked session cannot use privileged admin API");
   assert.match(revoked.data.error,/session/i);
   assert.equal(calls.list,beforeSessionDenial,"revoked JWT must not load admin data");
+  assert.equal(calls.securitySignals.at(-1).signal,"admin_inactive_session");
   revokedSessionIds.delete(ownerId);
   sessionLookupError=true;
   const lookupFailure=await call({jwt:ownerAal2});

@@ -17,7 +17,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: supabase/setup-cli@v1
         with:
-          version: latest
+          version: 2.120.0
       - name: Prepare disposable local Supabase configuration
         shell: bash
         run: |
@@ -65,6 +65,7 @@ jobs:
           docker exec -i "$container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 < supabase/tests/mfa_enforcement.sql
           docker exec -i "$container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 < supabase/tests/cloud_device_registry.sql
           docker exec -i "$container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 < supabase/tests/admin_device_access.sql
+          docker exec -i "$container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 < supabase/tests/admin_security_center.sql
       - name: Start real local Edge Function
         shell: bash
         run: |

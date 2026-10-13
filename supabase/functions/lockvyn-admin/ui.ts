@@ -54,6 +54,18 @@ footer{font-size:12px;color:#787284;margin-top:20px}
 .skip-link:focus{top:8px}
 #directory-table:focus-visible{outline:3px solid #6a5bd6;outline-offset:3px}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
+/* Phase 04: concise metadata-only security signals. */
+.security-alerts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:16px 0}
+.security-alert{border:1px solid #e4e0f1;border-radius:12px;padding:13px;background:#fbfaff}
+.security-alert strong{display:block;font-size:22px;font-variant-numeric:tabular-nums}
+.security-alert small{color:#716b84;line-height:1.5}
+.security-alert.warning{border-color:#e6b08a;background:#fff8f2}
+.security-events{list-style:none;padding:0;display:grid;gap:9px}
+.security-events li{border:1px solid #eeeaf7;border-radius:10px;padding:12px}
+.security-events li strong{display:block}
+.security-events li p{margin:5px 0 0;font-size:12px;overflow-wrap:anywhere}
+@media(max-width:700px){.security-alerts{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:420px){.security-alerts{grid-template-columns:1fr}}
 /* Phase 02: explicit, accessible, cloud-only support workflow. */
 .support-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
 .support-grid label{display:grid;gap:7px;font-size:13px;font-weight:650}
@@ -205,6 +217,14 @@ footer{font-size:12px;color:#787284;margin-top:20px}
   <div id="support-history-state" role="status" aria-live="polite"></div>
   <ul class="case-history" id="support-history"></ul>
 </section>
+<section id="security-center" aria-labelledby="security-center-heading">
+  <div class="toolbar"><h2 id="security-center-heading">Security Center</h2>
+    <button id="refresh-security-events" type="button">Refresh security activity</button></div>
+  <p class="note">Last 90 days of privacy-limited first-party events: opt-in cloud session enrollment/revocation, support actions, recovery requests, and verified-user admin access denials. Password login failures, emails, IP addresses, tokens, and vault data are not collected here.</p>
+  <div id="security-alerts" class="security-alerts" role="group" aria-label="Recent security signal counts"></div>
+  <div id="security-events-state" role="status" aria-live="polite">Security activity has not been loaded.</div>
+  <ul id="security-events" class="security-events"></ul>
+</section>
 <section><h2>About account recovery</h2><p>Send a password recovery email for a user's <strong>cloud login account</strong>.
 The user chooses a new cloud password using their own verified email.
 <strong>Master Passphrases cannot be reset by the administrator</strong>: private vault encryption remains independent.</p></section>
@@ -247,7 +267,7 @@ async function api(action,params){
 function jwtAal(jwt){try{const bits=jwt.split(".")[1].replace(/-/g,"+").replace(/_/g,"/");return JSON.parse(atob(bits)).aal||"";}catch{return "";}}
 async function openDashboard(){
   visible("login",false);visible("mfa",false);visible("dashboard",true);visible("logout",true);
-  await loadPage(1);await loadHistory();
+  await loadPage(1);await loadHistory();await loadSecurityEvents();
 }
 async function setupMfa(){
   const user=await authFetch("user",null,"GET",accessToken);
@@ -590,6 +610,74 @@ get("support-form").addEventListener("submit",async e=>{
   }catch(error){get("support-otp").value="";alertText(error.message,true);}
   finally{confirmBtn.disabled=false;}
 });
+const SECURITY_EVENT_LABELS={
+  account_recovery_requested:"Cloud password recovery requested",
+  cloud_device_unregistered:"Cloud session inventory consent withdrawn",
+  cloud_session_registered:"New opt-in cloud session registered",
+  cloud_session_revoked:"Cloud session access revoked",
+  support_case_opened:"Support case opened",
+  support_action_completed:"Cloud support action completed",
+  support_action_failed:"Cloud support action failed",
+  support_review_pending:"Support action sent for review",
+  admin_step_up_denied:"Admin access blocked: verified 2FA required",
+  admin_allowlist_denied:"Admin access blocked: account is not authorized",
+  admin_inactive_session:"Admin access blocked: Auth session is inactive"
+};
+function safeCount(value){return Number.isSafeInteger(value)&&value>=0?value:0;}
+function shortId(value){return typeof value==="string"&&/^[a-f0-9-]{36}$/i.test(value)?value.slice(0,8):"";}
+function renderSecurityEvents(data){
+  if(!data||!Array.isArray(data.events)||!data.alerts)throw Error("Invalid security activity response");
+  const alerts=data.alerts,host=get("security-alerts");host.replaceChildren();
+  const repeated=safeCount(alerts.repeatedDeniedActors15m);
+  const cards=[
+    ["Repeated denied actors · 15 min",repeated,repeated?"Review repeated admin-access denials.":"No repeated actor reached the alert threshold.",repeated>0],
+    ["2FA step-up denials · 15 min",safeCount(alerts.adminStepUpDenials15m),"Valid accounts blocked before admin access.",false],
+    ["New opt-in sessions · 24 h",safeCount(alerts.newCloudSessions24h),"Session registrations reported by opted-in clients.",false],
+    ["Failed support actions · 24 h",safeCount(alerts.failedSupportActions24h),"Review the corresponding support history.",false]
+  ];
+  for(const [label,count,hint,warning] of cards){
+    const card=document.createElement("article");card.className="security-alert"+(warning?" warning":"");
+    const title=document.createElement("small");title.textContent=label;
+    const value=document.createElement("strong");value.textContent=String(count);
+    const note=document.createElement("small");note.textContent=hint;
+    card.append(title,value,note);host.append(card);
+  }
+  const list=get("security-events");list.replaceChildren();
+  for(const item of data.events){
+    const row=document.createElement("li");
+    const title=document.createElement("strong");
+    title.textContent=Object.hasOwn(SECURITY_EVENT_LABELS,item.eventType)?SECURITY_EVENT_LABELS[item.eventType]:"Security activity";
+    const meta=document.createElement("p");
+    const actor=shortId(item.actorId),subject=shortId(item.subjectId);
+    const time=typeof item.occurredAt==="string"&&Number.isFinite(Date.parse(item.occurredAt))
+      ?new Date(item.occurredAt).toLocaleString():"Unknown time";
+    const details=[];
+    if(actor)details.push("actor "+actor);
+    if(subject)details.push("account "+subject);
+    if(typeof item.detailCode==="string")details.push(item.detailCode.replaceAll("_"," "));
+    details.push(time);
+    meta.textContent=details.join(" · ");
+    row.append(title,meta);list.append(row);
+  }
+  get("security-events-state").textContent=data.events.length
+    ?"Showing "+data.events.length+" recent metadata-only security events."
+    :"No retained security events yet.";
+}
+async function loadSecurityEvents(){
+  if(!accessToken)return;
+  const state=get("security-events-state");
+  state.textContent="Loading security activity…";
+  try{
+    const data=await api("securityEvents",{limit:50});
+    renderSecurityEvents(data);
+  }catch(error){
+    get("security-events").replaceChildren();
+    get("security-alerts").replaceChildren();
+    state.textContent="Could not load security activity.";
+    alertText(error.message,true);
+  }
+}
+get("refresh-security-events").addEventListener("click",()=>{if(accessToken)loadSecurityEvents()});
 async function loadHistory(){
   const info=get("support-history-state");
   info.textContent="Loading support cases…";
