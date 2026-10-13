@@ -174,8 +174,10 @@ internal sealed class UpdateDialog : Window
         sizes.Text = ""; fallbackNote.Text = "";
         progress.Visibility = progressLabel.Visibility = Visibility.Collapsed;
         var policy = await LoadReleasePolicyAsync();
-        Version installedVersion = manager.CurrentVersion ?? Version.Parse(AppVersion);
-        bool mandatory = installedVersion < policy.MinimumVersion;
+        string installedText = manager.CurrentVersion?.ToString() ?? AppVersion;
+        if (!Version.TryParse(installedText, out var installedVersion) || installedVersion is null)
+            throw new InvalidOperationException("Installed version could not be verified.");
+        bool mandatory = installedVersion.CompareTo(policy.MinimumVersion) < 0;
         // Rollout sampling stays on this device. No stable device identifier or telemetry is sent.
         if (!mandatory && (policy.RolloutPercent == 0 || Random.Shared.Next(100) >= policy.RolloutPercent))
         {
