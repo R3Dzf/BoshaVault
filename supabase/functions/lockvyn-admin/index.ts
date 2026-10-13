@@ -1,5 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2.58.0";
 import { html } from "./ui.ts";
+import { verifiedUserGate, adminMembershipGate } from "./access.mjs";
 
 // The service-role key is only read inside this Edge Function. It is never
 // embedded in the HTML response, shipped to clients, or logged.
@@ -88,20 +89,18 @@ Deno.serve(async (request) => {
   if (invalid || !verified.user?.email_confirmed_at) return result({ error: "Unauthorized" }, 401);
   // getUser() validates the token with Supabase Auth; only inspect claims *after*
   // the verification succeeds, and never authorize from user_metadata.
-  let assurance = "";
+  let claims;
   try {
     const encoded = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
-    const claims = JSON.parse(atob(encoded));
-    assurance = claims.aal;
-    if (claims.sub !== verified.user.id || claims.role !== "authenticated") {
-      return result({ error: "Unauthorized" }, 401);
-    }
+    claims = JSON.parse(atob(encoded));
   } catch { return result({ error: "Unauthorized" }, 401); }
-  if (assurance !== "aal2") return result({ error: "Admin access requires verified 2FA", mfaRequired: true }, 403);
+  const denied = verifiedUserGate(verified.user, claims);
+  if (denied) return result(denied.body, denied.status);
   const { data: admin, error: permissionError } = await service
     .from("lockvyn_admins").select("user_id").eq("user_id", verified.user.id).maybeSingle();
   if (permissionError) return result({ error: "Administration is not configured" }, 503);
-  if (!admin) return result({ error: "Not an authorized Lockvyn administrator" }, 403);
+  if (!adminMembershipGate(admin, verified.user.id))
+    return result({ error: "Not an authorized Lockvyn administrator" }, 403);
 
   let body: Record<string, unknown>;
   try {
