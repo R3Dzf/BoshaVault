@@ -159,8 +159,52 @@ footer{font-size:12px;color:#787284;margin-top:20px}
       <p class="note">Only sessions the user explicitly opted in appear here. Names and software versions are self-reported; they do not prove a physical device's identity.</p></div>
       <button id="refresh-cloud-devices" type="button">Refresh sessions</button></div>
     <p class="support-note">Revoking blocks this signed-in app session from cloud snapshots and pairing. It does not erase offline vault data or invalidate the Auth refresh token. A new sign-in creates a different session.</p>
-    <div id="cloud-device-state" role="status" aria-live="polite" tabindex="-1">Registered sessions have not been loaded.</div>
-    <ul id="cloud-device-list" class="device-list"></ul>
+    <section class="sync-overview" aria-labelledby="cloud-sync-heading">
+      <h4 id="cloud-sync-heading">Encrypted cloud sync</h4>
+      <p id="cloud-sync-usage" role="status" aria-live="polite">Sync usage has not been loaded.</p>
+      <p id="cloud-sync-state" class="support-note" role="status" aria-live="polite">Cloud sync state has not been loaded.</p>
+      <div class="filters" role="group" aria-label="Cloud sync activity filters">
+        <label>Platform
+          <select id="cloud-device-platform"><option value="">All platforms</option>
+            <option value="windows">Windows</option><option value="android">Android</option>
+            <option value="macos">macOS</option><option value="ios">iOS</option>
+            <option value="linux">Linux</option><option value="other">Other</option></select></label>
+        <label>Last result
+          <select id="cloud-device-outcome"><option value="all">All results</option>
+            <option value="success">Success</option><option value="failure">Failure</option>
+            <option value="unknown">Not reported</option></select></label>
+        <label>Activity window
+          <select id="cloud-device-since"><option value="7">7 days</option><option value="30" selected>30 days</option>
+            <option value="90">90 days</option><option value="365">365 days</option>
+            <option value="all">Any time</option></select></label>
+        <label>Device or app
+          <input id="cloud-device-query" type="search" maxlength="80" autocomplete="off"
+            placeholder="Filter session metadata"></label>
+        <button id="apply-cloud-device-filters" type="button">Apply filters</button>
+      </div>
+      <div class="support-actions" aria-label="Cloud sync control">
+        <button class="primary" id="pause-cloud-sync" type="button" hidden>Pause cloud sync</button>
+        <button class="primary" id="resume-cloud-sync" type="button" hidden>Resume cloud sync</button>
+      </div>
+      <div id="cloud-sync-confirm" role="group" aria-labelledby="cloud-sync-confirm-heading" hidden>
+        <h4 id="cloud-sync-confirm-heading">Confirm cloud sync change</h4>
+        <p id="cloud-sync-confirm-summary" class="note"></p>
+        <form id="cloud-sync-form">
+          <label>Type the affected account's full email
+            <input id="cloud-sync-email" type="email" autocomplete="off" required></label>
+          <label>Reason
+            <select id="cloud-sync-reason"><option value="support_review">Support review</option>
+              <option value="suspected_compromise">Suspected compromise</option></select></label>
+          <label>Fresh code from your own authenticator app
+            <input id="cloud-sync-otp" inputmode="numeric" autocomplete="one-time-code"
+              pattern="[0-9]{6}" maxlength="6" required></label>
+          <div class="support-actions"><button class="primary" type="submit">Confirm cloud sync change</button>
+            <button id="cancel-cloud-sync" type="button">Cancel</button></div>
+        </form>
+      </div>
+      <div id="cloud-device-state" role="status" aria-live="polite" tabindex="-1">Registered sessions have not been loaded.</div>
+      <ul id="cloud-device-list" class="device-list"></ul>
+    </section>
     <div id="device-revoke-panel" role="group" aria-labelledby="device-revoke-heading" hidden>
       <h4 id="device-revoke-heading">Confirm cloud session revocation</h4>
       <p id="device-revoke-summary" class="note"></p>
@@ -410,7 +454,7 @@ async function loadSupportStatus(){
   }
 }
 get("refresh-support-status").addEventListener("click",loadSupportStatus);
-let pendingDevice=null,pendingDeviceTrigger=null,deviceRevocationBusy=false;
+let pendingDevice=null,pendingDeviceTrigger=null,deviceRevocationBusy=false,cloudSyncBusy=false,pendingSyncSuspend=null,pendingSyncTrigger=null,cloudDeviceLoadSequence=0;
 function clearDeviceConfirmation({restoreFocus=false,force=false}={}){
   if(deviceRevocationBusy&&!force)return;
   const trigger=pendingDeviceTrigger;
@@ -429,10 +473,25 @@ function setDeviceRevocationBusy(busy){
   panel.setAttribute("aria-busy",String(busy));
   for(const control of form.querySelectorAll("input,button"))control.disabled=busy;
   get("refresh-cloud-devices").disabled=busy;
+  get("apply-cloud-device-filters").disabled=busy;
+  get("pause-cloud-sync").disabled=busy;
+  get("resume-cloud-sync").disabled=busy;
   get("close-support").disabled=busy;
   get("logout").disabled=busy;
   for(const control of get("cloud-device-list").querySelectorAll("button"))control.disabled=busy;
   if(busy)get("cloud-device-state").textContent="Revocation is in progress. Keep this page open for the result.";
+}
+const SYNC_OUTCOME_LABELS={success:"Successful",failure:"Failed",unknown:"Not reported"};
+const SYNC_ERROR_LABELS={quota_exceeded:"Storage limit reached",sync_suspended:"Sync paused",
+  network:"Network issue",auth:"Sign-in required",transport:"Cloud service issue",unknown:"Other issue"};
+function safeBytes(value){return Number.isSafeInteger(value)&&value>=0?value:null;}
+function formatBytes(value){
+  if(value<1024)return value+" bytes";
+  return (value/(1024*1024)).toFixed(2)+" MiB";
+}
+function dateTime(value){
+  return typeof value==="string"&&Number.isFinite(Date.parse(value))
+    ?new Date(value).toLocaleString():"—";
 }
 function renderCloudDevices(devices){
   const list=get("cloud-device-list");list.replaceChildren();
@@ -446,12 +505,21 @@ function renderCloudDevices(devices){
       .filter(Boolean).join(" · ")||"Platform details not reported";
     li.append(platform);
     const dates=document.createElement("p");
-    dates.textContent="Registered "+date(item.registered_at)+
-      " · Last successful sync "+date(item.last_sync_at);
+    dates.textContent="Registered "+dateTime(item.registered_at)+
+      " · Last successful sync "+dateTime(item.last_sync_at);
     li.append(dates);
+    const activity=document.createElement("p");
+    const outcome=Object.hasOwn(SYNC_OUTCOME_LABELS,item.last_sync_outcome)
+      ?SYNC_OUTCOME_LABELS[item.last_sync_outcome]:"Not reported";
+    const bytes=safeBytes(item.last_sync_bytes);
+    const error=Object.hasOwn(SYNC_ERROR_LABELS,item.last_sync_error_code)
+      ?SYNC_ERROR_LABELS[item.last_sync_error_code]:"";
+    activity.textContent="Last attempt "+dateTime(item.last_sync_attempt_at)+" · "+outcome+
+      (bytes===null?"":" · "+formatBytes(bytes))+(error?" · "+error:"");
+    li.append(activity);
     const state=document.createElement("p");
     state.textContent=item.revoked_at
-      ?"Revoked "+new Date(item.revoked_at).toLocaleString()
+      ?"Revoked "+dateTime(item.revoked_at)
       :"Cloud session not revoked by Lockvyn";
     li.append(state);
     if(!item.revoked_at){
@@ -459,9 +527,9 @@ function renderCloudDevices(devices){
       button.type="button";button.textContent="Revoke cloud access for this session";
       button.setAttribute("aria-label","Revoke cloud access for "+
         (item.display_name||"unnamed app session")+" for "+supportTarget.email);
-      button.disabled=deviceRevocationBusy;
+      button.disabled=deviceRevocationBusy||cloudSyncBusy;
       button.addEventListener("click",()=>{
-        if(deviceRevocationBusy)return;
+        if(deviceRevocationBusy||cloudSyncBusy)return;
         pendingDevice=item;pendingDeviceTrigger=button;
         get("device-revoke-summary").textContent=
           "This blocks "+(item.display_name||"this app session")+
@@ -478,28 +546,49 @@ function renderCloudDevices(devices){
   }
   if(!devices.length){
     const empty=document.createElement("li");
-    empty.textContent="No opted-in cloud sessions are registered for this account.";
+    empty.textContent="No registered sessions match these filters.";
     list.append(empty);
   }
 }
 async function loadCloudDevices(){
   if(!supportTarget)return;
-  const id=supportTarget.id,state=get("cloud-device-state");
-  state.textContent="Loading registered cloud sessions…";
+  const id=supportTarget.id,state=get("cloud-device-state"),sequence=++cloudDeviceLoadSequence;
+  state.textContent="Loading registered cloud sessions and sync activity…";
   try{
-    const data=await api("deviceList",{id});
-    if(!supportTarget||supportTarget.id!==id)return;
-    if(!Array.isArray(data.devices))throw Error("Invalid session inventory response");
+    const selectedSince=get("cloud-device-since").value;
+    const data=await api("deviceList",{
+      id,
+      platform:get("cloud-device-platform").value||null,
+      outcome:get("cloud-device-outcome").value,
+      sinceDays:selectedSince==="all"?null:Number(selectedSince),
+      deviceQuery:get("cloud-device-query").value.trim()||null,
+    });
+    if(sequence!==cloudDeviceLoadSequence||!supportTarget||supportTarget.id!==id)return;
+    if(!Array.isArray(data.devices)||typeof data.suspended!=="boolean")throw Error("Invalid sync inventory response");
+    for(const key of ["snapshotCount","ciphertextBytes","quotaBytes","remainingBytes"])
+      if(!Number.isSafeInteger(data[key])||data[key]<0)throw Error("Invalid sync usage response");
     renderCloudDevices(data.devices);
+    get("cloud-sync-usage").textContent="Encrypted cloud snapshots: "+data.snapshotCount+
+      " of "+data.maxSnapshots+" · "+formatBytes(data.ciphertextBytes)+" used of "+
+      formatBytes(data.quotaBytes)+" · "+formatBytes(data.remainingBytes)+" remaining";
+    get("cloud-sync-state").textContent=data.suspended
+      ?"Cloud sync is paused. Offline vault data and encrypted cloud snapshots are preserved."
+      :"Cloud sync is active. Pausing it will preserve offline vault data and encrypted cloud snapshots.";
+    visible("pause-cloud-sync",!data.suspended);
+    visible("resume-cloud-sync",data.suspended);
     state.textContent=data.devices.length
-      ?data.devices.length+" registered session"+(data.devices.length===1?"":"s")
-      :"No opted-in sessions are registered.";
+      ?data.devices.length+" registered session"+(data.devices.length===1?"":"s")+" match these filters."
+      :"No registered sessions match these filters.";
   }catch(error){
-    if(supportTarget&&supportTarget.id===id)
-      state.textContent="Could not load registered cloud sessions: "+error.message;
+    if(sequence===cloudDeviceLoadSequence&&supportTarget&&supportTarget.id===id){
+      state.textContent="Could not load cloud sync activity: "+error.message;
+      get("cloud-sync-usage").textContent="Sync usage is unavailable.";
+      get("cloud-sync-state").textContent="Cloud sync state is unavailable.";
+    }
   }
 }
 get("refresh-cloud-devices").addEventListener("click",loadCloudDevices);
+get("apply-cloud-device-filters").addEventListener("click",loadCloudDevices);
 get("cancel-device-revoke").addEventListener("click",()=>clearDeviceConfirmation({restoreFocus:true}));
 get("device-revoke-form").addEventListener("submit",async e=>{
   e.preventDefault();
@@ -534,8 +623,82 @@ get("device-revoke-form").addEventListener("submit",async e=>{
     alertText(error.message,true);
   }finally{setDeviceRevocationBusy(false);}
 });
+function setCloudSyncBusy(busy){
+  cloudSyncBusy=busy;
+  const form=get("cloud-sync-form");
+  get("cloud-sync-confirm").setAttribute("aria-busy",String(busy));
+  for(const control of form.querySelectorAll("input,select,button"))control.disabled=busy;
+  get("refresh-cloud-devices").disabled=busy;
+  get("apply-cloud-device-filters").disabled=busy;
+  get("pause-cloud-sync").disabled=busy;
+  get("resume-cloud-sync").disabled=busy;
+  get("close-support").disabled=busy;
+  get("logout").disabled=busy;
+  for(const control of get("cloud-device-list").querySelectorAll("button"))control.disabled=busy;
+  if(busy)get("cloud-sync-state").textContent="Saving cloud sync state. Keep this page open for the result.";
+}
+function openCloudSyncControl(suspend,trigger){
+  if(!supportTarget||deviceRevocationBusy||cloudSyncBusy)return;
+  pendingSyncSuspend=suspend;pendingSyncTrigger=trigger;
+  get("cloud-sync-confirm-summary").textContent=(suspend
+    ?"Pause encrypted cloud snapshot sync for "
+    :"Resume encrypted cloud snapshot sync for ")+supportTarget.email+
+    "? Offline vault data and encrypted cloud snapshots will be preserved. A fresh authenticator code and typed email are required.";
+  get("cloud-sync-email").value="";get("cloud-sync-otp").value="";
+  visible("cloud-sync-confirm",true);get("cloud-sync-email").focus();
+}
+function closeCloudSyncConfirmation(restoreFocus=false){
+  if(cloudSyncBusy)return;
+  const trigger=pendingSyncTrigger;
+  pendingSyncSuspend=null;pendingSyncTrigger=null;
+  get("cloud-sync-email").value="";get("cloud-sync-otp").value="";
+  visible("cloud-sync-confirm",false);
+  if(restoreFocus&&trigger?.isConnected)trigger.focus();
+}
+get("pause-cloud-sync").addEventListener("click",e=>openCloudSyncControl(true,e.currentTarget));
+get("resume-cloud-sync").addEventListener("click",e=>openCloudSyncControl(false,e.currentTarget));
+get("cancel-cloud-sync").addEventListener("click",()=>closeCloudSyncConfirmation(true));
+get("cloud-sync-form").addEventListener("submit",async e=>{
+  e.preventDefault();
+  if(pendingSyncSuspend===null||!supportTarget||deviceRevocationBusy||cloudSyncBusy)return;
+  const suspend=pendingSyncSuspend,target=supportTarget,email=get("cloud-sync-email").value.trim();
+  if(email.toLowerCase()!==target.email.toLowerCase()){
+    alertText("The confirmation email does not match.",true);return;
+  }
+  if(!confirm((suspend?"Pause":"Resume")+" cloud sync for "+target.email+
+      "? Offline vault data and encrypted cloud snapshots are preserved."))return;
+  const button=get("cloud-sync-form").querySelector('button[type="submit"]');
+  button.disabled=true;setCloudSyncBusy(true);
+  try{
+    const user=await authFetch("user",null,"GET",accessToken);
+    const factor=(Array.isArray(user.factors)?user.factors:[])
+      .find(x=>x.factor_type==="totp"&&x.status==="verified");
+    if(!factor)throw Error("No verified administrator authenticator factor.");
+    const challenge=await authFetch("factors/"+encodeURIComponent(factor.id)+"/challenge",{},"POST",accessToken);
+    const fresh=await authFetch("factors/"+encodeURIComponent(factor.id)+"/verify",{
+      challenge_id:challenge.id,code:get("cloud-sync-otp").value.trim(),
+    },"POST",accessToken);
+    get("cloud-sync-otp").value="";
+    if(jwtAal(fresh.access_token)!=="aal2")throw Error("Fresh MFA verification did not succeed.");
+    accessToken=fresh.access_token;
+    const done=await api("syncControl",{
+      id:target.id,suspend,reasonCode:get("cloud-sync-reason").value,confirmEmail:email,
+    });
+    pendingSyncSuspend=null;pendingSyncTrigger=null;
+    visible("cloud-sync-confirm",false);
+    setCloudSyncBusy(false);
+    await loadCloudDevices();
+    get("cloud-sync-state").focus();
+    alertText(done.warning);
+  }catch(error){
+    get("cloud-sync-otp").value="";
+    alertText(error.message,true);
+  }finally{
+    setCloudSyncBusy(false);button.disabled=false;
+  }
+});
 function openSupport(user,trigger=null){
-  if(deviceRevocationBusy){alertText("A cloud session revocation is still being processed. Wait for its result.",true);return;}
+  if(deviceRevocationBusy||cloudSyncBusy){alertText("A cloud control is still being processed. Wait for its result.",true);return;}
   supportTrigger=trigger;
   supportTarget={id:user.id,email:user.email,isSelf:user.isSelf};
   pendingSupport=null;visible("support-confirm",false);
@@ -550,7 +713,7 @@ function openSupport(user,trigger=null){
   get("support-heading").focus();
 }
 function closeSupport(){
-  if(deviceRevocationBusy){alertText("A cloud session revocation is still being processed. Wait for its result.",true);return;}
+  if(deviceRevocationBusy||cloudSyncBusy){alertText("A cloud control is still being processed. Wait for its result.",true);return;}
   const trigger=supportTrigger;
   supportTrigger=null;
   supportTarget=null;pendingSupport=null;
@@ -615,6 +778,8 @@ const SECURITY_EVENT_LABELS={
   cloud_device_unregistered:"Cloud session inventory consent withdrawn",
   cloud_session_registered:"New opt-in cloud session registered",
   cloud_session_revoked:"Cloud session access revoked",
+  cloud_sync_suspended:"Encrypted cloud sync paused",
+  cloud_sync_resumed:"Encrypted cloud sync resumed",
   support_case_opened:"Support case opened",
   support_action_completed:"Cloud support action completed",
   support_action_failed:"Cloud support action failed",
@@ -704,7 +869,7 @@ get("clear-filters").addEventListener("click",()=>{
 get("prev").addEventListener("click",()=>{if(page>1&&!get("prev").disabled)loadPage(page-1);});
 get("next").addEventListener("click",()=>{if(!get("next").disabled)loadPage(page+1);});
 get("logout").addEventListener("click",()=>{
-  if(deviceRevocationBusy){alertText("A cloud session revocation is still being processed. Wait for its result.",true);return;}
+  if(deviceRevocationBusy||cloudSyncBusy){alertText("A cloud control is still being processed. Wait for its result.",true);return;}
   ++loadSequence;clearTimeout(searchDelay);
   accessToken="";accounts=[];matching=0;closeSupport();
   get("support-history").replaceChildren();
