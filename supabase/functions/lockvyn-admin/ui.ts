@@ -699,6 +699,7 @@ get("cloud-sync-form").addEventListener("submit",async e=>{
 });
 function openSupport(user,trigger=null){
   if(deviceRevocationBusy||cloudSyncBusy){alertText("A cloud control is still being processed. Wait for its result.",true);return;}
+  closeCloudSyncConfirmation();
   supportTrigger=trigger;
   supportTarget={id:user.id,email:user.email,isSelf:user.isSelf};
   pendingSupport=null;visible("support-confirm",false);
@@ -715,6 +716,7 @@ function openSupport(user,trigger=null){
 function closeSupport(){
   if(deviceRevocationBusy||cloudSyncBusy){alertText("A cloud control is still being processed. Wait for its result.",true);return;}
   const trigger=supportTrigger;
+  closeCloudSyncConfirmation();
   supportTrigger=null;
   supportTarget=null;pendingSupport=null;
   get("support-email").value="";get("support-otp").value="";
