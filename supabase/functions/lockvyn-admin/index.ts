@@ -119,7 +119,7 @@ async function loadReleaseCatalog(){
   const stable=releases.filter(r=>r&&!r.draft&&!r.prerelease&&
     typeof r.tag_name==="string"&&
     (validCandidateTag("windows",r.tag_name)||validCandidateTag("android",r.tag_name))).slice(0,12);
-  const output=await Promise.all(stable.map(async $1=>{
+  const output=await Promise.all(stable.map(async r=>{
     const tag=r.tag_name;
     const platform=validCandidateTag("windows",tag)?"windows":"android";
     const rawAssets=Array.isArray(r.assets)?r.assets.slice(0,40):[];
@@ -128,7 +128,7 @@ async function loadReleaseCatalog(){
         sha256:typeof a.digest==="string"&&/^sha256:[a-f0-9]{64}$/i.test(a.digest)
           ?a.digest.slice(7).toLowerCase():null}))
       .slice(0,24);
-    const manifestAsset=platform==="android"?rawAssets.find($1=>a?.name==="android-update.json"):null;
+    const manifestAsset=platform==="android"?rawAssets.find(a=>a?.name==="android-update.json"):null;
     const [checks,manifest]=await Promise.all([
       releaseChecks(tag),
       manifestAsset?androidReleaseManifest(manifestAsset.id,tag):Promise.resolve(null),
