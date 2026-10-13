@@ -102,20 +102,27 @@ cloud refresh sessions via the supported GoTrue
 - A separate final consent click is required. Auth failures report an error,
   never a fabricated success. The page uses nonce-scoped CSP, no third-party
   scripts, no analytics, no new service or paid feature.
-- Revoking refresh tokens does **not** invalidate an already-issued access
-  JWT before `exp`. It cannot lock an offline encrypted vault or recover a
-  missing TOTP factor. Clients will need to sign in again after expiry.
-- The admin's `session_review` workflow is still review-only. No admin may
+- Supabase access JWTs remain cryptographically valid until `exp`, but
+  the sensitive Lockvyn paths now check the signed `session_id` against a
+  live `auth.sessions` row. The guard applies to encrypted snapshots,
+  temporary device-pairing data, and every admin Edge Function action. After
+  global sign-out removes the session row, an old JWT cannot use those paths.
+  Other Supabase endpoints without this guard may accept the JWT until expiry.
+- This cannot lock or erase an offline encrypted vault, or recover a missing
+  TOTP factor. Clients with revoked refresh tokens must sign in again.
+- The admin's `session_review` workflow remains review-only. No admin may
   impersonate a customer or collect a user's password/JWT to remotely log
-  them out. This is a **self-service mitigation**, not an administrator
-  session revocation endpoint.
-- Integration test: disposable local GoTrue users sign in from two additional
-  sessions, the authenticated user initiates global sign-out, and old refresh
-  tokens are rejected. Existing AAL2 owner, banned-user and AAL1 denial tests
-  remain enabled.
-- No SQL migration and no production user data changes. Roll back by
-  reverting the Edge Function and Cloudflare Worker to their previous
-  versions, leaving user Auth and encrypted vault records intact.
+  them out. Session revocation is owner-authorized self-service.
+- Integration tests use disposable local GoTrue users with additional
+  sessions. They verify global logout rejects old refresh tokens and that
+  stale access JWTs cannot call the admin API, read encrypted snapshots, or
+  access device-pairing data. The test confirms the underlying rows remain
+  present; revocation does not erase data.
+- Additive migration `20261013193000_active_cloud_sessions.sql`; it changes
+  authorization checks only and does not mutate customer rows. Roll back the
+  Edge Function to its prior version and, if removing the RLS guard, apply a
+  forward migration restoring the prior policy function. Keep Auth sessions
+  and encrypted vault rows intact.
 
 ## Public production delivery smoke test
 
@@ -127,7 +134,7 @@ This proves page delivery and its public response safeguards only. It does not s
 
 The self-service /security page now lists the account owner's verified TOTP factors and lets the owner choose the factor they can access before a challenge is issued. If a code from one device is unavailable, the owner can return and use a separately enrolled backup TOTP. Factor labels are rendered as plain text. The chosen factor must still pass Supabase's challenge and verification flow, the resulting session must reach AAL2, and the owner must give final consent before global sign-out.
 
-This does not reset MFA, reveal factor secrets, or recover an account after every enrolled factor is lost. Supabase Auth does not provide recovery codes; the supported safety measure is enrolling a separate backup factor ([Supabase MFA guide](https://supabase.com/docs/guides/auth/auth-mfa)). No administrator MFA-reset bypass is enabled, so identity-proofed recovery remains an open Phase 02 gate.
+This does not reset MFA, reveal factor secrets, or recover an account after every enrolled factor is lost. Supabase JS Auth now documents experimental recovery-code APIs; they are disabled by default and this hosted project's Auth-server availability has not been verified. The current Lockvyn flow relies on separately enrolled backup TOTP factors ([recovery-code API](https://supabase.com/docs/reference/javascript/auth-mfa-recovery-codes-generate), [MFA guide](https://supabase.com/docs/guides/auth/auth-mfa), [lost-access guide](https://supabase.com/docs/guides/troubleshooting/lost-accessforgot-the-mfa-device-nAPT-7)). No administrator MFA-reset bypass is enabled, so recovery after all factors are lost remains an open Phase 02 gate.
 
 **Remaining Phase 02 gate:** production user acceptance, supported
 identity-proofed 2FA recovery, user-consented deletion with retention, and
