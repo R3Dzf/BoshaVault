@@ -88,8 +88,24 @@ const vm = require("node:vm");
       };
     },
     rpc:async(name,args)=>{
-      assert.equal(name,"lockvyn_claim_recovery");
       assert.equal(args.p_actor,ownerId);
+      if(name==="lockvyn_admin_directory"){
+        calls.list++;
+        const full=[
+          {id:ownerId,email:"owner@example.invalid",confirmed:true,mfa:true,isSelf:true},
+          {id:otherId,email:"user@example.invalid",confirmed:true,mfa:false,isSelf:false},
+          {id:targetId,email:"target@example.invalid",confirmed:true,mfa:false,isSelf:false},
+        ];
+        const q=args.p_search.toLowerCase();
+        const rows=full.filter(u=>u.email.includes(q) &&
+          (args.p_email_state==="all" || (args.p_email_state==="verified" && u.confirmed) ||
+             (args.p_email_state==="pending" && !u.confirmed)) &&
+          (args.p_mfa_state==="all" || (args.p_mfa_state==="enabled" && u.mfa) ||
+             (args.p_mfa_state==="disabled" && !u.mfa)));
+        return {data:{page:args.p_page,perPage:30,total:full.length,matching:rows.length,
+          stats:{verified:3,mfaEnabled:1,active30Days:1},users:rows},error:null};
+      }
+      assert.equal(name,"lockvyn_claim_recovery");
       assert.equal(args.p_target,targetId);
       calls.recoveryClaim++;
       return {data:true,error:null};
@@ -113,11 +129,11 @@ const vm = require("node:vm");
   };
   vm.runInNewContext(source,context,{filename:file,timeout:2000});
   assert.equal(typeof handler,"function");
-  async function call({jwt,action="list",id=targetId,page=1,originHeader=origin,contentType="application/json",method="POST"}={}){
+  async function call({jwt,action="list",id=targetId,page=1,search="",emailState="all",mfaState="all",originHeader=origin,contentType="application/json",method="POST"}={}){
     const headers={Origin:originHeader,"Content-Type":contentType};
     if(jwt)headers.Authorization="Bearer "+jwt;
     const request=new Request(endpoint,{method,headers,
-      body:method==="POST"?JSON.stringify({action,id,page}):undefined});
+      body:method==="POST"?JSON.stringify({action,id,page,search,emailState,mfaState}):undefined});
     const res=await handler(request);
     return {status:res.status,data:await res.json()};
   }
@@ -147,7 +163,19 @@ const vm = require("node:vm");
   assert.equal(good.data.total,3);
   assert.equal(good.data.users[0].mfa,true);
   assert.equal(good.data.users[1].mfa,false);
+  assert.equal(good.data.matching,3);
+  assert.equal(good.data.stats.mfaEnabled,1);
   assert.equal(calls.list,1);
+  const filtered=await call({jwt:ownerAal2,search:"OWNER"});
+  assert.equal(filtered.status,200);
+  assert.equal(filtered.data.matching,1);
+  assert.equal(filtered.data.users[0].id,ownerId);
+  const second=await call({jwt:ownerAal2,mfaState:"disabled"});
+  assert.equal(second.status,200);
+  assert.equal(second.data.matching,2);
+  const rejected=await call({jwt:ownerAal2,emailState:"invalid"});
+  assert.equal(rejected.status,400);
+  assert.equal(rejected.data.users,undefined);
   const recovery=await call({jwt:ownerAal2,action:"recover"});
   assert.equal(recovery.status,200);
   assert.equal(recovery.data.sent,true);
