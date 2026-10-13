@@ -119,15 +119,27 @@ Deno.serve(async (request) => {
     }
     const { data, error } = await service.auth.admin.listUsers({ page, perPage: 30 });
     if (error || !data) return result({ error: "Unable to load accounts" }, 502);
-    return result({
-      page, total: data.total ?? null,
-      users: data.users.map((user) => ({
-        id: user.id, email: user.email ?? "", createdAt: user.created_at,
-        lastSignInAt: user.last_sign_in_at ?? null,
-        confirmed: Boolean(user.email_confirmed_at),
-        mfa: Boolean(user.factors?.some((factor) => factor.status === "verified")),
-      })),
-    });
+    // listUsers() does not reliably return MFA factors. Fetch the account's
+    // verified enrollment status explicitly from Supabase Auth Admin.
+    // Bound concurrency and return null (Unknown), never false (Off), on failure.
+    const users = [];
+    for (let offset = 0; offset < data.users.length; offset += 5) {
+      const batch = await Promise.all(data.users.slice(offset, offset + 5).map(async (user) => {
+        const { data: factors, error: factorsError } =
+          await service.auth.admin.mfa.listFactors({ userId: user.id });
+        const mfa = factorsError || !Array.isArray(factors?.factors)
+          ? null
+          : factors.factors.some((factor) => factor.status === "verified");
+        return {
+          id: user.id, email: user.email ?? "", createdAt: user.created_at,
+          lastSignInAt: user.last_sign_in_at ?? null,
+          confirmed: Boolean(user.email_confirmed_at),
+          mfa,
+        };
+      }));
+      users.push(...batch);
+    }
+    return result({ page, total: data.total ?? null, users });
   }
   if (body.action === "recover") {
     if (recoveryRedirect !== dashboardOrigin + "/recover") {
