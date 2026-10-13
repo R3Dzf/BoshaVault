@@ -73,7 +73,7 @@ The user chooses the new password through their own verified email.
 <script nonce="${n}">
 "use strict";
 const PUBLIC_KEY=${JSON.stringify(key)}, RECOVERY=${recovering};
-const base=location.origin;
+const base="https://ghmbcfqiomggoxgwghjs.supabase.co";
 let accessToken="", pendingFactor=null, challengeId="", page=1, accounts=[];
 const get=id=>document.getElementById(id);
 function alertText(message,bad=false){const el=get("alert");el.textContent=message;el.className=bad?"error":"success";}
@@ -90,7 +90,7 @@ async function authFetch(path,body,verb="POST",jwt=""){
   return data;
 }
 async function api(action,params){
-  const res=await fetch(location.pathname.replace(/\/$/,""),{method:"POST",cache:"no-store",
+  const res=await fetch(base+"/functions/v1/lockvyn-admin",{method:"POST",cache:"no-store",
     headers:{"Authorization":"Bearer "+accessToken,"Content-Type":"application/json"},
     body:JSON.stringify({action,...params})});
   const data=await res.json();
@@ -140,9 +140,9 @@ function display(){
   for(const user of accounts.filter(u=>u.email.toLowerCase().includes(search))){
     const row=document.createElement("tr");
     td(row,user.email);td(row,date(user.createdAt));td(row,date(user.lastSignInAt));
-    td(row,user.confirmed?"Verified":"Pending");td(row,user.mfa?"Enabled":"Off");
+    td(row,user.confirmed?"Verified":"Pending");td(row,user.mfa===true?"Enabled":user.mfa===false?"Off":"Unknown");
     const action=document.createElement("td"),btn=document.createElement("button");
-    btn.textContent="Send recovery email";btn.disabled=!user.confirmed;
+    btn.textContent=user.isSelf?"Reset my cloud password":"Send recovery email";btn.disabled=!user.confirmed;
     btn.addEventListener("click",()=>sendRecovery(user));action.append(btn);row.append(action);body.append(row);
   }
 }
@@ -156,8 +156,11 @@ async function loadPage(n){
   }catch(error){alertText(error.message,true);}
 }
 async function sendRecovery(user){
-  if(!confirm("Send a cloud password recovery email to "+user.email+"? This will not change their master passphrase."))return;
-  try{await api("recover",{id:user.id});alertText("Recovery email requested for "+user.email);}
+  const message=user.isSelf
+    ? "Send yourself a cloud account password reset email? Your encrypted vault master passphrase will not change."
+    : "Send a cloud account password recovery email to "+user.email+"? This will not change their master passphrase.";
+  if(!confirm(message))return;
+  try{await api("recover",{id:user.id});alertText("Recovery email requested for "+user.email+". Check the inbox and spam folder.");}
   catch(error){alertText(error.message,true);}
 }
 get("search").addEventListener("input",display);

@@ -6,8 +6,9 @@ import { html } from "./ui.ts";
 const apiUrl = Deno.env.get("SUPABASE_URL") ?? "";
 const publicKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
 const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-const recoveryRedirect = Deno.env.get("LOCKVYN_RECOVERY_REDIRECT_URL") ?? 
-  (apiUrl ? new URL("/functions/v1/lockvyn-admin/recover", apiUrl).href : "");
+const dashboardOrigin = "https://lockvyn-admin-ui.r3dzf-studio.workers.dev";
+const recoveryRedirect = Deno.env.get("LOCKVYN_RECOVERY_REDIRECT_URL") ??
+  dashboardOrigin + "/recover";
 const service = createClient(apiUrl, serviceKey, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
@@ -21,6 +22,8 @@ function result(data: unknown, status = 200): Response {
       "X-Content-Type-Options": "nosniff",
       "Referrer-Policy": "no-referrer",
       "X-Frame-Options": "DENY",
+      "Access-Control-Allow-Origin": dashboardOrigin,
+      "Vary": "Origin",
     },
   });
 }
@@ -32,6 +35,20 @@ function nonce(): string {
 
 Deno.serve(async (request) => {
   const url = new URL(request.url);
+  if (request.method === "OPTIONS" &&
+      url.pathname.endsWith("/lockvyn-admin") &&
+      request.headers.get("origin") === dashboardOrigin) {
+    return new Response(null, {
+      status: 204, headers: {
+        "Access-Control-Allow-Origin": dashboardOrigin,
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "authorization, content-type",
+        "Access-Control-Max-Age": "600",
+        "Cache-Control": "no-store",
+        "Vary": "Origin",
+      },
+    });
+  }
   if (request.method === "GET" && (url.pathname.endsWith("/lockvyn-admin") ||
       url.pathname.endsWith("/lockvyn-admin/") ||
       url.pathname.endsWith("/lockvyn-admin/recover"))) {
@@ -56,7 +73,7 @@ Deno.serve(async (request) => {
   }
 
   // Reject browser cross-origin requests before evaluating any user credentials.
-  if (request.headers.get("origin") !== url.origin) return result({ error: "Forbidden" }, 403);
+  if (![url.origin, dashboardOrigin].includes(request.headers.get("origin") ?? "")) return result({ error: "Forbidden" }, 403);
   if (!request.headers.get("content-type")?.startsWith("application/json")) {
     return result({ error: "Invalid content type" }, 415);
   }
@@ -102,20 +119,31 @@ Deno.serve(async (request) => {
     }
     const { data, error } = await service.auth.admin.listUsers({ page, perPage: 30 });
     if (error || !data) return result({ error: "Unable to load accounts" }, 502);
-    return result({
-      page, total: data.total ?? null,
-      users: data.users.map((user) => ({
-        id: user.id, email: user.email ?? "", createdAt: user.created_at,
-        lastSignInAt: user.last_sign_in_at ?? null,
-        confirmed: Boolean(user.email_confirmed_at),
-        mfa: Boolean(user.factors?.some((factor) => factor.status === "verified")),
-      })),
-    });
+    // listUsers() does not reliably return MFA factors. Fetch the account's
+    // verified enrollment status explicitly from Supabase Auth Admin.
+    // Bound concurrency and return null (Unknown), never false (Off), on failure.
+    const users = [];
+    for (let offset = 0; offset < data.users.length; offset += 5) {
+      const batch = await Promise.all(data.users.slice(offset, offset + 5).map(async (user) => {
+        const { data: factors, error: factorsError } =
+          await service.auth.admin.mfa.listFactors({ userId: user.id });
+        const mfa = factorsError || !Array.isArray(factors?.factors)
+          ? null
+          : factors.factors.some((factor) => factor.status === "verified");
+        return {
+          id: user.id, email: user.email ?? "", createdAt: user.created_at,
+          lastSignInAt: user.last_sign_in_at ?? null,
+          confirmed: Boolean(user.email_confirmed_at),
+          isSelf: user.id === verified.user.id,
+          mfa,
+        };
+      }));
+      users.push(...batch);
+    }
+    return result({ page, total: data.total ?? null, users });
   }
   if (body.action === "recover") {
-    if (!/^https:\/\/[^\s]+$/.test(recoveryRedirect) ||
-        new URL(recoveryRedirect).origin !== new URL(apiUrl).origin ||
-        !new URL(recoveryRedirect).pathname.endsWith("/lockvyn-admin/recover")) {
+    if (recoveryRedirect !== dashboardOrigin + "/recover") {
       return result({ error: "Account recovery link is not configured" }, 503);
     }
     const id = body.id;
@@ -123,7 +151,9 @@ Deno.serve(async (request) => {
         !/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(id)) {
       return result({ error: "Invalid user" }, 400);
     }
-    if (id === verified.user.id) return result({ error: "Use your own account recovery flow" }, 400);
+    // The approved administrator can request recovery of their own cloud login
+    // too. Delivery remains email-verified, audited, and rate-limited just like
+    // support requests for other accounts. This never changes the vault key.
     const { data: target, error: targetError } = await service.auth.admin.getUserById(id);
     if (targetError || !target.user?.email || !target.user.email_confirmed_at) {
       return result({ error: "Account not found or unconfirmed" }, 404);

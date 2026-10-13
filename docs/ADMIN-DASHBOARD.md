@@ -2,7 +2,7 @@
 
 The account-support dashboard runs as the `lockvyn-admin` Supabase Edge Function.
 
-Open: `https://ghmbcfqiomggoxgwghjs.supabase.co/functions/v1/lockvyn-admin`
+Open: `https://lockvyn-admin-ui.r3dzf-studio.workers.dev/` (Cloudflare HTML host). The Supabase Edge Function is the authenticated JSON backend, not a browser-facing HTML renderer.
 
 ## Scope and security
 - View a paginated list of Supabase Auth accounts: email, registration, last sign-in, confirmed-email status and verified 2FA status.
@@ -25,7 +25,7 @@ Open: `https://ghmbcfqiomggoxgwghjs.supabase.co/functions/v1/lockvyn-admin`
    ```
 4. Deploy `supabase/functions/lockvyn-admin` with `verify_jwt=false`. The login page is public, but each POST request verifies the signed user token, AAL2, and the allowlist independently. Configure the function through the Supabase project backend only.
 5. In Supabase Auth → URL Configuration → Redirect URLs, add exactly:
-   `https://ghmbcfqiomggoxgwghjs.supabase.co/functions/v1/lockvyn-admin/recover`
+   `https://lockvyn-admin-ui.r3dzf-studio.workers.dev/recover`
    Verify the recovery email template uses the canonical `{{ .ConfirmationURL }}` reset link. Only your Supabase email provider should send recovery emails.
 6. Test on a **non-production account**: signing in without permission must fail, signing in without AAL2 must fail, recovery should send to the **account owner**, and a second request within one hour must be refused.
 
@@ -33,3 +33,6 @@ The allowlist is empty by default. Do **not** use a public email comparison, a h
 
 ## Important limitation
 The vault master passphrase is not the cloud account password. Admins cannot reset or reveal it. The only honest recovery options are an unlocked trusted device or a user-held encrypted backup and its decryption credentials. Supabase service operators can see account metadata and ciphertext, not the plaintext vault.
+
+## Browser HTML hosting
+Supabase Edge Functions serve HTML as text on their default project domain. The login page is served through a dedicated Cloudflare Worker (`infra/cloudflare/lockvyn-admin-ui.js`) that renders HTML with a strict nonce-based CSP. The browser signs in directly with Supabase Auth and sends only authorized admin API requests to the Edge Function from the explicitly allowed Cloudflare origin. No administrative service-role secret is shipped to the Worker or browser.
