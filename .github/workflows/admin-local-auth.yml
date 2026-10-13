@@ -54,15 +54,12 @@ jobs:
           supabase start
           supabase status -o json > "$RUNNER_TEMP/local-supabase.json"
           node -e 'const x=require(process.argv[1]);if(!x.API_URL?.startsWith("http://127.0.0.1:"))process.exit(1)' "$RUNNER_TEMP/local-supabase.json"
-      - name: Apply cloud sync and admin schemas to ephemeral database
+      - name: Apply admin and active-session guard schemas to ephemeral database
         shell: bash
         run: |
           set -euo pipefail
           container="$(docker ps --filter name=supabase_db_ --format '{{.ID}}' | head -n 1)"
           if [ -z "$container" ]; then echo 'No local Postgres container'; exit 1; fi
-          docker exec -i "$container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 < supabase/migrations/20261009182200_opaque_device_snapshots.sql
-          docker exec -i "$container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 < supabase/migrations/20261011150409_opt_in_mfa_enforcement.sql
-          docker exec -i "$container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 < supabase/migrations/20261012083000_device_pairing_sessions.sql
           docker exec -i "$container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 < supabase/migrations/20261013123000_admin_console.sql
           docker exec -i "$container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 < supabase/migrations/20261013173000_admin_directory.sql
           docker exec -i "$container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 < supabase/migrations/20261013190000_admin_support_cases.sql
