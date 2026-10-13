@@ -143,6 +143,7 @@ const vm = require("node:vm");
     freshVerifiedTotp:supportPolicy.freshVerifiedTotp,
     safeTarget:supportPolicy.safeTarget,
     isAutomaticAction:supportPolicy.isAutomaticAction,
+    cloudLoginStatus:supportPolicy.cloudLoginStatus,
     Deno:{
       env:{get:name=>({
         SUPABASE_URL:"https://example.supabase.co",
@@ -220,6 +221,16 @@ const vm = require("node:vm");
   assert.equal(self.status,403,"Owner cannot suspend own account");
   const invalidKind=await call({jwt:ownerAal2,action:"supportPrepare",kind:"delete_now",reason:"lost_device"});
   assert.equal(invalidKind.status,400);
+  const statusBefore=await call({jwt:ownerAal2,action:"supportStatus"});
+  assert.equal(statusBefore.status,200);
+  assert.equal(statusBefore.data.cloudLogin.state,"active");
+  assert.equal(statusBefore.data.cloudLogin.until,null);
+  const deniedStatus=await call({jwt:nonAdminAal2,action:"supportStatus"});
+  assert.equal(deniedStatus.status,403);
+  const selfStatus=await call({jwt:ownerAal2,action:"supportStatus",id:ownerId});
+  assert.equal(selfStatus.status,403);
+  const badStatus=await call({jwt:ownerAal2,action:"supportStatus",id:"invalid"});
+  assert.equal(badStatus.status,400);
   const requested=await call({jwt:ownerAal2,action:"supportPrepare",kind:"suspend_24h",reason:"lost_device"});
   assert.equal(requested.status,200);assert.equal(requested.data.caseId,caseId);
   assert.equal(calls.updated,0,"Preparing support must never change Auth");

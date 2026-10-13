@@ -38,6 +38,22 @@ export function freshVerifiedTotp(claims, nowSeconds) {
 export function safeTarget(targetId, actorId, targetIsAdmin) {
   return Boolean(targetId && actorId && targetId!==actorId && !targetIsAdmin);
 }
+// Read-only cloud-login status; never infer state from audit cases or from
+// a past action. Malformed/missing provider timestamps must not mean active.
+export function cloudLoginStatus(bannedUntil, nowMs = Date.now()) {
+  if (bannedUntil === null || bannedUntil === undefined || bannedUntil === "") {
+    return { state: "active", until: null };
+  }
+  if (typeof bannedUntil !== "string" || !Number.isFinite(nowMs)) {
+    return { state: "unknown", until: null };
+  }
+  const parsed = Date.parse(bannedUntil);
+  if (!Number.isFinite(parsed)) return { state: "unknown", until: null };
+  return parsed > nowMs
+    ? { state: "suspended", until: new Date(parsed).toISOString() }
+    : { state: "active", until: null };
+}
+
 export function isAutomaticAction(kind) {
   return kind==="suspend_24h" || kind==="restore_login";
 }
