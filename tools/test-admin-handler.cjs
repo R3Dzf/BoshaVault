@@ -38,7 +38,7 @@ const vm = require("node:vm");
   const byToken = new Map();
   const caseId = "d0000000-0000-4000-8000-000000000004";
   let caseState="pending";
-  const calls = {list:0,adminLookup:0,mail:0,recoveryClaim:0,factors:0,updated:0,prepared:0,claimed:0,finished:0,sessionCheck:0,securitySignals:[],securityFeed:0};
+  const calls = {list:0,adminLookup:0,mail:0,recoveryClaim:0,factors:0,updated:0,prepared:0,claimed:0,finished:0,sessionCheck:0,securitySignals:[],securityFeed:0,syncOverview:0,syncControl:0};
   const revokedSessionIds=new Set();
   let sessionLookupError=false;
   function token(user,aal="aal2",role="authenticated",sessionId=user.id) {
@@ -120,6 +120,32 @@ const vm = require("node:vm");
         return {data:{events:[],alerts:{adminStepUpDenials15m:0,adminAllowlistDenials15m:0,
           repeatedDeniedActors15m:0,newCloudSessions24h:0,failedSupportActions24h:0}},error:null};
       }
+      if(name==="lockvyn_admin_cloud_sync_overview"){
+        calls.syncOverview++;
+        assert.equal(args.p_actor,ownerId);
+        assert.equal(args.p_actor_session,ownerId);
+        assert.equal(args.p_actor_aal,"aal2");
+        assert.equal(args.p_target,targetId);
+        assert.equal(args.p_platform,"windows");
+        assert.equal(args.p_outcome,"failure");
+        assert.equal(args.p_since_days,7);
+        assert.equal(args.p_device_query,"laptop");
+        return {data:{devices:[{device_id:"d0000000-0000-4000-8000-000000000005",
+          last_sync_outcome:"failure"}],suspended:false,suspendedAt:null,
+          snapshotCount:2,ciphertextBytes:2048,quotaBytes:67108864,
+          remainingBytes:67106816,maxSnapshots:64},error:null};
+      }
+      if(name==="lockvyn_admin_set_cloud_sync_suspension"){
+        calls.syncControl++;
+        assert.equal(args.p_actor,ownerId);
+        assert.equal(args.p_actor_session,ownerId);
+        assert.equal(args.p_actor_aal,"aal2");
+        assert.equal(args.p_fresh_totp,true);
+        assert.equal(args.p_target,targetId);
+        assert.equal(args.p_suspend,true);
+        assert.equal(args.p_confirm_email,"target@example.invalid");
+        return {data:true,error:null};
+      }
       if(name==="lockvyn_admin_directory"){
         calls.list++;
         const full=[
@@ -180,11 +206,11 @@ const vm = require("node:vm");
   };
   vm.runInNewContext(source,context,{filename:file,timeout:2000});
   assert.equal(typeof handler,"function");
-  async function call({jwt,action="list",id=targetId,page=1,search="",emailState="all",mfaState="all",limit=50,originHeader=origin,contentType="application/json",method="POST",kind,reason,caseId:requestCaseId,confirmEmail}={}){
+  async function call({jwt,action="list",id=targetId,page=1,search="",emailState="all",mfaState="all",limit=50,originHeader=origin,contentType="application/json",method="POST",kind,reason,caseId:requestCaseId,confirmEmail,platform,outcome,sinceDays,deviceQuery,suspend,reasonCode}={}){
     const headers={Origin:originHeader,"Content-Type":contentType};
     if(jwt)headers.Authorization="Bearer "+jwt;
     const request=new Request(endpoint,{method,headers,
-      body:method==="POST"?JSON.stringify({action,id,page,search,emailState,mfaState,limit,kind,reason,caseId:requestCaseId,confirmEmail}):undefined});
+      body:method==="POST"?JSON.stringify({action,id,page,search,emailState,mfaState,limit,kind,reason,caseId:requestCaseId,confirmEmail,platform,outcome,sinceDays,deviceQuery,suspend,reasonCode}):undefined});
     const res=await handler(request);
     return {status:res.status,data:await res.json()};
   }
@@ -231,6 +257,26 @@ const vm = require("node:vm");
   assert.equal(feed.status,200,"AAL2 administrator can read the security feed");
   assert.equal(feed.data.events.length,0);
   assert.equal(calls.securityFeed,1);
+  const syncInventory=await call({jwt:ownerAal2,action:"deviceList",id:targetId,
+    platform:"windows",outcome:"failure",sinceDays:7,deviceQuery:"laptop"});
+  assert.equal(syncInventory.status,200,"AAL2 administrator can load filtered sync activity");
+  assert.equal(syncInventory.data.devices[0].last_sync_outcome,"failure");
+  assert.equal(syncInventory.data.snapshotCount,2);
+  assert.equal(calls.syncOverview,1);
+  const badSyncFilter=await call({jwt:ownerAal2,action:"deviceList",id:targetId,
+    platform:"bogus",outcome:"failure",sinceDays:7,deviceQuery:"laptop"});
+  assert.equal(badSyncFilter.status,400,"Invalid sync inventory filters are rejected");
+  assert.equal(calls.syncOverview,1,"Invalid filters never reach the privileged RPC");
+  const badSyncEmail=await call({jwt:ownerAal2,action:"syncControl",id:targetId,
+    suspend:true,reasonCode:"support_review",confirmEmail:"wrong@example.invalid"});
+  assert.equal(badSyncEmail.status,409,"Typed email is checked before changing sync");
+  assert.equal(calls.syncControl,0);
+  const syncPause=await call({jwt:ownerAal2,action:"syncControl",id:targetId,
+    suspend:true,reasonCode:"support_review",confirmEmail:"target@example.invalid"});
+  assert.equal(syncPause.status,200,"Fresh TOTP admin can pause cloud sync");
+  assert.equal(syncPause.data.suspended,true);
+  assert.match(syncPause.data.warning,/Offline vault data and encrypted cloud snapshots are preserved/);
+  assert.equal(calls.syncControl,1);
   const invalidFeed=await call({jwt:ownerAal2,action:"securityEvents",limit:101});
   assert.equal(invalidFeed.status,400,"Security feed page size is bounded");
   assert.equal(calls.securityFeed,1,"Invalid feed requests must not query audit data");
@@ -265,7 +311,7 @@ const vm = require("node:vm");
   assert.equal(recovery.data.sent,true);
   assert.equal(calls.mail,1,"only synthetic mock email sent");
   assert.equal(calls.recoveryClaim,1,"recovery is audited/rate-limited through mock RPC");
-  assert.equal(calls.adminLookup,1);
+  assert.equal(calls.adminLookup,3,"Recovery plus both cloud sync confirmations look up only synthetic targets");
   // Phase 02: dangerous operations must be rejected before any Auth mutation.
   const beforeSupport={...calls};
   const deniedSupport=await call({jwt:ownerAal1,action:"supportPrepare",kind:"suspend_24h",reason:"lost_device"});

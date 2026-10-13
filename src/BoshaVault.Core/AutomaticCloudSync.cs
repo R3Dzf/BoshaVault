@@ -45,9 +45,12 @@ public static class AutomaticCloudSync
     {
         profile.Validate(profile.VaultId); ct.ThrowIfCancellationRequested();
         byte[]? local = null; var remote = new List<RemoteEncryptedSnapshot>();
-        bool downloaded = false, uploaded = false; int conflicts = 0;
+        bool downloaded = false, uploaded = false; int conflicts = 0; long transferBytes = 0;
         try
         {
+            CloudSyncStatus status = await transport.GetCloudSyncStatusAsync(ct);
+            if (status.Suspended)
+                throw new VaultException("Cloud sync is paused. Offline vault data and encrypted cloud snapshots are preserved.");
             local = await export(); var env = VaultCodec.Parse(local);
             if (Guid.Parse(env.VaultId) != profile.VaultId) throw new VaultException("Cloud settings do not match this vault.");
             if (profile.KeyEpoch == 0) profile.KeyEpoch = env.KeyEpoch;
@@ -60,7 +63,12 @@ public static class AutomaticCloudSync
                 if (stamp != profile.DownloadedStamp || missing)
                 {
                     var all = await transport.ListAsync(profile.VaultSlot, ct);
-                    foreach (var row in all) { if (row.DeviceSlot != profile.DeviceSlot) remote.Add(row); else CryptographicOperations.ZeroMemory(row.Blob); }
+                    foreach (var row in all)
+                    {
+                        transferBytes = Math.Min(67_108_864L,transferBytes+row.Blob.Length);
+                        if (row.DeviceSlot != profile.DeviceSlot) remote.Add(row);
+                        else CryptographicOperations.ZeroMemory(row.Blob);
+                    }
                     var inner = Authenticate(remote, profile);
                     foreach (byte[] bytes in inner) CryptographicOperations.ZeroMemory(bytes);
                     stamp = Stamp(remote.Select(x => new RemoteSnapshotMetadata(x.DeviceSlot, Digest(x.Blob))), profile.DeviceSlot);
@@ -89,6 +97,7 @@ public static class AutomaticCloudSync
                 try
                 {
                     outer = CloudSnapshotCodec.Seal(local, key, profile.VaultSlot, profile.DeviceSlot);
+                    transferBytes = Math.Min(67_108_864L,transferBytes+outer.Length);
                     await transport.UploadAsync(profile.OwnerId, profile.VaultSlot, profile.DeviceSlot, outer, ct);
                     ct.ThrowIfCancellationRequested(); profile.LastUploadedHash = hash; profile.LastOuterHash = Digest(outer); uploaded = true;
                 }
@@ -101,7 +110,8 @@ public static class AutomaticCloudSync
                     string appVersion = typeof(CloudProject).Assembly.GetName().Version?.ToString() ?? "unknown";
                     await transport.RegisterCloudDeviceAsync("windows", Environment.OSVersion.VersionString,
                         appVersion, "Windows app session", ct);
-                    await transport.RecordCloudDeviceSyncAsync(ct);
+                    await transport.RecordCloudSyncOutcomeAsync("success",
+                        Math.Min(67_108_864L,transferBytes),null,ct);
                     profile.DeviceInventoryState = "visible";
                 }
                 catch (OperationCanceledException) { throw; }
@@ -115,6 +125,41 @@ public static class AutomaticCloudSync
             if (uploaded || downloaded || profile.LastSyncUtc.Length == 0 || !DateTimeOffset.TryParse(profile.LastSyncUtc, out var last) || DateTimeOffset.UtcNow - last > TimeSpan.FromMinutes(1)) { profile.LastSyncUtc = DateTimeOffset.UtcNow.ToString("O"); save(); }
             return new(uploaded, downloaded, conflicts, profile.DownloadedStamp != profile.MergedStamp);
         }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            if (profile.DeviceInventoryConsent)
+            {
+                try
+                {
+                    string appVersion = typeof(CloudProject).Assembly.GetName().Version?.ToString() ?? "unknown";
+                    await transport.RegisterCloudDeviceAsync("windows", Environment.OSVersion.VersionString,
+                        appVersion, "Windows app session", ct);
+                    await transport.RecordCloudSyncOutcomeAsync("failure",
+                        Math.Min(67_108_864L,transferBytes),BoundedSyncErrorCode(ex),ct);
+                }
+                catch (Exception telemetryError) when (telemetryError is VaultException or System.Net.Http.HttpRequestException or System.IO.IOException or OperationCanceledException)
+                {
+                    // Never replace the sync failure with a best-effort metadata failure.
+                }
+            }
+            throw;
+        }
         finally { if (local != null) CryptographicOperations.ZeroMemory(local); foreach (var row in remote) CryptographicOperations.ZeroMemory(row.Blob); }
+    }
+
+    private static string BoundedSyncErrorCode(Exception ex)
+    {
+        string message=ex.Message;
+        if(message.Contains("quota",StringComparison.OrdinalIgnoreCase))return "quota_exceeded";
+        if(message.Contains("paused",StringComparison.OrdinalIgnoreCase) ||
+           message.Contains("suspended",StringComparison.OrdinalIgnoreCase))return "sync_suspended";
+        if(message.Contains("sign-in",StringComparison.OrdinalIgnoreCase) ||
+           message.Contains("session",StringComparison.OrdinalIgnoreCase) ||
+           message.Contains("auth",StringComparison.OrdinalIgnoreCase))return "auth";
+        if(message.Contains("network",StringComparison.OrdinalIgnoreCase) ||
+           message.Contains("reached",StringComparison.OrdinalIgnoreCase) ||
+           ex is System.Net.Http.HttpRequestException or System.IO.IOException)return "network";
+        return "transport";
     }
 }

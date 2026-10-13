@@ -217,7 +217,7 @@ Deno.serve(async (request) => {
     }
     return result(data);
   }
-  if (body.action === "deviceList" || body.action === "deviceRevoke") {
+  if (body.action === "deviceList" || body.action === "deviceRevoke" || body.action === "syncControl") {
     if (typeof body.id !== "string" ||
         !/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(body.id)) {
       return result({ error: "Invalid target" }, 400);
@@ -231,16 +231,84 @@ Deno.serve(async (request) => {
     if (targetAdmin) return result({ error: "Administrator accounts are protected" }, 403);
 
     if (body.action === "deviceList") {
-      const { data, error } = await service.rpc("lockvyn_admin_list_cloud_devices", {
+      const platform = body.platform ?? null;
+      const outcome = body.outcome ?? null;
+      const sinceDays = body.sinceDays === undefined ? 30 : body.sinceDays;
+      const deviceQuery = body.deviceQuery ?? null;
+      if ((platform !== null && (typeof platform !== "string" ||
+           !["windows","android","macos","ios","linux","other"].includes(platform))) ||
+          (outcome !== null && (typeof outcome !== "string" ||
+           !["all","success","failure","unknown"].includes(outcome))) ||
+          (sinceDays !== null && (typeof sinceDays !== "number" ||
+           !Number.isSafeInteger(sinceDays) || sinceDays < 1 || sinceDays > 365)) ||
+          (deviceQuery !== null && (typeof deviceQuery !== "string" || deviceQuery.length > 80))) {
+        return result({ error: "Invalid sync activity filters" }, 400);
+      }
+      const { data, error } = await service.rpc("lockvyn_admin_cloud_sync_overview", {
         p_actor: verified.user.id,
+        p_actor_session: sessionId,
+        p_actor_aal: claims.aal,
         p_target: body.id,
+        p_platform: platform,
+        p_outcome: outcome,
+        p_since_days: sinceDays,
+        p_device_query: typeof deviceQuery === "string" && deviceQuery.trim()
+          ? deviceQuery.trim() : null,
       });
       if (error) {
-        if (error.code === "42501") return result({ error: "Device inventory is not available for this account" }, 403);
-        if (error.code === "22023") return result({ error: "Target account not found" }, 404);
-        return result({ error: "Unable to load registered cloud sessions" }, 502);
+        if (error.code === "42501") return result({ error: "Sync inventory is not available for this account" }, 403);
+        if (error.code === "22023") return result({ error: "Invalid sync activity filter or target" }, 400);
+        return result({ error: "Unable to load cloud sync activity" }, 502);
       }
-      return result({ devices: Array.isArray(data) ? data : [] });
+      if (!data || !Array.isArray(data.devices) ||
+          !Number.isSafeInteger(data.snapshotCount) ||
+          !Number.isSafeInteger(data.ciphertextBytes) ||
+          !Number.isSafeInteger(data.quotaBytes) ||
+          typeof data.suspended !== "boolean") {
+        return result({ error: "Invalid cloud sync activity response" }, 502);
+      }
+      return result(data);
+    }
+
+    if (body.action === "syncControl") {
+      if (typeof body.suspend !== "boolean" ||
+          typeof body.confirmEmail !== "string" || body.confirmEmail.length > 320 ||
+          (body.reasonCode !== "support_review" &&
+           body.reasonCode !== "suspected_compromise")) {
+        return result({ error: "Invalid cloud sync control request" }, 400);
+      }
+      const { data: target, error: targetError } = await service.auth.admin.getUserById(body.id);
+      if (targetError || !target?.user?.email) return result({ error: "Target account not found" }, 404);
+      if (target.user.email.toLowerCase() !== body.confirmEmail.trim().toLowerCase()) {
+        return result({ error: "The confirmation email does not match this account" }, 409);
+      }
+      if (!freshVerifiedTotp(claims, Math.floor(Date.now()/1000))) {
+        return result({ error: "Verify a fresh authenticator code before changing cloud sync" }, 403);
+      }
+      const { data, error } = await service.rpc("lockvyn_admin_set_cloud_sync_suspension", {
+        p_actor: verified.user.id,
+        p_actor_session: sessionId,
+        p_actor_aal: claims.aal,
+        p_fresh_totp: true,
+        p_target: body.id,
+        p_suspend: body.suspend,
+        p_reason_code: body.reasonCode,
+        p_confirm_email: body.confirmEmail,
+      });
+      if (error) {
+        if (error.code === "54000") return result({ error: "Cloud sync control rate limit reached. Wait before trying again." }, 429);
+        if (error.code === "42501") return result({ error: "Cloud sync control is not allowed for this account" }, 403);
+        if (error.code === "22023") return result({ error: "Invalid cloud sync control target or reason" }, 400);
+        return result({ error: "Unable to change cloud sync state" }, 502);
+      }
+      return result({
+        suspended: body.suspend,
+        changed: data === true,
+        cloudOnly: true,
+        warning: body.suspend
+          ? "Cloud sync is paused. Offline vault data and encrypted cloud snapshots are preserved."
+          : "Cloud sync is resumed. Offline vault data and encrypted cloud snapshots were preserved.",
+      });
     }
 
     if (typeof body.deviceId !== "string" ||

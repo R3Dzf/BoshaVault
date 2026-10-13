@@ -109,6 +109,8 @@ final class CloudAuth {
     private static void discard(byte[] bytes){Arrays.fill(bytes,(byte)0);}
     static String error(int status,String path,String code){
         if(status==429)return "Cloud rate limit reached. Wait before trying again.";
+        if(code.equals("BV001"))return "Cloud storage limit reached. Nothing was deleted; your local vault is unchanged.";
+        if(code.equals("BV002"))return "Cloud sync is paused. Offline vault data and encrypted cloud snapshots are preserved.";
         if(code.equals("email_address_not_authorized"))return "Email verification delivery is not enabled for this address yet. The app owner needs to configure the email sender. Your vault works offline without an account.";
         if(code.equals("email_not_confirmed"))return "Confirm your account email first. Use Resend confirmation email if needed.";
         if(code.equals("mfa_verification_failed")||code.equals("mfa_challenge_expired"))return "The authenticator code is incorrect or expired. Use the current six-digit code and check your device clock.";

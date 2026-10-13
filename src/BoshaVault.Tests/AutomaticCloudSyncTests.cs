@@ -10,9 +10,30 @@ public static class AutomaticCloudSyncTests
     private sealed class Server : HttpMessageHandler
     {
         public readonly Dictionary<Guid, byte[]> Rows = [];
+        public readonly List<(string Outcome,long? Bytes,string? Error)> Outcomes = [];
+        public bool Suspended;
         public int Uploads, Downloads;
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
+            string path=request.RequestUri!.AbsolutePath;
+            if (request.Method == HttpMethod.Post && path.EndsWith("/rpc/lockvyn_cloud_sync_status",StringComparison.Ordinal))
+            {
+                long bytes=Rows.Values.Sum(x=>(long)x.Length);
+                var status=new { suspended=Suspended,snapshotCount=Rows.Count,ciphertextBytes=bytes,
+                    quotaBytes=67_108_864L,remainingBytes=67_108_864L-bytes,maxSnapshots=64 };
+                return new(HttpStatusCode.OK) { Content=new StringContent(JsonSerializer.Serialize(status),Encoding.UTF8,"application/json") };
+            }
+            if (request.Method == HttpMethod.Post && path.EndsWith("/rpc/lockvyn_register_cloud_device",StringComparison.Ordinal))
+                return new(HttpStatusCode.OK) { Content=new StringContent(JsonSerializer.Serialize(Guid.NewGuid()),Encoding.UTF8,"application/json") };
+            if (request.Method == HttpMethod.Post && path.EndsWith("/rpc/lockvyn_record_cloud_sync_outcome",StringComparison.Ordinal))
+            {
+                using var doc=JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));
+                var result=doc.RootElement;
+                Outcomes.Add((result.GetProperty("p_outcome").GetString()!,
+                    result.GetProperty("p_ciphertext_bytes").ValueKind==JsonValueKind.Null?null:result.GetProperty("p_ciphertext_bytes").GetInt64(),
+                    result.GetProperty("p_error_code").ValueKind==JsonValueKind.Null?null:result.GetProperty("p_error_code").GetString()));
+                return new(HttpStatusCode.OK) { Content=new StringContent("true",Encoding.UTF8,"application/json") };
+            }
             if (request.Method == HttpMethod.Post)
             {
                 using var doc = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));
@@ -45,7 +66,8 @@ public static class AutomaticCloudSyncTests
             var slot = Guid.NewGuid(); string recovery = CloudSnapshotCodec.NewRecoveryKey(); Guid owner = Guid.NewGuid(), id = Guid.Parse(a.Data.VaultId);
             CloudProfile Profile() => new() { OwnerId = owner, VaultId = id, VaultSlot = slot, DeviceSlot = Guid.NewGuid(), RecoveryKey = recovery,
                 RefreshToken = "synthetic-refresh-token-only", Email = "synthetic@example.invalid" };
-            var pa = Profile(); var pb = Profile(); var server = new Server(); using var http = new HttpClient(server);
+            var pa = Profile(); var pb = Profile(); pa.DeviceInventoryConsent=true;
+            var server = new Server(); using var http = new HttpClient(server);
             var transport = new SupabaseSnapshotTransport(http, new Uri("https://synthetic.supabase.co/"), "synthetic_publishable_key_0123456789", _ => Task.FromResult("synthetic_bearer_token_0123456789"));
             byte[]? pendingA = null, pendingB = null;
             Task<AutomaticCloudSync.Result> Sync(VaultSession? vault, CloudProfile profile, bool aSide)
@@ -76,7 +98,22 @@ public static class AutomaticCloudSyncTests
             bool rejected = false;
             try { await Sync(b, pb, false); } catch (VaultException) { rejected = true; }
             if (!rejected || !original.SequenceEqual(b.ExportEncrypted())) throw new Exception("Tampered cloud snapshot changed the vault.");
-            Console.WriteLine("PASS automatic two-device sync, unchanged no-op, locked encrypted staging, unlock merge, tamper rejection");
+            if(!server.Outcomes.Any(x=>x.Outcome=="success"&&x.Bytes is > 0&&x.Error==null))
+                throw new Exception("Explicitly opted-in sync did not report bounded success metadata.");
+            var beforePauseUploads=server.Uploads;var beforePauseDownloads=server.Downloads;
+            byte[] beforePauseVault=a.ExportEncrypted();server.Suspended=true;
+            bool paused=false;
+            try{await Sync(a,pa,true);}catch(VaultException ex)
+            {
+                paused=ex.Message.Contains("paused",StringComparison.OrdinalIgnoreCase)&&
+                    ex.Message.Contains("preserved",StringComparison.OrdinalIgnoreCase);
+            }
+            if(!paused||server.Uploads!=beforePauseUploads||server.Downloads!=beforePauseDownloads||
+               !beforePauseVault.SequenceEqual(a.ExportEncrypted()))
+                throw new Exception("Sync suspension did not stop network snapshot work while preserving the local vault.");
+            if(!server.Outcomes.Any(x=>x.Outcome=="failure"&&x.Error=="sync_suspended"))
+                throw new Exception("Opted-in suspended sync did not report its bounded failure code.");
+            Console.WriteLine("PASS automatic two-device sync, encrypted staging/merge, tamper rejection, opt-in telemetry, and paused preflight");
         }
         finally { Directory.Delete(root, true); }
     }

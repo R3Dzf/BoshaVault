@@ -208,6 +208,11 @@ const firstClaims=JSON.parse(Buffer.from(strangerAAL2.aal2.split(".")[1],"base64
 assert.match(firstClaims.session_id,/^[a-f0-9-]{36}$/i);
 const syncHeartbeat=await dataApi("rpc/lockvyn_record_cloud_device_sync","POST",strangerAAL2.aal2,{});
 assert.equal(syncHeartbeat.status,200,"Successful cloud sync records a server timestamp");
+const initialSyncStatus=await dataApi("rpc/lockvyn_cloud_sync_status","POST",strangerAAL2.aal2,{});
+assert.equal(initialSyncStatus.status,200,"Owner can preflight cloud sync without reading ciphertext");
+assert.equal(initialSyncStatus.data.suspended,false);
+assert.equal(initialSyncStatus.data.snapshotCount,0);
+assert.equal(initialSyncStatus.data.ciphertextBytes,0);
 const secondSignIn=await invoke("/auth/v1/token?grant_type=password","POST",anon,null,
   {email:stranger.email,password});
 assert.equal(secondSignIn.status,200,"Create a second synthetic Auth session");
@@ -218,13 +223,35 @@ assert.equal(registeredTwo.status,200,"Register second independent Auth session"
 assert.notEqual(registeredOne.data,registeredTwo.data,"Separate Auth sessions have separate registry IDs");
 const deviceVaultSlot=randomUUID(),deviceSlot=randomUUID();
 const syntheticCipher=Buffer.alloc(102,0x5a).toString("base64");
-const deviceSnapshotPath="opaque_device_snapshots?select=owner_id,vault_slot&owner_id=eq."+
+const deviceSnapshotPath="opaque_device_snapshots?select=owner_id,vault_slot,ciphertext_bytes&owner_id=eq."+
   stranger.id+"&vault_slot=eq."+deviceVaultSlot;
 const deviceSnapshotBody={owner_id:stranger.id,vault_slot:deviceVaultSlot,device_slot:deviceSlot,
   ciphertext_base64:syntheticCipher,
   ciphertext_sha256:createHash("sha256").update(syntheticCipher).digest("hex")};
 const deviceSnapshot=await dataApi(deviceSnapshotPath,"POST",strangerAAL2.aal2,deviceSnapshotBody);
 assert.equal(deviceSnapshot.status,201,"Synthetic encrypted snapshot is accessible before revocation");
+const derivedSize=await dataApi(deviceSnapshotPath,"GET",strangerAAL2.aal2,null);
+assert.equal(derivedSize.status,200);
+assert.equal(derivedSize.data[0].ciphertext_bytes,102,
+  "Server derives raw ciphertext size even though this old-client payload omits the column");
+const usedSyncStatus=await dataApi("rpc/lockvyn_cloud_sync_status","POST",strangerAAL2.aal2,{});
+assert.equal(usedSyncStatus.status,200);
+assert.equal(usedSyncStatus.data.snapshotCount,1);
+assert.equal(usedSyncStatus.data.ciphertextBytes,102);
+assert.equal(usedSyncStatus.data.quotaBytes,67108864);
+const concurrentVault=randomUUID();
+const concurrentRows=await Promise.all([randomUUID(),randomUUID()].map(async device=>dataApi(
+  "opaque_device_snapshots","POST",strangerAAL2.aal2,{
+    owner_id:stranger.id,vault_slot:concurrentVault,device_slot:device,
+    ciphertext_base64:syntheticCipher,
+    ciphertext_sha256:createHash("sha256").update(syntheticCipher).digest("hex"),
+  })));
+assert(concurrentRows.every(row=>row.status===201),
+  "Two concurrent synthetic snapshot uploads both commit under the owner quota");
+const concurrentRead=await dataApi("opaque_device_snapshots?select=device_slot&owner_id=eq."+
+  stranger.id+"&vault_slot=eq."+concurrentVault,"GET",strangerAAL2.aal2,null);
+assert.equal(concurrentRead.status,200);
+assert.equal(concurrentRead.data.length,2,"Concurrent uploads leave both device rows visible");
 const inventory=await admin(ownerAAL2.aal2,{action:"deviceList",id:stranger.id});
 assert.equal(inventory.status,200,"Allowlisted admin can list opted-in sessions: "+JSON.stringify(inventory.data));
 assert.equal(inventory.data.devices.length,2,"Only explicitly registered sessions appear");
@@ -232,6 +259,13 @@ assert(inventory.data.devices.some(d=>d.device_id===registeredOne.data&&d.last_s
   "Inventory includes session metadata and server-recorded last sync");
 assert(!JSON.stringify(inventory.data.devices).includes(firstClaims.session_id),
   "Inventory never exposes Auth session identifiers");
+assert.equal(typeof inventory.data.snapshotCount,"number","Admin receives safe quota usage");
+assert.equal(inventory.data.ciphertextBytes,306,"Admin usage sums only ciphertext byte counts");
+const filteredInventory=await admin(ownerAAL2.aal2,{action:"deviceList",id:stranger.id,
+  platform:"windows",outcome:"success",sinceDays:30,deviceQuery:"Synthetic laptop"});
+assert.equal(filteredInventory.status,200,"Admin can filter sync outcomes and software metadata");
+assert.equal(filteredInventory.data.devices.length,1);
+assert.equal(filteredInventory.data.devices[0].device_id,registeredOne.data);
 const selfInventory=await admin(ownerAAL2.aal2,{action:"deviceList",id:owner.id});
 assert.equal(selfInventory.status,403,"Administrator's own account is protected");
 const protectedInventory=await admin(ownerAAL2.aal2,{action:"deviceList",id:pending.data.id});
@@ -288,6 +322,48 @@ assert(!securityJson.includes("@example.invalid"),"Security feed must not expose
 assert(!securityJson.includes(firstClaims.session_id),"Security feed must not expose Auth session identifiers");
 assert(!securityJson.includes("ip_address")&&!securityJson.includes("user_agent"),
   "Security feed must not expose network metadata");
+const syncFreshAdminToken=await verifyExistingTotp(ownerAAL2,owner.aal1);
+const wrongSyncEmail=await admin(syncFreshAdminToken,{action:"syncControl",id:stranger.id,
+  suspend:true,reasonCode:"support_review",confirmEmail:"wrong@example.invalid"});
+assert.equal(wrongSyncEmail.status,409,"Typed target email blocks sync suspension");
+const paused=await admin(syncFreshAdminToken,{action:"syncControl",id:stranger.id,
+  suspend:true,reasonCode:"support_review",confirmEmail:stranger.email});
+assert.equal(paused.status,200,"Fresh AAL2 + TOTP admin can pause cloud sync");
+assert.equal(paused.data.suspended,true);
+assert.equal(paused.data.changed,true);
+assert.match(paused.data.warning,/Offline vault data and encrypted cloud snapshots are preserved/);
+const statusWhilePaused=await dataApi("rpc/lockvyn_cloud_sync_status","POST",secondAAL2,{});
+assert.equal(statusWhilePaused.status,200);
+assert.equal(statusWhilePaused.data.suspended,true);
+assert(statusWhilePaused.data.snapshotCount>=1);
+const hiddenWhilePaused=await dataApi(deviceSnapshotPath,"GET",secondAAL2,null);
+assert.equal(hiddenWhilePaused.status,200);
+assert.equal(hiddenWhilePaused.data.length,0,"Restrictive RLS blocks snapshot reads while paused");
+const pausedWrite=await dataApi("opaque_device_snapshots","POST",secondAAL2,{
+  owner_id:stranger.id,vault_slot:randomUUID(),device_slot:randomUUID(),
+  ciphertext_base64:syntheticCipher,
+  ciphertext_sha256:createHash("sha256").update(syntheticCipher).digest("hex"),
+});
+assert(![200,201,204].includes(pausedWrite.status),"Restrictive RLS rejects uploads while paused");
+const retainedDuringPause=await dataApi(deviceSnapshotPath,"GET",service,null,service);
+assert.equal(retainedDuringPause.status,200);
+assert.equal(retainedDuringPause.data.length,1,"Pausing sync leaves encrypted snapshots intact");
+const resumeToken=await verifyExistingTotp(ownerAAL2,owner.aal1);
+const resumed=await admin(resumeToken,{action:"syncControl",id:stranger.id,
+  suspend:false,reasonCode:"support_review",confirmEmail:stranger.email});
+assert.equal(resumed.status,200,"Fresh AAL2 + TOTP admin can resume cloud sync");
+assert.equal(resumed.data.suspended,false);
+assert.equal(resumed.data.changed,true);
+const visibleAfterResume=await dataApi(deviceSnapshotPath,"GET",secondAAL2,null);
+assert.equal(visibleAfterResume.status,200);
+assert.equal(visibleAfterResume.data.length,1,"Resume restores access without replacing ciphertext");
+const syncEvents=await admin(resumeToken,{action:"securityEvents",limit:100});
+assert.equal(syncEvents.status,200);
+const syncEventTypes=new Set(syncEvents.data.events.map(event=>event.eventType));
+assert(syncEventTypes.has("cloud_sync_suspended")&&syncEventTypes.has("cloud_sync_resumed"),
+  "Pause and resume are visible in the privacy-limited Security Center");
+assert(!JSON.stringify(syncEvents.data).includes("@example.invalid"));
+console.log("PASS Phase 05 local GoTrue: concurrent uploads, derived usage, filtered admin activity, fresh-TOTP pause/resume, RLS, and ciphertext retention");
 console.log("PASS Phase 04 local GoTrue: AAL2 feed, denial signals, opt-in/revocation events and metadata privacy");
 console.log("PASS Phase 03 local GoTrue: opt-in, server heartbeat, admin inventory, fresh-TOTP session revocation, per-session RLS, and ciphertext retention");
 await denied(strangerAAL2.aal2,"Unapproved user recovery",{action:"recover",id:owner.id});
@@ -339,6 +415,17 @@ assert.match(dashboardPage.headers.get("content-security-policy")||"",/script-sr
 const dashboardHtml=await dashboardPage.text();
 for(const required of [
   "Registered cloud sessions",
+  "Encrypted cloud sync",
+  "Cloud sync activity filters",
+  "id=\"cloud-sync-usage\" role=\"status\" aria-live=\"polite\"",
+  "id=\"pause-cloud-sync\" type=\"button\" hidden",
+  "id=\"resume-cloud-sync\" type=\"button\" hidden",
+  "id=\"cloud-sync-otp\" inputmode=\"numeric\" autocomplete=\"one-time-code\"",
+  "syncControl",
+  "SYNC_OUTCOME_LABELS",
+  "SYNC_ERROR_LABELS",
+  "cloud_sync_suspended",
+  "Offline vault data and encrypted cloud snapshots are preserved.",
   "Only sessions the user explicitly opted in appear here",
   "self-reported; they do not prove a physical device",
   "Fresh code from your own authenticator app",

@@ -25,6 +25,15 @@ required={
   'metadata-only privacy disclosure': 'Password login failures, emails, IP addresses, tokens, and vault data are not collected here.',
   'safe event labels': 'SECURITY_EVENT_LABELS',
   'safe event rendering': 'meta.textContent=details.join',
+  'sync usage status': 'id="cloud-sync-usage" role="status" aria-live="polite"',
+  'sync state status': 'id="cloud-sync-state" class="support-note" role="status" aria-live="polite" tabindex="-1"',
+  'sync activity filter group': 'aria-label="Cloud sync activity filters"',
+  'cloud sync pause control': 'id="pause-cloud-sync" type="button" hidden',
+  'cloud sync resume control': 'id="resume-cloud-sync" type="button" hidden',
+  'typed email and fresh MFA controls': 'Fresh code from your own authenticator app',
+  'preserved cloud and offline data': 'Offline vault data and encrypted cloud snapshots are preserved.',
+  'safe sync error labels': 'SYNC_ERROR_LABELS',
+  'sync row text-only rendering': 'activity.textContent="Last attempt "',
 }
 for label, marker in required.items():
     assert marker in s, f"Missing {label}: {marker}"

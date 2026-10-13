@@ -67,8 +67,14 @@ final class CloudClient implements AutoCloseable {
             profile.put("refreshToken",latest.getString("refreshToken"));
             for(String field:new String[]{"lastUploadedHash","lastOuterHash","downloadedStamp","mergedStamp","keyEpoch","autoSync","deviceInventoryConsent","deviceInventoryPlatform","deviceInventoryOsVersion","deviceInventoryAppVersion","deviceInventoryDisplayName"})if(latest.has(field))profile.put(field,latest.get(field));
             String slot=profile.getString("vaultSlot"),device=profile.getString("deviceSlot");byte[] local=null,key=null,outer=null,response=null;
-            List<byte[]> snapshots=new ArrayList<>();int conflicts=0;boolean changed=false;
+            List<byte[]> snapshots=new ArrayList<>();int conflicts=0;boolean changed=false;long transferBytes=0;
             try{
+                response=request("POST","rest/v1/rpc/lockvyn_cloud_sync_status",new JSONObject(),session.access,8192);
+                JSONObject syncStatus=StrictJson.object(new String(response,StandardCharsets.UTF_8));
+                if(!(syncStatus.opt("suspended") instanceof Boolean))throw new Exception("Cloud returned invalid sync status.");
+                boolean syncSuspended=syncStatus.getBoolean("suspended");
+                Arrays.fill(response,(byte)0);response=null;
+                if(syncSuspended)throw new Exception("Cloud sync is paused. Offline vault data and encrypted cloud snapshots are preserved.");
                 local=engine!=null&&engine.isOpen()?engine.export():VaultEngine.read(vault);
                 JSONObject env=VaultEngine.parse(local);if(!env.getString("vaultId").equals(profile.getString("vaultId")))throw new Exception("Cloud settings do not match this vault.");
                 long epoch=env.getLong("keyEpoch");if(profile.optLong("keyEpoch",0)==0)profile.put("keyEpoch",epoch);
@@ -88,6 +94,7 @@ final class CloudClient implements AutoCloseable {
                         JSONObject row=rows.getJSONObject(i);String id=row.getString("device_slot"),digest=row.getString("ciphertext_sha256"),encoded=row.getString("ciphertext_base64");
                         if(!VaultEngine.id(id)||!digest.matches("[0-9a-f]{64}")||encoded.length()>2800000)throw new Exception("Invalid cloud backup metadata.");
                         byte[] blob=Base64.getDecoder().decode(encoded);
+                        transferBytes=Math.min(67108864L,transferBytes+blob.length);
                         try{if(blob.length>CloudSnapshot.MAX_INNER+29||!hex(VaultEngine.sha(blob)).equals(digest))throw new Exception("Cloud backup checksum failed.");
                             if(!id.equals(device)){if(others.put(id,digest)!=null)throw new Exception("Duplicate cloud device.");byte[] inner=CloudSnapshot.open(blob,key,slot,id);
                                 try{JSONObject remote=VaultEngine.parse(inner);if(!remote.getString("vaultId").equals(profile.getString("vaultId"))||remote.getLong("keyEpoch")!=epoch)throw new Exception("A device changed the vault key. Local data is preserved.");}finally{Arrays.fill(inner,(byte)0);}
@@ -111,46 +118,80 @@ final class CloudClient implements AutoCloseable {
                 String hash=hex(VaultEngine.sha(local));
                 if(!hash.equals(profile.optString("lastUploadedHash"))||ownDigest.isEmpty()||!ownDigest.equals(profile.optString("lastOuterHash"))){
                     outer=CloudSnapshot.seal(local,key,slot,device);String outerHash=hex(VaultEngine.sha(outer));JSONObject body=new JSONObject().put("owner_id",session.owner).put("vault_slot",slot).put("device_slot",device).put("ciphertext_base64",Base64.getEncoder().encodeToString(outer)).put("ciphertext_sha256",outerHash);
+                    transferBytes=Math.min(67108864L,transferBytes+outer.length);
                     byte[] reply=request("POST","rest/v1/opaque_device_snapshots?on_conflict=owner_id,vault_slot,device_slot",body,session.access,65536);Arrays.fill(reply,(byte)0);
                     profile.put("lastUploadedHash",hash).put("lastOuterHash",outerHash);changed=true;
                 }
                 if(profile.optBoolean("deviceInventoryConsent",false)){
-                    byte[] registered=null,heartbeat=null;
                     try{
-                        JSONObject consent=new JSONObject()
-                            .put("p_consent",true)
-                            .put("p_platform",profile.optString("deviceInventoryPlatform","android"))
-                            .put("p_os_version",profile.optString("deviceInventoryOsVersion","unknown"))
-                            .put("p_app_version",profile.optString("deviceInventoryAppVersion","unknown"))
-                            .put("p_display_name",profile.optString("deviceInventoryDisplayName","Android app session"))
-                            .put("p_schema_version",1);
-                        registered=request("POST","rest/v1/rpc/lockvyn_register_cloud_device",consent,session.access,1024);
-                        JSONArray idValue=new JSONArray("["+new String(registered,StandardCharsets.UTF_8).trim()+"]");
-                        String registryId=idValue.getString(0);
-                        if(!VaultEngine.id(registryId))throw new Exception("Invalid cloud session registry response.");
-                        profile.put("deviceRegistryId",registryId);
-                        heartbeat=request("POST","rest/v1/rpc/lockvyn_record_cloud_device_sync",new JSONObject(),session.access,1024);
-                        if(!new String(heartbeat,StandardCharsets.UTF_8).trim().equals("true"))
-                            throw new Exception("Cloud session heartbeat was not accepted.");
+                        recordSyncOutcome(profile,session,transferBytes,"success",null);
                         profile.put("deviceInventoryState","visible");
                     }catch(Exception inventoryError){
                         profile.put("deviceInventoryState","pending");
-                    }finally{
-                        if(registered!=null)Arrays.fill(registered,(byte)0);
-                        if(heartbeat!=null)Arrays.fill(heartbeat,(byte)0);
                     }
                     changed=true;
                 }
                 Instant now=Instant.now();String previous=profile.optString("lastSyncUtc");
                 try{if(previous.isEmpty()||now.toEpochMilli()-Instant.parse(previous).toEpochMilli()>60000)changed=true;}catch(Exception invalid){changed=true;}
                 if(changed){profile.put("lastSyncUtc",now.toString());store.save(profile);}return conflicts;
+            }catch(Exception syncFailure){
+                if(!cancelled&&profile.optBoolean("deviceInventoryConsent",false)){
+                    try{
+                        recordSyncOutcome(profile,session,transferBytes,"failure",syncErrorCode(syncFailure));
+                        profile.put("deviceInventoryState","visible");store.save(profile);
+                    }catch(Exception telemetryFailure){
+                        profile.put("deviceInventoryState","pending");store.save(profile);
+                    }
+                }
+                throw syncFailure;
             }finally{CloudSettingsStore.clear(latest);if(response!=null)Arrays.fill(response,(byte)0);if(key!=null)Arrays.fill(key,(byte)0);if(local!=null)Arrays.fill(local,(byte)0);if(outer!=null)Arrays.fill(outer,(byte)0);for(byte[] inner:snapshots)Arrays.fill(inner,(byte)0);}
         }
+    }
+    private void recordSyncOutcome(JSONObject profile,CloudAuth.Session session,long bytes,
+                                   String outcome,String errorCode)throws Exception{
+        byte[] registered=null,result=null;
+        try{
+            JSONObject consent=new JSONObject()
+                .put("p_consent",true)
+                .put("p_platform",profile.optString("deviceInventoryPlatform","android"))
+                .put("p_os_version",profile.optString("deviceInventoryOsVersion","unknown"))
+                .put("p_app_version",profile.optString("deviceInventoryAppVersion","unknown"))
+                .put("p_display_name",profile.optString("deviceInventoryDisplayName","Android app session"))
+                .put("p_schema_version",1);
+            registered=request("POST","rest/v1/rpc/lockvyn_register_cloud_device",consent,session.access,1024);
+            JSONArray idValue=new JSONArray("["+new String(registered,StandardCharsets.UTF_8).trim()+"]");
+            String registryId=idValue.getString(0);
+            if(!VaultEngine.id(registryId))throw new Exception("Invalid cloud session registry response.");
+            profile.put("deviceRegistryId",registryId);
+            JSONObject report=new JSONObject()
+                .put("p_outcome",outcome)
+                .put("p_ciphertext_bytes",Math.min(67108864L,Math.max(0L,bytes)))
+                .put("p_error_code",errorCode==null?JSONObject.NULL:errorCode);
+            result=request("POST","rest/v1/rpc/lockvyn_record_cloud_sync_outcome",report,session.access,1024);
+            if(!new String(result,StandardCharsets.UTF_8).trim().equals("true"))
+                throw new Exception("Cloud sync outcome was not accepted.");
+        }finally{
+            if(registered!=null)Arrays.fill(registered,(byte)0);
+            if(result!=null)Arrays.fill(result,(byte)0);
+        }
+    }
+    private static String syncErrorCode(Exception error){
+        String message=error.getMessage()==null?"":error.getMessage().toLowerCase(java.util.Locale.ROOT);
+        if(message.contains("quota")||message.contains("storage limit"))return "quota_exceeded";
+        if(message.contains("paused")||message.contains("suspended"))return "sync_suspended";
+        if(message.contains("sign-in")||message.contains("session")||message.contains("auth"))return "auth";
+        if(message.contains("network")||message.contains("reached")||error instanceof java.io.IOException)return "network";
+        return "transport";
     }
     private static String stamp(SortedMap<String,String> rows)throws Exception{StringBuilder joined=new StringBuilder();for(Map.Entry<String,String> row:rows.entrySet()){if(joined.length()>0)joined.append('\n');joined.append(row.getKey()).append(':').append(row.getValue());}return hex(VaultEngine.sha(joined.toString().getBytes(StandardCharsets.UTF_8)));}
     byte[] firstSnapshot(JSONObject pairing,CloudAuth.Session session)throws Exception{
         String slot=pairing.getString("vaultSlot");byte[] key=CloudSnapshot.parseKey(pairing.getString("recoveryKey")),response=null;
         try{
+            response=request("POST","rest/v1/rpc/lockvyn_cloud_sync_status",new JSONObject(),session.access,8192);
+            JSONObject syncStatus=StrictJson.object(new String(response,StandardCharsets.UTF_8));
+            if(!(syncStatus.opt("suspended") instanceof Boolean))throw new Exception("Cloud returned invalid sync status.");
+            boolean syncSuspended=syncStatus.getBoolean("suspended");Arrays.fill(response,(byte)0);response=null;
+            if(syncSuspended)throw new Exception("Cloud sync is paused. Offline vault data and encrypted cloud snapshots are preserved.");
             response=request("GET","rest/v1/opaque_device_snapshots?select=device_slot,ciphertext_base64,ciphertext_sha256&vault_slot=eq."+slot+"&order=updated_at.desc&limit=64",null,session.access,16000000);
             JSONArray rows=StrictJson.array(new String(response,StandardCharsets.UTF_8));if(rows.length()==0)throw new Exception("No cloud backup yet. Sync the first device before joining.");
             if(rows.length()>64)throw new Exception("Too many cloud devices.");
