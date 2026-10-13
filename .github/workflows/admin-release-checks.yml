@@ -30,5 +30,7 @@ jobs:
         run: python tools/test_admin_denials.py
       - name: Check accessible mobile directory UI
         run: python tools/test_admin_accessibility.py
-      - name: Verify published admin HTML (read-only)
+      - name: Test public page safety assertions without credentials
+        run: node tools/test_admin_live_ui.test.mjs
+      - name: Verify deployed admin and owner security HTML (read-only)
         run: node tools/test_admin_live_ui.mjs
