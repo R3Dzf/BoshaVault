@@ -1,9 +1,11 @@
 # Lockvyn Admin Dashboard — Delivery plan
 
-> **Source of truth:** This file and the linked GitHub issues. Do not mark a phase
-> completed until its GitHub issue has every acceptance item checked and the
-> applicable CI, staging, security review and deployment evidence is linked.
-> Do not skip phases or silently remove requirements.
+> **Source of truth:** This file and the linked GitHub issues. Do not mark a
+> phase completed until its GitHub issue has every acceptance item checked and
+> applicable CI, staging, security review and deployment evidence linked.
+> An explicit owner instruction may administratively waive/defer unchecked
+> gates so work can proceed; record that in the issue and mark the phase
+> **waived**, never completed. Do not silently remove requirements.
 >
 > **Zero-cost rule:** All phases must use no-charge tools only. See
 > [ZERO-COST-POLICY.md](ZERO-COST-POLICY.md). Hosted paid staging, cloud
@@ -15,8 +17,8 @@
 | --- | --- | --- | --- |
 | 00 | Foundation & security gates | [#18](https://github.com/R3Dzf/BoshaVault/issues/18) | Completed |
 | 01 | Overview & account directory | [#19](https://github.com/R3Dzf/BoshaVault/issues/19) | Completed |
-| 02 | Account support actions | [#20](https://github.com/R3Dzf/BoshaVault/issues/20) | In progress |
-| 03 | Device inventory & access | [#21](https://github.com/R3Dzf/BoshaVault/issues/21) | Queued |
+| 02 | Account support actions | [#20](https://github.com/R3Dzf/BoshaVault/issues/20) | Owner-waived; acceptance incomplete |
+| 03 | Device inventory & access | [#21](https://github.com/R3Dzf/BoshaVault/issues/21) | In progress by owner direction |
 | 04 | Security Center | [#22](https://github.com/R3Dzf/BoshaVault/issues/22) | Queued |
 | 05 | Encrypted sync & quotas | [#23](https://github.com/R3Dzf/BoshaVault/issues/23) | Queued |
 | 06 | Release Manager | [#24](https://github.com/R3Dzf/BoshaVault/issues/24) | Queued |
@@ -34,10 +36,11 @@
 5. Verify denial paths for unauthenticated, AAL1, unauthorized and suspended actors.
 6. Review and merge after CI succeeds on the **exact commit**.
 7. Deploy behind safe defaults; verify real behavior without exposing vault secrets.
-8. Record proof in the phase issue and close it before starting the next phase.
+8. Record proof in the phase issue. Close a phase as completed only after every acceptance item passes. If the owner explicitly waives remaining items, close it as **waived**, list every deferred item, and proceed only at that owner's direction.
 
-**Gate:** no paid resource may be created, even temporarily. A phase with unchecked requirements is not complete. Delayed work and
-blocked features stay visible in their issue; do not silently defer or omit them.
+**Gate:** no paid resource may be created, even temporarily. A phase with unchecked requirements is not complete. Delayed work and blocked features stay visible in their issue; an owner waiver is recorded as deferred, never as passed.
+
+**Current owner-directed transition:** Phase 02 (#20) was closed with its unchecked acceptance gates deferred at the owner's explicit direction. This administrative closure is not a passing phase. Phase 03 (#21) is now in progress at that direction; see [Phase 02 record](ADMIN-PHASE-02.md).
 
 ## Existing capabilities to preserve
 
@@ -64,8 +67,12 @@ blocked features stay visible in their issue; do not silently defer or omit them
 
 ## Completion definition
 
-All 11 phase issues closed with tests and verified deployments; one final
-security/threat-model review; docs, rollback procedures and support playbook
-updated; all published Windows and Android versions remain updatable.
+All 11 phase issues resolved. A phase counts as completed only when its
+checklist and evidence pass; owner-waived phases remain visibly incomplete and
+do not count as final sign-off. Complete one final security/threat-model
+review, update docs, rollback procedures and support playbook, and verify all
+published Windows and Android versions remain updatable.
 
-**Status:** Phase 00 completed after local GoTrue AAL1/AAL2 integration tests and full cross-platform CI. Phase 01 is in progress; phases 02–10 are queued.
+**Status:** Phases 00–01 completed. Phase 02 is owner-waived with acceptance
+gates deferred; Phase 03 is in progress by that direction. Phases 04–10 are
+queued.

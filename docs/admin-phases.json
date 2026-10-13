@@ -3,6 +3,7 @@
   "updated_at": "2026-10-13",
   "rules": [
     "sequential",
+    "owner_directed_waiver",
     "passing_ci",
     "authorization_review",
     "staging_acceptance",
@@ -28,13 +29,13 @@
       "number": "02",
       "issue": 20,
       "name": "Account support actions",
-      "status": "in_progress"
+      "status": "waived"
     },
     {
       "number": "03",
       "issue": 21,
       "name": "Device inventory & access",
-      "status": "queued"
+      "status": "in_progress"
     },
     {
       "number": "04",
