@@ -24,6 +24,7 @@ public sealed class SupabaseSnapshotTransport(HttpClient http, Uri projectUrl,
     }
     public sealed record RemoteEncryptedSnapshot(Guid DeviceSlot,byte[] Blob);
     public sealed record RemoteSnapshotMetadata(Guid DeviceSlot,string Digest);
+    public sealed record CloudSyncStatus(bool Suspended,long SnapshotCount,long CiphertextBytes,long QuotaBytes,long RemainingBytes);
 
     private async Task<byte[]> InventoryRpcAsync(string function, object body, CancellationToken ct)
     {
@@ -32,6 +33,53 @@ public sealed class SupabaseSnapshotTransport(HttpClient http, Uri projectUrl,
         using var res = await http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
         if (!res.IsSuccessStatusCode) throw new VaultException("Cloud session inventory could not be updated.");
         return await SupabaseCloudAccount.ReadBounded(res.Content, 8192, ct);
+    }
+
+    public async Task<CloudSyncStatus> GetCloudSyncStatusAsync(CancellationToken ct = default)
+    {
+        byte[] response=await InventoryRpcAsync("lockvyn_cloud_sync_status",new { },ct);
+        try
+        {
+            using var json=JsonDocument.Parse(response,new JsonDocumentOptions{MaxDepth=4});
+            JsonOptions.NoDuplicates(json.RootElement);
+            var root=json.RootElement;
+            if(root.ValueKind!=JsonValueKind.Object ||
+               !root.TryGetProperty("suspended",out var suspended) ||
+               suspended.ValueKind is not (JsonValueKind.True or JsonValueKind.False) ||
+               !root.TryGetProperty("snapshotCount",out var count) || !count.TryGetInt64(out long snapshotCount) ||
+               !root.TryGetProperty("ciphertextBytes",out var used) || !used.TryGetInt64(out long ciphertextBytes) ||
+               !root.TryGetProperty("quotaBytes",out var quota) || !quota.TryGetInt64(out long quotaBytes) ||
+               !root.TryGetProperty("remainingBytes",out var remaining) || !remaining.TryGetInt64(out long remainingBytes) ||
+               snapshotCount is < 0 or > 64 || ciphertextBytes < 0 ||
+               quotaBytes is < 1 or > 67_108_864 || remainingBytes < 0 || remainingBytes > quotaBytes)
+                throw new VaultException("Cloud returned invalid sync status.");
+            return new(suspended.GetBoolean(),snapshotCount,ciphertextBytes,quotaBytes,remainingBytes);
+        }
+        catch(JsonException ex){throw new VaultException("Cloud returned invalid sync status.",ex);}
+        finally{CryptographicOperations.ZeroMemory(response);}
+    }
+
+    public async Task RecordCloudSyncOutcomeAsync(string outcome,long? ciphertextBytes,
+        string? errorCode,CancellationToken ct=default)
+    {
+        if(outcome is not ("success" or "failure") ||
+           ciphertextBytes is < 0 or > 67_108_864 ||
+           errorCode is not (null or "quota_exceeded" or "sync_suspended" or "network" or "auth" or "transport" or "unknown") ||
+           outcome=="success" && errorCode is not null ||
+           outcome=="failure" && errorCode is null)
+            throw new VaultException("Invalid bounded cloud sync result.");
+        byte[] response=await InventoryRpcAsync("lockvyn_record_cloud_sync_outcome",new
+        {
+            p_outcome=outcome,p_ciphertext_bytes=ciphertextBytes,p_error_code=errorCode
+        },ct);
+        try
+        {
+            using var json=JsonDocument.Parse(response,new JsonDocumentOptions{MaxDepth=2});
+            if(json.RootElement.ValueKind!=JsonValueKind.True)
+                throw new VaultException("Cloud did not accept the sync result.");
+        }
+        catch(JsonException ex){throw new VaultException("Cloud returned an invalid sync result.",ex);}
+        finally{CryptographicOperations.ZeroMemory(response);}
     }
 
     public async Task<Guid> RegisterCloudDeviceAsync(string platform, string osVersion,
@@ -156,7 +204,33 @@ public sealed class SupabaseSnapshotTransport(HttpClient http, Uri projectUrl,
             CiphertextBase64=payload,CiphertextSha256=digest
         }),Encoding.UTF8,"application/json");
         using var res=await http.SendAsync(req,HttpCompletionOption.ResponseHeadersRead,ct);
-        if(!res.IsSuccessStatusCode)throw new VaultException("Encrypted cloud upload rejected by Supabase.");
+        if(!res.IsSuccessStatusCode)
+        {
+            string code=await SafeDatabaseErrorCodeAsync(res,ct);
+            string message=code switch
+            {
+                "BV001"=>"Cloud storage limit reached. Nothing was deleted; your local vault is unchanged.",
+                "BV002"=>"Cloud sync is paused. Offline vault data and encrypted cloud snapshots are preserved.",
+                _=>"Encrypted cloud upload was rejected. Check your cloud session and try again."
+            };
+            throw new VaultException(message);
+        }
+    }
+
+    private static async Task<string> SafeDatabaseErrorCodeAsync(HttpResponseMessage response,CancellationToken ct)
+    {
+        byte[] bytes=await SupabaseCloudAccount.ReadBounded(response.Content,8192,ct);
+        try
+        {
+            using var json=JsonDocument.Parse(bytes,new JsonDocumentOptions{MaxDepth=3});
+            if(json.RootElement.ValueKind!=JsonValueKind.Object ||
+               !json.RootElement.TryGetProperty("code",out var code) || code.ValueKind!=JsonValueKind.String)
+                return "";
+            string value=code.GetString() ?? "";
+            return value is "BV001" or "BV002" ? value : "";
+        }
+        catch(JsonException){return "";}
+        finally{CryptographicOperations.ZeroMemory(bytes);}
     }
 
     public async Task<IReadOnlyList<RemoteEncryptedSnapshot>> ListAsync(Guid vaultSlot,
