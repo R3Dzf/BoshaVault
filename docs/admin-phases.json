@@ -47,13 +47,13 @@
       "number": "05",
       "issue": 23,
       "name": "Encrypted sync & quotas",
-      "status": "in_progress"
+      "status": "completed"
     },
     {
       "number": "06",
       "issue": 24,
       "name": "Release Manager",
-      "status": "queued"
+      "status": "in_progress"
     },
     {
       "number": "07",
