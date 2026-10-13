@@ -19,9 +19,8 @@ declare
 begin
   if not (select lockvyn_private.cloud_assurance_allowed())
      or not (select lockvyn_private.cloud_device_session_allowed())
-     or coalesce((select auth.jwt()->>'aal'),'') <> 'aal2'
      or v_owner is null or v_session is null then
-    raise exception 'Verified AAL2 is required to withdraw device inventory consent'
+    raise exception 'A verified active cloud session is required to withdraw device inventory consent'
       using errcode = '42501';
   end if;
 
