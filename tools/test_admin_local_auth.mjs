@@ -146,6 +146,9 @@ const strangerAAL2=await totpChallenge(stranger);
 const grant=await invoke("/rest/v1/lockvyn_admins","POST",service,service,
   {user_id:owner.id});
 assert([201,204].includes(grant.status),"Local allowlist grant failed: "+JSON.stringify(grant.data));
+const protectedGrant=await invoke("/rest/v1/lockvyn_admins","POST",service,service,
+  {user_id:pending.data.id});
+assert([201,204].includes(protectedGrant.status),"Synthetic protected admin grant failed");
 await denied(owner.aal1,"Owner without completing MFA");
 await denied(strangerAAL2.aal2,"Verified 2FA user without admin role");
 await denied(stranger.aal1,"Nonadmin AAL1");
@@ -231,8 +234,8 @@ assert(!JSON.stringify(inventory.data.devices).includes(firstClaims.session_id),
   "Inventory never exposes Auth session identifiers");
 const selfInventory=await admin(ownerAAL2.aal2,{action:"deviceList",id:owner.id});
 assert.equal(selfInventory.status,403,"Administrator's own account is protected");
-const protectedInventory=await admin(ownerAAL2.aal2,{action:"deviceList",id:(await admin(ownerAAL2.aal2,{action:"list",page:1})).data.users.find(u=>u.id!==owner.id&&u.email===owner.email)?.id||owner.id});
-assert.equal(protectedInventory.status,403,"Protected account inventory is denied");
+const protectedInventory=await admin(ownerAAL2.aal2,{action:"deviceList",id:pending.data.id});
+assert.equal(protectedInventory.status,403,"Another administrator's inventory is denied");
 await denied(owner.aal1,"AAL1 device inventory",{action:"deviceList",id:stranger.id});
 const wrongDeviceEmail=await admin(ownerAAL2.aal2,{action:"deviceRevoke",id:stranger.id,
   deviceId:registeredOne.data,confirmEmail:"wrong@example.invalid"});
