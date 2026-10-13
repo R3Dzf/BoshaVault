@@ -1,6 +1,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2.58.0";
 import { html } from "./ui.ts";
 import { verifiedUserGate, adminMembershipGate } from "./access.mjs";
+import { validSupportRequest, validCaseConfirmation, freshVerifiedTotp, safeTarget, isAutomaticAction } from "./support.mjs";
 
 // The service-role key is only read inside this Edge Function. It is never
 // embedded in the HTML response, shipped to clients, or logged.
@@ -139,6 +140,83 @@ Deno.serve(async (request) => {
       return result({ error: "Unable to load account directory" }, 502);
     }
     return result(data);
+  }
+  if (body.action === "supportHistory") {
+    const { data, error } = await service.rpc("lockvyn_admin_support_recent", {
+      p_actor: verified.user.id,
+    });
+    if (error || !Array.isArray(data)) return result({ error: "Unable to load support history" }, 502);
+    return result({ cases: data });
+  }
+  if (body.action === "supportPrepare" || body.action === "supportExecute") {
+    const executing = body.action === "supportExecute";
+    if (!validSupportRequest(body) || (executing && !validCaseConfirmation(body))) {
+      return result({ error: "Invalid support request" }, 400);
+    }
+    // Never permit a support action on the authenticated Owner, or on any
+    // other administrator. Policy is repeated inside the service-only RPC.
+    const { data: target, error: targetError } = await service.auth.admin.getUserById(body.id);
+    if (targetError || !target?.user?.email) {
+      return result({ error: "Target account is unavailable" }, 404);
+    }
+    const { data: otherAdmin, error: otherAdminError } = await service
+      .from("lockvyn_admins").select("user_id").eq("user_id", body.id).maybeSingle();
+    if (otherAdminError) return result({ error: "Unable to verify protected account" }, 503);
+    if (!safeTarget(body.id, verified.user.id, Boolean(otherAdmin))) {
+      return result({ error: "Administrator accounts cannot be changed here" }, 403);
+    }
+    if (!executing) {
+      const { data: caseId, error: prepareError } =
+        await service.rpc("lockvyn_admin_support_prepare", {
+          p_actor: verified.user.id, p_target: body.id,
+          p_kind: body.kind, p_reason: body.reason,
+        });
+      if (prepareError || typeof caseId !== "string") {
+        return result({ error: "Unable to start case. Check the one-minute cooldown." }, 429);
+      }
+      return result({
+        caseId, expiresInSeconds: 300, targetEmail: target.user.email,
+        kind: body.kind, cloudOnly: true,
+      });
+    }
+    // Explicit fresh TOTP challenge required; a refreshed AAL2 JWT cannot
+    // extend the timestamp of its last factor verification.
+    if (!freshVerifiedTotp(claims, Math.floor(Date.now()/1000))) {
+      return result({ error: "Verify a fresh authenticator code before confirming this action" }, 403);
+    }
+    const { data: claimed, error: claimError } =
+      await service.rpc("lockvyn_admin_support_claim", {
+        p_actor: verified.user.id, p_case: body.caseId, p_target: body.id,
+        p_kind: body.kind, p_email: body.confirmEmail,
+      });
+    if (claimError || !claimed) {
+      return result({ error: "Confirmation expired, was already used, or email did not match" }, 409);
+    }
+    let status = "review_pending";
+    let operationError = null;
+    if (isAutomaticAction(body.kind)) {
+      const { error: updateError } = await service.auth.admin.updateUserById(body.id, {
+        ban_duration: body.kind === "suspend_24h" ? "24h" : "none",
+      });
+      operationError = updateError;
+      status = updateError ? "failed" : "completed";
+    }
+    const { data: finished, error: finishError } =
+      await service.rpc("lockvyn_admin_support_finish", {
+        p_actor: verified.user.id, p_case: body.caseId, p_status: status,
+      });
+    if (finishError || !finished) {
+      // The provider may have applied the action already; do NOT replay it
+      // without checking its status with the support history/admin API.
+      return result({ error: "Support state is uncertain. Check case history; do not retry." }, 503);
+    }
+    if (operationError) return result({ error: "Cloud Auth did not apply the operation; case logged as failed" }, 502);
+    return result({
+      status, caseId: body.caseId, cloudOnly: true,
+      warning: status === "review_pending"
+        ? "A review case was recorded; no factor, session or account was changed."
+        : "Existing access JWTs may remain valid until expiry; offline vaults are not controlled.",
+    });
   }
   if (body.action === "recover") {
     if (recoveryRedirect !== dashboardOrigin + "/recover") {
