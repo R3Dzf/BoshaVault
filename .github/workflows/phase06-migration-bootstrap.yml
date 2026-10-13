@@ -1,0 +1,38 @@
+name: Phase 06 migration bootstrap (temporary)
+on:
+  push:
+    branches: [phase-06-release-manager]
+    paths:
+      - .github/workflows/phase06-migration-bootstrap.yml
+permissions:
+  contents: write
+jobs:
+  migration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: phase-06-release-manager
+          persist-credentials: true
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.120.0
+      - name: Generate the migration path using Supabase CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase init --force
+          supabase migration new admin_release_manager
+          path="$(find supabase/migrations -maxdepth 1 -type f -name '*_admin_release_manager.sql' -print -quit)"
+          test -n "$path"
+          printf '%s\n' "$path" > phase06-migration-path.txt
+          cat > "$path" <<'SQL'
+          -- Phase 06 Release Manager schema; generated with the Supabase CLI.
+          -- Filled with the reviewed migration after the generated path is captured.
+          SQL
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$path" phase06-migration-path.txt
+          git commit -m "chore: generate phase 06 migration path with Supabase CLI"
+          git push origin HEAD:phase-06-release-manager
