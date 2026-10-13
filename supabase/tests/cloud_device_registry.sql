@@ -93,13 +93,13 @@ select '00000000-0000-4000-8000-000000000d01',
 from generate_series(1,10) as g;
 set local role authenticated;
 select set_config('request.jwt.claims','{"sub":"00000000-0000-4000-8000-000000000d01","role":"authenticated","aal":"aal2","session_id":"10000000-0000-4000-8000-000000000d02"}',true);
-do $ begin
+do $$ begin
   begin
     perform public.lockvyn_revoke_cloud_device(current_setting('lockvyn.test.device_target')::uuid);
     raise exception 'Revocation rate limit was not enforced';
   exception when sqlstate '54000' then null;
   end;
-end $;
+end $$;
 reset role;
 delete from lockvyn_private.cloud_device_audit
 where owner_id='00000000-0000-4000-8000-000000000d01'
@@ -109,7 +109,7 @@ where owner_id='00000000-0000-4000-8000-000000000d01'
 set local role authenticated;
 select set_config('request.jwt.claims','{"sub":"00000000-0000-4000-8000-000000000d01","role":"authenticated","aal":"aal2","session_id":"10000000-0000-4000-8000-000000000d02"}',true);
 -- The owner's AAL2 session revokes the selected Auth session and creates one audit record.
-do $ begin
+do $$ begin
   if not public.lockvyn_revoke_cloud_device(current_setting('lockvyn.test.device_target')::uuid) then
     raise exception 'Owner AAL2 revocation failed';
   end if;
