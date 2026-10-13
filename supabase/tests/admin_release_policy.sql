@@ -16,7 +16,9 @@ begin
      or has_table_privilege('service_role','lockvyn_private.release_policies','select')
      or has_table_privilege('anon','lockvyn_private.release_policy_audit','select')
      or has_table_privilege('authenticated','lockvyn_private.release_policy_audit','select')
-  then raise exception 'Release policy tables must have no direct Data API grants'; end if;
+     or has_function_privilege('anon',
+       'public.lockvyn_admin_set_release_policy(uuid,uuid,text,boolean,text,text,text,integer,text)','execute')
+  then raise exception 'Release policy tables/functions must have no direct Data API grants'; end if;
 end;
 $phase06$;
 
@@ -47,6 +49,22 @@ begin
       'a7000000-0000-4000-8000-000000000001','aal1',true,
       'windows',null,'1.20.0',100,'planned_rollout');
     raise exception 'AAL1 mutation was accepted';
+  exception when insufficient_privilege then null; end;
+
+  begin
+    perform public.lockvyn_admin_set_release_policy(
+      'a6000000-0000-4000-8000-000000000001',
+      'a7000000-0000-4000-8000-000000000001',null,true,
+      'windows',null,'1.20.0',100,'planned_rollout');
+    raise exception 'Mutation without an assurance claim was accepted';
+  exception when insufficient_privilege then null; end;
+
+  begin
+    perform public.lockvyn_admin_set_release_policy(
+      'a6000000-0000-4000-8000-000000000001',
+      'a7000000-0000-4000-8000-000000000099','aal2',true,
+      'windows',null,'1.20.0',100,'planned_rollout');
+    raise exception 'Mutation with a revoked or missing session was accepted';
   exception when insufficient_privilege then null; end;
 
   begin
