@@ -101,6 +101,10 @@ el("verify-otp").addEventListener("submit",async e=>{
       {challenge_id:challengeId,code:el("otp").value.trim()},"POST",accessToken);
     el("otp").value="";
     if(typeof reply.access_token!=="string")throw Error("Authenticator verification failed");
+    let claims={};
+    try{claims=JSON.parse(atob(reply.access_token.split(".")[1].replace(/-/g,"+").replace(/_/g,"/")));}catch{}
+    if(claims.aal!=="aal2"||claims.sub!==actorId)
+      throw Error("Fresh 2FA did not establish the required identity level");
     const me=await auth("user",null,"GET",reply.access_token);
     if(me.id!==actorId)throw Error("Account mismatch");
     accessToken=reply.access_token;
