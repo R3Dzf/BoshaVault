@@ -12,7 +12,10 @@ const vm = require("node:vm");
   let source = readFileSync(file,"utf8");
   // The single TS-only type annotation does not affect runtime semantics.
   source = source.replace(/^import .*;\s*$/gm,"")
-    .replace("let body: Record<string, unknown>;","let body;");
+    .replace("let body: Record<string, unknown>;","let body;")
+    .replace("function result(data: unknown, status = 200): Response {",
+             "function result(data, status = 200) {")
+    .replace("function nonce(): string {", "function nonce() {");
   assert(!source.includes("let body: Record<string, unknown>;"),
     "Test must evaluate the real Edge Function body");
 
