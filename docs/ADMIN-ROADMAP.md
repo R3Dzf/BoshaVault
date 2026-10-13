@@ -18,8 +18,8 @@
 | 00 | Foundation & security gates | [#18](https://github.com/R3Dzf/BoshaVault/issues/18) | Completed |
 | 01 | Overview & account directory | [#19](https://github.com/R3Dzf/BoshaVault/issues/19) | Completed |
 | 02 | Account support actions | [#20](https://github.com/R3Dzf/BoshaVault/issues/20) | Owner-waived; acceptance incomplete |
-| 03 | Device inventory & access | [#21](https://github.com/R3Dzf/BoshaVault/issues/21) | In progress by owner direction |
-| 04 | Security Center | [#22](https://github.com/R3Dzf/BoshaVault/issues/22) | Queued |
+| 03 | Device inventory & access | [#21](https://github.com/R3Dzf/BoshaVault/issues/21) | Owner-waived; external gates deferred (not passed) |
+| 04 | Security Center | [#22](https://github.com/R3Dzf/BoshaVault/issues/22) | In progress by owner direction |
 | 05 | Encrypted sync & quotas | [#23](https://github.com/R3Dzf/BoshaVault/issues/23) | Queued |
 | 06 | Release Manager | [#24](https://github.com/R3Dzf/BoshaVault/issues/24) | Queued |
 | 07 | Announcements & notices | [#25](https://github.com/R3Dzf/BoshaVault/issues/25) | Queued |
@@ -40,7 +40,7 @@
 
 **Gate:** no paid resource may be created, even temporarily. A phase with unchecked requirements is not complete. Delayed work and blocked features stay visible in their issue; an owner waiver is recorded as deferred, never as passed.
 
-**Current owner-directed transition:** Phase 02 (#20) was closed with its unchecked acceptance gates deferred at the owner's explicit direction. This administrative closure is not a passing phase. Phase 03 (#21) is now in progress at that direction; see [Phase 02 record](ADMIN-PHASE-02.md).
+**Current owner-directed transition:** Phase 02 (#20) was closed with its unchecked acceptance gates deferred at the owner's explicit direction. This administrative closure is not a passing phase. On 2026-10-13 the owner directed continued delivery toward all ten phases; Phase 03 (#21) is therefore waived solely for sequencing, not completed or passed. Its acceptance is incomplete; deferred evidence remains visible, and a waiver is never recorded as completed. PR #46 and all four final-head CI workflows passed. The independent human accessibility/security review, non-customer hosted staging rehearsal, and production migration rollout verification remain deferred. No hosted project, customer account, or production deployment was changed. See [Phase 03 record](https://github.com/R3Dzf/BoshaVault/issues/21) and [rollout/rollback runbook](ADMIN-PHASE-03-ROLLOUT-ROLLBACK.md). Phase 04 (#22) is now in progress by owner direction.
 
 ## Existing capabilities to preserve
 
@@ -73,6 +73,4 @@ do not count as final sign-off. Complete one final security/threat-model
 review, update docs, rollback procedures and support playbook, and verify all
 published Windows and Android versions remain updatable.
 
-**Status:** Phases 00–01 completed. Phase 02 is owner-waived with acceptance
-gates deferred; Phase 03 is in progress by that direction. Phases 04–10 are
-queued.
+**Status:** Phases 00–01 completed. Phases 02–03 are owner-waived with acceptance gates deferred; Phase 04 is in progress by owner direction; Phases 05–10 are queued.

@@ -43,10 +43,10 @@ for index, phase in enumerate(state["phases"]):
             f"Stage {phase['number']} started before unfinished stage {state['phases'][index - 1]['number']}"
         )
     elif previous == "waived":
-        assert phase["status"] in {"queued", "in_progress", "blocked"}, (
+        assert phase["status"] in {"queued", "in_progress", "blocked", "waived"}, (
             f"Stage {phase['number']} may proceed after a waived stage only by explicit owner direction"
         )
-        if phase["status"] in {"in_progress", "blocked"}:
+        if phase["status"] in {"in_progress", "blocked", "waived"}:
             assert waiver_recorded, "Owner-directed transition must record incomplete/deferred acceptance"
 
 if state["phases"][0]["status"] == "completed":
