@@ -308,7 +308,7 @@ Deno.serve(async (request) => {
       return result({error:invalid||"Type the selected release tag to confirm the change"},400);
     if(!freshVerifiedTotp(claims,Math.floor(Date.now()/1000)))
       return result({error:"Verify a fresh authenticator code before changing release policy"},403);
-    let catalog:unknown[];
+    let catalog;
     try{catalog=await loadReleaseCatalog();}
     catch{return result({error:"Unable to verify the published release. Retry later."},502);}
     const candidates=catalog;
@@ -317,7 +317,7 @@ Deno.serve(async (request) => {
       ?eligible.find(x=>x.tag===input.candidateTag)
       :eligible[0];
     if(!selected)return result({error:"The selected stable release is not published"},409);
-    const names=new Set((selected.assets||[]).map((x:any)=>x.name));
+    const names=new Set((selected.assets||[]).map(x=>x.name));
     if(input.platform==="windows"&&(!names.has("Lockvyn-win-Setup.exe")||!names.has("releases.win.json")))
       return result({error:"The Windows release is missing its installer or stable update feed"},409);
     if(input.platform==="android"){
@@ -327,8 +327,8 @@ Deno.serve(async (request) => {
          Number(input.minimumVersion)>manifest.versionCode)
         return result({error:"The Android release metadata or minimum version could not be verified"},409);
     }
-    if(input.platform==="windows"&&input.candidateTag){
-      const selectedVersion=input.candidateTag.slice("windows-v".length);
+    if(input.platform==="windows"){
+      const selectedVersion=selected.tag.slice("windows-v".length);
       if(compareReleaseVersions("windows",input.minimumVersion,selectedVersion)>0)
         return result({error:"Minimum version cannot exceed the selected release"},400);
     }
