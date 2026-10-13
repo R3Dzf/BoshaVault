@@ -110,6 +110,11 @@ begin
   if tg_op='UPDATE' and new.owner_id is distinct from old.owner_id then
     raise exception 'Snapshot ownership cannot change' using errcode='42501';
   end if;
+  if (select auth.uid())=new.owner_id
+     and not (select lockvyn_private.cloud_sync_allowed()) then
+    raise exception 'Cloud sync is paused. Offline vault data and encrypted cloud snapshots are preserved.'
+      using errcode='BV002';
+  end if;
   v_bytes := octet_length(pg_catalog.decode(new.ciphertext_base64,'base64'));
   if v_bytes < 1 or v_bytes > 2000029 then
     raise exception 'Encrypted snapshot size is invalid' using errcode='22023';
