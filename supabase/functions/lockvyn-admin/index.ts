@@ -150,7 +150,9 @@ Deno.serve(async (request) => {
         !/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(id)) {
       return result({ error: "Invalid user" }, 400);
     }
-    if (id === verified.user.id) return result({ error: "Use your own account recovery flow" }, 400);
+    // The approved administrator can request recovery of their own cloud login
+    // too. Delivery remains email-verified, audited, and rate-limited just like
+    // support requests for other accounts. This never changes the vault key.
     const { data: target, error: targetError } = await service.auth.admin.getUserById(id);
     if (targetError || !target.user?.email || !target.user.email_confirmed_at) {
       return result({ error: "Account not found or unconfirmed" }, 404);
