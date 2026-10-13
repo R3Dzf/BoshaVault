@@ -104,7 +104,7 @@ footer{font-size:12px;color:#787284;margin-top:20px}
   </div>
 </section>
 <section id="directory-section" aria-labelledby="directory-heading">
-  <div class="table-head"><div><h2 id="directory-heading">Account directory</h2>
+  <div class="table-head"><div><h2 id="directory-heading" tabindex="-1">Account directory</h2>
     <p class="note">Search and filters cover all registered accounts, not only the current page.</p></div>
     <div class="muted" id="filtered-count" aria-live="polite">Loading account count…</div>
   </div>
@@ -143,7 +143,7 @@ footer{font-size:12px;color:#787284;margin-top:20px}
     A suspended user's existing access token may remain valid until its expiry.
     2FA recovery and account deletion create review cases only; they never silently change the account. A user can <a href="https://lockvyn-admin-ui.r3dzf-studio.workers.dev/security">revoke their own cloud sessions</a> with their credentials; administrators cannot impersonate them.</p>
   <section class="device-inventory" aria-labelledby="cloud-device-heading">
-    <div class="toolbar"><div><h3 id="cloud-device-heading">Registered cloud sessions</h3>
+    <div class="toolbar"><div><h3 id="cloud-device-heading" tabindex="-1">Registered cloud sessions</h3>
       <p class="note">Only sessions the user explicitly opted in appear here. Names and software versions are self-reported; they do not prove a physical device's identity.</p></div>
       <button id="refresh-cloud-devices" type="button">Refresh sessions</button></div>
     <p class="support-note">Revoking blocks this signed-in app session from cloud snapshots and pairing. It does not erase offline vault data or invalidate the Auth refresh token. A new sign-in creates a different session.</p>
@@ -540,6 +540,7 @@ function closeSupport(){
   visible("support-confirm",false);visible("account-support",false);
   get("support-cloud-state").textContent="Cloud login status has not been checked.";
   if(trigger?.isConnected)trigger.focus();
+  else get("directory-heading").focus();
 }
 get("close-support").addEventListener("click",closeSupport);
 get("support-kind").addEventListener("change",()=>{pendingSupport=null;visible("support-confirm",false)});
