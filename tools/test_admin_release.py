@@ -10,7 +10,10 @@ windows=(root/".github/workflows/release-windows.yml").read_text()
 android=(root/".github/workflows/release-android.yml").read_text()
 py_compile.compile(str(root/"tools/combine_releases.py"), doraise=True)
 assert "service.auth.getUser(token)" in admin
-assert 'assurance !== "aal2"' in admin
+assert 'verifiedUserGate(verified.user, claims)' in admin
+assert 'adminMembershipGate(admin, verified.user.id)' in admin
+assert 'service.auth.getUser(token)' in admin
+assert '"./access.mjs"' in admin
 assert '.from("lockvyn_admins")' in admin
 assert 'service.auth.admin.listUsers' in admin
 assert "service.auth.admin.mfa.listFactors({ userId: user.id })" in admin
