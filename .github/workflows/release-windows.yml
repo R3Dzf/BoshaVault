@@ -23,7 +23,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 30
     permissions:
-      actions: read
+      actions: write
       contents: write
     steps:
       - uses: actions/checkout@v4
@@ -113,6 +113,14 @@ jobs:
           gh release edit $tag --repo '${{ github.repository }}' --notes-file $notes
           if ($LASTEXITCODE) { throw 'Release instruction upload failed.' }
         # gh uses the same short-lived workflow token; no updater token is shipped to clients.
+      - name: Combine platform downloads
+        if: github.event_name == 'push' || inputs.publish
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run combine-releases.yml --repo '${{ github.repository }}' --ref main
+          if ($LASTEXITCODE) { throw 'Combined release workflow dispatch failed.' }
       - name: Retain release files
         uses: actions/upload-artifact@v4
         with:

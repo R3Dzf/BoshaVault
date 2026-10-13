@@ -1,0 +1,37 @@
+name: Bundle Windows and Android
+on:
+  release:
+    types: [published]
+  push:
+    branches: ['release/bundle-v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: lockvyn-combined-release
+  cancel-in-progress: false
+
+jobs:
+  bundle:
+    if: github.repository == 'R3Dzf/BoshaVault'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Combine verified platform releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/combine_releases.py
+      - name: Drop temporary trigger branch
+        if: success() && startsWith(github.ref, 'refs/heads/release/bundle-')
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const branch = context.ref.replace('refs/heads/', '');
+            if (!/^release\/bundle-v\d+\.\d+\.\d+$/.test(branch)) {
+              throw new Error('Unexpected temporary release branch');
+            }
+            await github.rest.git.deleteRef({...context.repo, ref:'heads/'+branch});
+            core.info('Deleted temporary bundling branch: '+branch);
