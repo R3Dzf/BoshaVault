@@ -211,7 +211,7 @@ assert.equal(syncHeartbeat.status,200,"Successful cloud sync records a server ti
 const secondSignIn=await invoke("/auth/v1/token?grant_type=password","POST",anon,null,
   {email:stranger.email,password});
 assert.equal(secondSignIn.status,200,"Create a second synthetic Auth session");
-const secondAAL2=await verifyExistingTotp(stranger,secondSignIn.data.access_token);
+const secondAAL2=await verifyExistingTotp(strangerAAL2,secondSignIn.data.access_token);
 const registeredTwo=await dataApi("rpc/lockvyn_register_cloud_device","POST",secondAAL2,
   {...registrationPayload,p_display_name:"Synthetic second laptop"});
 assert.equal(registeredTwo.status,200,"Register second independent Auth session");
@@ -240,7 +240,7 @@ await denied(owner.aal1,"AAL1 device inventory",{action:"deviceList",id:stranger
 const wrongDeviceEmail=await admin(ownerAAL2.aal2,{action:"deviceRevoke",id:stranger.id,
   deviceId:registeredOne.data,confirmEmail:"wrong@example.invalid"});
 assert.equal(wrongDeviceEmail.status,409,"Typed target email is checked before revocation");
-const freshOwnerToken=await verifyExistingTotp(owner,owner.aal1);
+const freshOwnerToken=await verifyExistingTotp(ownerAAL2,owner.aal1);
 const revokeOne=await admin(freshOwnerToken,{action:"deviceRevoke",id:stranger.id,
   deviceId:registeredOne.data,confirmEmail:stranger.email});
 assert.equal(revokeOne.status,200,"Fresh AAL2 + TOTP admin revocation succeeds: "+JSON.stringify(revokeOne.data));
