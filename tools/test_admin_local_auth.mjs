@@ -313,6 +313,21 @@ console.log("PASS real local GoTrue AAL1/AAL2 JWT verification, admin allowlist 
 console.log("PASS recovery rejected for nonadmin and AAL1; no recovery messages sent");
 
 
+const dashboardPage=await fetch(endpoint,{method:"GET",redirect:"manual"});
+assert.equal(dashboardPage.status,200,"Local admin dashboard HTML is served");
+assert.match(dashboardPage.headers.get("content-security-policy")||"",/script-src 'nonce-/);
+const dashboardHtml=await dashboardPage.text();
+for(const required of [
+  "Registered cloud sessions",
+  "Only sessions the user explicitly opted in appear here",
+  "self-reported; they do not prove a physical device",
+  "Fresh code from your own authenticator app",
+  "It does not erase offline vault data or invalidate the Auth refresh token",
+  "deviceRevoke",
+]){
+  assert(dashboardHtml.includes(required),"Admin session UI must include: "+required);
+}
+console.log("PASS local admin inventory UI includes opt-in disclosure, no-hardware-proof caveat, fresh-TOTP confirmation, and cloud-only impact");
 const securePage=await fetch(endpoint+"/security",{method:"GET",redirect:"manual"});
 assert.equal(securePage.status,200,"Isolated user-owned security page is available");
 assert.match(securePage.headers.get("content-security-policy")||"",/script-src 'nonce-/);
