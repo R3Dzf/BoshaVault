@@ -334,9 +334,12 @@ for(const required of [
 ]){
   assert(dashboardHtml.includes(required),"Admin session UI must include: "+required);
 }
-const adminScript=dashboardHtml.match(/<script nonce=\"[^\"]+\">([\\s\\S]*?)<\\/script>/)?.[1];
-assert(adminScript,"Admin script must be present");
-new Function(adminScript);
+const adminScriptStart=dashboardHtml.indexOf('<script nonce="');
+const adminScriptBodyStart=dashboardHtml.indexOf(">",adminScriptStart)+1;
+const adminScriptEnd=dashboardHtml.lastIndexOf("</script>");
+assert(adminScriptStart>=0&&adminScriptBodyStart>adminScriptStart&&adminScriptEnd>=adminScriptBodyStart,
+  "Admin script must be present");
+new Function(dashboardHtml.slice(adminScriptBodyStart,adminScriptEnd));
 console.log("PASS local admin session flow exposes named controls, focus return, busy guard, and syntactically valid UI script");
 const securePage=await fetch(endpoint+"/security",{method:"GET",redirect:"manual"});
 assert.equal(securePage.status,200,"Isolated user-owned security page is available");
