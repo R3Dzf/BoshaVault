@@ -6,8 +6,9 @@ import { html } from "./ui.ts";
 const apiUrl = Deno.env.get("SUPABASE_URL") ?? "";
 const publicKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
 const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-const recoveryRedirect = Deno.env.get("LOCKVYN_RECOVERY_REDIRECT_URL") ?? 
-  (apiUrl ? new URL("/functions/v1/lockvyn-admin/recover", apiUrl).href : "");
+const dashboardOrigin = "https://lockvyn-admin-ui.r3dzf-studio.workers.dev";
+const recoveryRedirect = Deno.env.get("LOCKVYN_RECOVERY_REDIRECT_URL") ??
+  dashboardOrigin + "/recover";
 const service = createClient(apiUrl, serviceKey, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
@@ -21,6 +22,8 @@ function result(data: unknown, status = 200): Response {
       "X-Content-Type-Options": "nosniff",
       "Referrer-Policy": "no-referrer",
       "X-Frame-Options": "DENY",
+      "Access-Control-Allow-Origin": dashboardOrigin,
+      "Vary": "Origin",
     },
   });
 }
@@ -32,6 +35,20 @@ function nonce(): string {
 
 Deno.serve(async (request) => {
   const url = new URL(request.url);
+  if (request.method === "OPTIONS" &&
+      url.pathname.endsWith("/lockvyn-admin") &&
+      request.headers.get("origin") === dashboardOrigin) {
+    return new Response(null, {
+      status: 204, headers: {
+        "Access-Control-Allow-Origin": dashboardOrigin,
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "authorization, content-type",
+        "Access-Control-Max-Age": "600",
+        "Cache-Control": "no-store",
+        "Vary": "Origin",
+      },
+    });
+  }
   if (request.method === "GET" && (url.pathname.endsWith("/lockvyn-admin") ||
       url.pathname.endsWith("/lockvyn-admin/") ||
       url.pathname.endsWith("/lockvyn-admin/recover"))) {
@@ -56,7 +73,7 @@ Deno.serve(async (request) => {
   }
 
   // Reject browser cross-origin requests before evaluating any user credentials.
-  if (request.headers.get("origin") !== url.origin) return result({ error: "Forbidden" }, 403);
+  if (![url.origin, dashboardOrigin].includes(request.headers.get("origin") ?? "")) return result({ error: "Forbidden" }, 403);
   if (!request.headers.get("content-type")?.startsWith("application/json")) {
     return result({ error: "Invalid content type" }, 415);
   }
@@ -113,9 +130,7 @@ Deno.serve(async (request) => {
     });
   }
   if (body.action === "recover") {
-    if (!/^https:\/\/[^\s]+$/.test(recoveryRedirect) ||
-        new URL(recoveryRedirect).origin !== new URL(apiUrl).origin ||
-        !new URL(recoveryRedirect).pathname.endsWith("/lockvyn-admin/recover")) {
+    if (recoveryRedirect !== dashboardOrigin + "/recover") {
       return result({ error: "Account recovery link is not configured" }, 503);
     }
     const id = body.id;
