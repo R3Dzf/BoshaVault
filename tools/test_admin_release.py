@@ -18,7 +18,7 @@ assert 'service.rpc("lockvyn_claim_recovery"' in admin
 assert 'request.headers.get("origin") !== url.origin' in admin
 assert 'Cache-Control": "no-store' in admin
 assert 'X-Frame-Options": "DENY"' in admin
-assert 'verify_jwt:false' in (root/"docs/ADMIN-DASHBOARD.md").read_text()
+assert 'verify_jwt=false' in (root/"docs/ADMIN-DASHBOARD.md").read_text()
 assert "grant select on public.lockvyn_admins to service_role;" in migration
 assert "grant execute on function public.lockvyn_claim_recovery(uuid,uuid) to service_role" in migration
 assert "revoke all on public.lockvyn_admins from public, anon, authenticated" in migration
