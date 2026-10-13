@@ -177,6 +177,64 @@ Deno.serve(async (request) => {
     }
     return result(data);
   }
+  if (body.action === "deviceList" || body.action === "deviceRevoke") {
+    if (typeof body.id !== "string" ||
+        !/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(body.id)) {
+      return result({ error: "Invalid target" }, 400);
+    }
+    if (body.id === verified.user.id) {
+      return result({ error: "Administrator accounts are protected" }, 403);
+    }
+    const { data: targetAdmin, error: targetAdminError } = await service
+      .from("lockvyn_admins").select("user_id").eq("user_id", body.id).maybeSingle();
+    if (targetAdminError) return result({ error: "Unable to verify protected account" }, 503);
+    if (targetAdmin) return result({ error: "Administrator accounts are protected" }, 403);
+
+    if (body.action === "deviceList") {
+      const { data, error } = await service.rpc("lockvyn_admin_list_cloud_devices", {
+        p_actor: verified.user.id,
+        p_target: body.id,
+      });
+      if (error) {
+        if (error.code === "42501") return result({ error: "Device inventory is not available for this account" }, 403);
+        if (error.code === "22023") return result({ error: "Target account not found" }, 404);
+        return result({ error: "Unable to load registered cloud sessions" }, 502);
+      }
+      return result({ devices: Array.isArray(data) ? data : [] });
+    }
+
+    if (typeof body.deviceId !== "string" ||
+        !/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(body.deviceId) ||
+        typeof body.confirmEmail !== "string" || body.confirmEmail.length > 320) {
+      return result({ error: "Invalid session revocation request" }, 400);
+    }
+    const { data: target, error: targetError } = await service.auth.admin.getUserById(body.id);
+    if (targetError || !target?.user?.email) return result({ error: "Target account not found" }, 404);
+    if (target.user.email.toLowerCase() !== body.confirmEmail.trim().toLowerCase()) {
+      return result({ error: "The confirmation email does not match this account" }, 409);
+    }
+    if (!freshVerifiedTotp(claims, Math.floor(Date.now()/1000))) {
+      return result({ error: "Verify a fresh authenticator code before revoking this session" }, 403);
+    }
+    const { data: revoked, error: revokeError } = await service.rpc(
+      "lockvyn_admin_revoke_cloud_device", {
+        p_actor: verified.user.id,
+        p_actor_session: sessionId,
+        p_actor_aal: claims.aal,
+        p_fresh_totp: true,
+        p_target: body.id,
+        p_device_id: body.deviceId,
+        p_confirm_email: body.confirmEmail,
+      },
+    );
+    if (revokeError) {
+      if (revokeError.code === "54000") return result({ error: "Cloud session revocation rate limit reached" }, 429);
+      if (revokeError.code === "42501") return result({ error: "A fresh verified administrator session is required" }, 403);
+      return result({ error: "Unable to revoke this cloud session" }, 502);
+    }
+    if (revoked !== true) return result({ error: "Session is already revoked or unavailable" }, 409);
+    return result({ revoked: true });
+  }
   if (body.action === "supportStatus") {
     if (typeof body.id !== "string" ||
         !/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(body.id))
