@@ -329,6 +329,8 @@ for(const required of [
   "pendingDeviceTrigger",
   "deviceRevocationBusy",
   "supportTrigger",
+  "id=\"directory-heading\" tabindex=\"-1\"",
+  "id=\"cloud-device-heading\" tabindex=\"-1\"",
   "restoreFocus:true",
   "cloud-device-state\").focus()",
 ]){
