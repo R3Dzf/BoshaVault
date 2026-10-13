@@ -257,6 +257,15 @@ assert.equal(blockedOldSession.data.length,0,"Revoked signed session can no long
 const activeSecondSession=await dataApi(deviceSnapshotPath,"GET",secondAAL2,null);
 assert.equal(activeSecondSession.status,200);
 assert.equal(activeSecondSession.data.length,1,"Second session still reads the account's encrypted snapshot");
+const withdrewConsent=await dataApi("rpc/lockvyn_unregister_cloud_device","POST",secondAAL2,{});
+assert.equal(withdrewConsent.status,200,"Second session can withdraw its inventory consent");
+assert.equal(withdrewConsent.data,true);
+const afterWithdrawInventory=await admin(freshOwnerToken,{action:"deviceList",id:stranger.id});
+assert.equal(afterWithdrawInventory.status,200);
+assert.equal(afterWithdrawInventory.data.devices.length,1,"Withdrawing consent removes only that session's registry metadata");
+const afterWithdrawSnapshot=await dataApi(deviceSnapshotPath,"GET",secondAAL2,null);
+assert.equal(afterWithdrawSnapshot.status,200);
+assert.equal(afterWithdrawSnapshot.data.length,1,"Withdrawing inventory consent leaves cloud sync access intact");
 const retainedDeviceSnapshot=await dataApi(deviceSnapshotPath,"GET",service,null,service);
 assert.equal(retainedDeviceSnapshot.status,200);
 assert.equal(retainedDeviceSnapshot.data.length,1,"Revocation does not delete encrypted data");
