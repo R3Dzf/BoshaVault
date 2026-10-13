@@ -28,6 +28,11 @@ values
  ('f5000000-0000-4000-8000-000000000002','f7000000-0000-4000-8000-000000000001','f8000000-0000-4000-8000-000000000001',repeat('A',136),repeat('0',64)),
  ('f5000000-0000-4000-8000-000000000002','f7000000-0000-4000-8000-000000000002','f8000000-0000-4000-8000-000000000002',repeat('B',136),repeat('1',64));
 
+-- A client cannot forge the derived byte count by updating that column directly.
+update public.opaque_device_snapshots set ciphertext_bytes=1
+where owner_id='f5000000-0000-4000-8000-000000000002'
+  and vault_slot='f7000000-0000-4000-8000-000000000001';
+
 do $phase05$
 declare v_status jsonb;
 begin
