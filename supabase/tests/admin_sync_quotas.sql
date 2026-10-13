@@ -255,7 +255,7 @@ begin
     values ('f5000000-0000-4000-8000-000000000002','f7000000-0000-4000-8000-000000000009',
       'f8000000-0000-4000-8000-000000000009',repeat('F',136),repeat('5',64));
     raise exception 'Suspended owner could upload another snapshot';
-  exception when insufficient_privilege then null;
+  exception when sqlstate 'BV002' then null;
   end;
   begin
     perform public.lockvyn_record_cloud_sync_outcome('success',204,null);
