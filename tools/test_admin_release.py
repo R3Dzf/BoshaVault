@@ -18,6 +18,10 @@ assert "mfa = factorsError || !Array.isArray(factors?.factors)" in admin
 assert "mfa: Boolean(user.factors?" not in admin
 assert 'user.mfa===true?"Enabled":user.mfa===false?"Off":"Unknown"' in ui
 assert 'service.auth.resetPasswordForEmail' in admin
+assert 'Use your own account recovery flow' not in admin
+assert 'isSelf: user.id === verified.user.id' in admin
+assert 'user.isSelf?"Reset my cloud password":"Send recovery email"' in ui
+assert "service.rpc(\"lockvyn_claim_recovery\"" in admin
 assert 'service.rpc("lockvyn_claim_recovery"' in admin
 assert '[url.origin, dashboardOrigin].includes(request.headers.get("origin")' in admin
 assert 'Cache-Control": "no-store' in admin
