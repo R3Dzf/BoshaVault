@@ -187,6 +187,11 @@ final class CloudClient implements AutoCloseable {
     byte[] firstSnapshot(JSONObject pairing,CloudAuth.Session session)throws Exception{
         String slot=pairing.getString("vaultSlot");byte[] key=CloudSnapshot.parseKey(pairing.getString("recoveryKey")),response=null;
         try{
+            response=request("POST","rest/v1/rpc/lockvyn_cloud_sync_status",new JSONObject(),session.access,8192);
+            JSONObject syncStatus=StrictJson.object(new String(response,StandardCharsets.UTF_8));
+            if(!(syncStatus.opt("suspended") instanceof Boolean))throw new Exception("Cloud returned invalid sync status.");
+            boolean syncSuspended=syncStatus.getBoolean("suspended");Arrays.fill(response,(byte)0);response=null;
+            if(syncSuspended)throw new Exception("Cloud sync is paused. Offline vault data and encrypted cloud snapshots are preserved.");
             response=request("GET","rest/v1/opaque_device_snapshots?select=device_slot,ciphertext_base64,ciphertext_sha256&vault_slot=eq."+slot+"&order=updated_at.desc&limit=64",null,session.access,16000000);
             JSONArray rows=StrictJson.array(new String(response,StandardCharsets.UTF_8));if(rows.length()==0)throw new Exception("No cloud backup yet. Sync the first device before joining.");
             if(rows.length()>64)throw new Exception("Too many cloud devices.");
