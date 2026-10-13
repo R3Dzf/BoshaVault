@@ -4,12 +4,16 @@ import json
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
+free_policy = (root / "docs/ZERO-COST-POLICY.md").read_text(encoding="utf-8")
 state = json.loads((root / "docs/admin-phases.json").read_text(encoding="utf-8"))
 roadmap = (root / "docs/ADMIN-ROADMAP.md").read_text(encoding="utf-8")
 assert state["schema"] == 1
 assert len(state["phases"]) == 11, "Expected all 11 dashboard stages"
 assert {"sequential", "passing_ci", "authorization_review", "staging_acceptance",
-        "rollback_documented", "production_verification", "issue_checklist_complete"} <= set(state["rules"])
+        "rollback_documented", "production_verification", "issue_checklist_complete",
+        "zero_cost_only"} <= set(state["rules"])
+assert "USD 0.01344/hour" in free_policy and "not created" in free_policy, "Reject paid Supabase staging"
+assert "ZERO-COST-POLICY.md" in roadmap, "All stages must link the free-only rule"
 allowed = {"queued", "in_progress", "blocked", "completed"}
 numbers = [f"{i:02d}" for i in range(11)]
 assert [p["number"] for p in state["phases"]] == numbers
