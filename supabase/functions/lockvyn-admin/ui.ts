@@ -413,7 +413,7 @@ function renderCloudDevices(devices){
     const state=document.createElement("p");
     state.textContent=item.revoked_at
       ?"Revoked "+new Date(item.revoked_at).toLocaleString()
-      :"Cloud access active";
+      :"Cloud session not revoked by Lockvyn";
     li.append(state);
     if(!item.revoked_at){
       const button=document.createElement("button");
