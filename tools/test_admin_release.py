@@ -78,3 +78,32 @@ assert 'releases.win.json' in (root/"tools/combine_releases.py").read_text()
 assert "combine-releases.yml" in windows and "combine-releases.yml" in android
 assert "on:\n  release:" in combined
 print("PASS admin authorization, audit, no client secrets, combined release contracts")
+
+# Phase 06 release manager: sanitized metadata, audited policy, client gates.
+release_code=(root/"supabase/functions/lockvyn-admin/release.mjs").read_text()
+release_migration=next((root/"supabase/migrations").glob("*_admin_release_manager.sql")).read_text()
+release_test=(root/"tools/test_admin_release_manager.mjs").read_text()
+release_fixture=(root/"supabase/tests/admin_release_policy.sql").read_text()
+assert "validCandidateTag" in release_code and "rolloutPercent" in release_code
+assert "Never offer a downgrade" in release_code
+assert "minimum client version" in release_code.lower()
+assert "candidate_tag is null" in release_migration
+assert "lockvyn_private.release_policies" in release_migration
+assert "lockvyn_private.release_policy_audit" in release_migration
+assert "revoke all on lockvyn_private.release_policies from public, anon, authenticated, service_role" in release_migration
+assert "grant execute on function public.lockvyn_admin_set_release_policy" in release_migration
+assert "to service_role" in release_migration
+assert "lockvyn_auth_session_is_active" in release_migration
+assert "pg_advisory_xact_lock" in release_migration and "interval '60 seconds'" in release_migration
+assert "freshVerifiedTotp(claims" in admin and "releasePolicySet" in admin
+assert "/lockvyn-admin/release-policy" in admin and 'Access-Control-Allow-Origin":"*"' in admin
+assert "api.github.com/repos/R3Dzf/BoshaVault/" in admin
+assert "androidManifest" in admin and "sha256" in admin and "check-runs" in admin
+assert "releaseManager" in ui and "release-rows" in ui
+assert "release-confirm-tag" in ui and "textContent=release.changelog" in ui
+assert "release-policy?platform=android" in (root/"android/app/src/main/java/com/bosha/vault/AndroidUpdater.java").read_text()
+assert "ThreadLocalRandom.current().nextInt(100)" in (root/"android/app/src/main/java/com/bosha/vault/AndroidUpdater.java").read_text()
+assert "release-policy?platform=windows" in (root/"src/BoshaVault.Windows/UpdateDialog.cs").read_text()
+assert "Random.Shared.Next(100)" in (root/"src/BoshaVault.Windows/UpdateDialog.cs").read_text()
+assert "below-minimum clients get the required update" in release_test
+assert "synthetic" in release_fixture.lower() and "rollback" in release_fixture
