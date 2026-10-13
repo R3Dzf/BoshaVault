@@ -3,6 +3,21 @@
 This runbook applies to the admin UI Worker and Supabase `lockvyn-admin` Edge
 Function. It must stay up to date as each phase is released.
 
+## Zero-cost staging
+
+- The project owner requires **$0 total spending**, no paid cloud projects,
+  paid Supabase branches, overage charges or subscription upgrades.
+- The previously quoted Supabase hosted branch at $0.01344/hour is not
+  authorized; do not create it.
+- Run unit and integration tests against a **local synthetic handler harness**,
+  with a locally hosted ephemeral Supabase stack only if feasible on a free
+  runner. Never create fake production users or email real customers.
+- Stop safely if hosted free quotas are exhausted. See
+  [ZERO-COST-POLICY.md](ZERO-COST-POLICY.md).
+- The AAL1/non-admin staging check must be evidenced. Synthetic/mock tests do
+  not by themselves prove the live provider integration. Keep the phase
+  open until an isolated free integration test has passed.
+
 ## Release gate
 
 - Keep the [phase tracker](admin-phases.json), [roadmap](ADMIN-ROADMAP.md)
