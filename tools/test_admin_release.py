@@ -107,3 +107,5 @@ assert "release-policy?platform=windows" in (root/"src/BoshaVault.Windows/Update
 assert "Random.Shared.Next(100)" in (root/"src/BoshaVault.Windows/UpdateDialog.cs").read_text()
 assert "below-minimum clients get the required update" in release_test
 assert "synthetic" in release_fixture.lower() and "rollback" in release_fixture
+assert "Release CI checks must pass before a candidate can be selected" in admin
+assert "manifest.signerSha256!==latestManifest.signerSha256" in admin
