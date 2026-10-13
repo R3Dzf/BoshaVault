@@ -22,13 +22,13 @@
       "number": "01",
       "issue": 19,
       "name": "Overview & account directory",
-      "status": "in_progress"
+      "status": "completed"
     },
     {
       "number": "02",
       "issue": 20,
       "name": "Account support actions",
-      "status": "queued"
+      "status": "in_progress"
     },
     {
       "number": "03",

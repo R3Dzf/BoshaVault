@@ -25,6 +25,19 @@ assert "lockvyn_admins" in directory
 assert "revoke all on function public.lockvyn_admin_directory" in directory
 assert "to service_role" in directory
 assert "auth.mfa_factors" in directory
+support=(root/"supabase/migrations/20261013190000_admin_support_cases.sql").read_text()
+assert "lockvyn_admin_support_prepare" in support
+assert "lockvyn_admin_support_claim" in support
+assert "lockvyn_admin_support_finish" in support
+assert "pg_advisory_xact_lock" in support
+assert "lockvyn_admins where user_id=p_target" in support
+assert "revoke all on public.lockvyn_admin_support_cases from public,anon,authenticated" in support
+assert "to service_role" in support
+assert "freshVerifiedTotp(claims" in admin
+assert 'ban_duration: body.kind === "suspend_24h" ? "24h" : "none"' in admin
+assert 'action === "supportPrepare"' in admin
+assert 'action === "supportExecute"' in admin
+assert "session_review" in ui and "deletion_review" in ui and "mfa_review" in ui
 assert "Master Passphrases cannot be reset" in ui
 assert 'id="email-filter"' in ui and 'id="mfa-filter"' in ui
 assert 'matching' in ui and 'verified-stat' in ui

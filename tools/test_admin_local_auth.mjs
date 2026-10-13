@@ -162,6 +162,41 @@ assert.equal(gotOwner.isSelf,true,"Admin owner shown as self");
 assert.equal(gotStranger.isSelf,false,"Nonadmin not labelled self");
 await denied(strangerAAL2.aal2,"Unapproved user recovery",{action:"recover",id:owner.id});
 await denied(owner.aal1,"Owner AAL1 recovery",{action:"recover",id:stranger.id});
+// Phase 02: real free/local GoTrue and Postgres support action tests.
+// The target is a disposable synthetic user; no production Auth mutation.
+await denied(owner.aal1,"AAL1 support preparation",{
+  action:"supportPrepare",id:stranger.id,kind:"suspend_24h",reason:"lost_device"});
+await denied(strangerAAL2.aal2,"Non-admin support preparation",{
+  action:"supportPrepare",id:pending.data.id,kind:"suspend_24h",reason:"lost_device"});
+const selfSupport=await admin(ownerAAL2.aal2,{
+  action:"supportPrepare",id:owner.id,kind:"suspend_24h",reason:"lost_device"});
+assert.equal(selfSupport.status,403,"Protected owner cannot be suspended");
+const createdCase=await admin(ownerAAL2.aal2,{
+  action:"supportPrepare",id:stranger.id,kind:"suspend_24h",reason:"lost_device"});
+assert.equal(createdCase.status,200,"Prepare real local account case: "+JSON.stringify(createdCase.data));
+assert(typeof createdCase.data.caseId==="string");
+const wrongEmail=await admin(ownerAAL2.aal2,{
+  action:"supportExecute",id:stranger.id,kind:"suspend_24h",reason:"lost_device",
+  caseId:createdCase.data.caseId,confirmEmail:"not-the-target@example.invalid"});
+assert.equal(wrongEmail.status,409,"Wrong account email blocks privileged action");
+const action=await admin(ownerAAL2.aal2,{
+  action:"supportExecute",id:stranger.id,kind:"suspend_24h",reason:"lost_device",
+  caseId:createdCase.data.caseId,confirmEmail:stranger.email});
+assert.equal(action.status,200,"Real local suspension: "+JSON.stringify(action.data));
+assert.equal(action.data.status,"completed");
+const replay=await admin(ownerAAL2.aal2,{
+  action:"supportExecute",id:stranger.id,kind:"suspend_24h",reason:"lost_device",
+  caseId:createdCase.data.caseId,confirmEmail:stranger.email});
+assert.equal(replay.status,409,"Already-consumed case cannot replay");
+const afterSupport=await invoke("/auth/v1/admin/users/"+stranger.id,"GET",service,service,null);
+assert.equal(afterSupport.status,200);
+assert(Date.parse(afterSupport.data.banned_until)>Date.now(),
+  "Synthetic cloud user is banned for a finite time");
+const supportLog=await admin(ownerAAL2.aal2,{action:"supportHistory"});
+assert.equal(supportLog.status,200);
+assert(supportLog.data.cases.some(c=>c.id===createdCase.data.caseId &&
+  c.state==="completed" && c.kind==="suspend_24h"),"Support action must be logged");
+console.log("PASS real local support: AAL1/nonadmin/self denied, typed email, finite ban and no replay");
 assert.equal(recoveryEmails,0,"No password reset mails");
 assert.equal(accountWrites,3,"Only disposable local identities were created");
 console.log("PASS real local GoTrue AAL1/AAL2 JWT verification, admin allowlist and read access");
