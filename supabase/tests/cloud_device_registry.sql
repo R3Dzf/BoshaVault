@@ -84,8 +84,9 @@ values ('00000000-0000-4000-8000-000000000d02','20000000-0000-4000-8000-00000000
 
 -- The server caps revocation at 10 actions per minute per actor Auth session.
 reset role;
-insert into lockvyn_private.cloud_device_audit(owner_id,device_id,actor_session_id,target_session_id,action)
+insert into lockvyn_private.cloud_device_audit(owner_id,actor_user_id,device_id,actor_session_id,target_session_id,action)
 select '00000000-0000-4000-8000-000000000d01',
+       '00000000-0000-4000-8000-000000000d01',
        current_setting('lockvyn.test.device_target')::uuid,
        '10000000-0000-4000-8000-000000000d02',
        ('50000000-0000-4000-8000-' || lpad(g::text,12,'0'))::uuid,
