@@ -9,9 +9,9 @@ assert.equal(validateReleasePolicy(policy()),null);
 assert.equal(validateReleasePolicy(policy({candidateTag:null})),null,"latest stable remains the default feed");
 assert.match(validateReleasePolicy(policy({platform:"macos"})),/platform/);
 assert.match(validateReleasePolicy(policy({candidateTag:"windows-v1.22.0-beta.1"})),/stable/);
-assert.match(validateReleasePolicy(policy({minimumVersion:"1.23.0"}),/exceed/);
-assert.match(validateReleasePolicy(policy({rolloutPercent:101}),/0 to 100/);
-assert.match(validateReleasePolicy(policy({reasonCode:"free text"}),/reason/);
+assert.match(validateReleasePolicy(policy({minimumVersion:"1.23.0"})),/exceed/);
+assert.match(validateReleasePolicy(policy({rolloutPercent:101})),/0 to 100/);
+assert.match(validateReleasePolicy(policy({reasonCode:"free text"})),/reason/);
 assert.equal(validateReleasePolicy(policy({
   platform:"android",candidateTag:"android-v1.22.0",minimumVersion:"120000",rolloutPercent:0
 })),null);
