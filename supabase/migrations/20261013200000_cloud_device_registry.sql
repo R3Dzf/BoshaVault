@@ -247,6 +247,17 @@ begin
     raise exception 'Verified AAL2 is required to revoke cloud device access' using errcode = '42501';
   end if;
 
+  if (
+    select count(*) >= 10
+    from lockvyn_private.cloud_device_audit a
+    where a.owner_id = v_owner
+      and a.actor_session_id = v_actor_session
+      and a.action = 'cloud_session_revoked'
+      and a.occurred_at > statement_timestamp() - interval '1 minute'
+  ) then
+    raise exception 'Cloud device revocation rate limit reached' using errcode = '54000';
+  end if;
+
   select d.id, d.auth_session_id, d.revoked_at
     into v_target_id, v_target_session, v_revoked_at
   from lockvyn_private.cloud_device_registry d
@@ -283,7 +294,7 @@ $$;
 revoke all on function public.lockvyn_revoke_cloud_device(uuid) from public, anon, authenticated;
 grant execute on function public.lockvyn_revoke_cloud_device(uuid) to authenticated;
 comment on function public.lockvyn_revoke_cloud_device(uuid) is
-  'Requires the caller’s live AAL2 session; blocks the selected signed Auth session from Lockvyn cloud RLS paths and records an audit row.';
+  'Requires the caller’s live AAL2 session; rate-limits to 10 revocations/minute; blocks the selected signed Auth session from Lockvyn cloud RLS paths and records an audit row.';
 
 create policy "device_registry_revoked_session_denied" on public.opaque_device_snapshots as restrictive
   for all to authenticated
