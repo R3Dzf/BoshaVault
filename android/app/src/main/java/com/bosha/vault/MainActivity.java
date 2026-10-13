@@ -458,7 +458,61 @@ public final class MainActivity extends Activity {
             b.addView(Ui.text(this,"Connected to "+profile.optString("email")+". New logins sync automatically when connected. Unlock to apply incoming changes.",13,Ui.MUTED,false));
             b.addView(Ui.text(this,profile.optString("lastSyncUtc").isEmpty()?"No successful sync yet.":"Last successful sync: "+profile.optString("lastSyncUtc"),12,Ui.MUTED,false));
             CheckBox auto=check(b,"Sync automatically on this device",profile.optBoolean("autoSync",true));auto.setOnCheckedChangeListener((button,enabled)->cloudTask(status,()->{synchronized(CloudClient.GATE){JSONObject latest=store.load(profile.getString("vaultId"));if(latest==null)throw new IOException("Cloud is disconnected on this device.");try{latest.put("autoSync",enabled);store.save(latest);profile.put("autoSync",enabled);}finally{CloudSettingsStore.clear(latest);}}},()->{status.setText(enabled?"Automatic sync is on.":"Automatic sync is paused on this device.");if(enabled)nextCloudCheck=0;}));
-            b.addView(Ui.button(this,"Sync now",true,()->cloudRefresh(client,profile,store,status,signedIn->{int[] conflicts={0};cloudTask(status,()->conflicts[0]=client.sync(engine,profile,store,signedIn),()->{status.setText("Synced successfully. "+conflicts[0]+" conflict copies kept.");renderList();});})));
+            b.addView(Ui.text(this,"Optional session list: if enabled, your account can show this signed-in app session, its self-reported platform/version, and the last successful sync. It does not identify physical hardware. You can remove it from the list without stopping cloud sync.",12,Ui.MUTED,false));
+            CheckBox inventory=check(b,"Show this app session in my cloud session list",profile.optBoolean("deviceInventoryConsent",false));
+            inventory.setContentDescription("Optional: show this signed-in Android app session in the cloud account session list");
+            final boolean[] changingInventory={false};
+            inventory.setOnCheckedChangeListener((button,enabled)->{
+                if(changingInventory[0])return;
+                changingInventory[0]=true;inventory.setChecked(!enabled);changingInventory[0]=false;
+                String message=enabled
+                    ?"This shares only an app-session label, Android and software versions, and server-recorded sync time with your cloud account's device list. It does not prove physical hardware identity. Continue?"
+                    :"Remove this app session's metadata from the account list? Cloud sync and offline vault data remain available.";
+                new AlertDialog.Builder(this).setTitle(enabled?"Show app session":"Remove app session")
+                    .setMessage(message).setNegativeButton("Cancel",(dialog,which)->{})
+                    .setPositiveButton(enabled?"Enable":"Remove",(dialog,which)->cloudRefresh(client,profile,store,status,signedIn->cloudTask(status,()->{
+                        if(!signedIn.owner.equals(profile.getString("ownerId")))throw new IOException("Cloud account changed. Reconnect before changing session visibility.");
+                        synchronized(CloudClient.GATE){
+                            JSONObject latest=store.load(profile.getString("vaultId"));
+                            if(latest==null)throw new IOException("Cloud is disconnected on this device.");
+                            try{
+                                if(enabled){
+                                    String version="unknown";
+                                    try{version=AndroidUpdater.installed(this).versionName;}catch(Exception ignored){}
+                                    if(version==null||version.isBlank())version="unknown";
+                                    latest.put("deviceInventoryConsent",true)
+                                        .put("deviceInventoryPlatform","android")
+                                        .put("deviceInventoryOsVersion",Build.VERSION.RELEASE==null?"unknown":Build.VERSION.RELEASE)
+                                        .put("deviceInventoryAppVersion",version)
+                                        .put("deviceInventoryDisplayName","Android app session");
+                                    profile.put("deviceInventoryConsent",true)
+                                        .put("deviceInventoryPlatform","android")
+                                        .put("deviceInventoryOsVersion",Build.VERSION.RELEASE==null?"unknown":Build.VERSION.RELEASE)
+                                        .put("deviceInventoryAppVersion",version)
+                                        .put("deviceInventoryDisplayName","Android app session");
+                                }else{
+                                    client.unregisterDeviceInventory(signedIn);
+                                    latest.put("deviceInventoryConsent",false);
+                                    latest.remove("deviceRegistryId");latest.remove("deviceInventoryState");
+                                    profile.put("deviceInventoryConsent",false);
+                                    profile.remove("deviceRegistryId");profile.remove("deviceInventoryState");
+                                }
+                                store.save(latest);
+                            }finally{CloudSettingsStore.clear(latest);}
+                        }
+                    },()->{
+                        changingInventory[0]=true;inventory.setChecked(enabled);changingInventory[0]=false;
+                        status.setText(enabled
+                            ?"This signed-in app session will appear after its next successful cloud sync."
+                            :"Session metadata removed. Cloud sync and offline vault data remain available.");
+                        if(enabled)nextCloudCheck=0;
+                    }))))
+                    .show();
+            });
+            b.addView(Ui.button(this,"Sync now",true,()->cloudRefresh(client,profile,store,status,signedIn->{int[] conflicts={0};cloudTask(status,()->conflicts[0]=client.sync(engine,profile,store,signedIn),()->{String listing=profile.optBoolean("deviceInventoryConsent",false)
+                ?(profile.optString("deviceInventoryState").equals("visible")?" The app session is visible in your account list.":" Session listing will retry on the next successful sync.")
+                :"";
+                status.setText("Synced successfully. "+conflicts[0]+" conflict copies kept."+listing);renderList();});})));
             b.addView(Ui.button(this,"Connect to my PC · secure QR",false,()->{d.dismiss();connectToPc("");}));
             LinearLayout advancedCloud=Ui.column(this);advancedCloud.setVisibility(View.GONE);
             b.addView(Ui.button(this,"Security & advanced cloud options ▾",false,()->advancedCloud.setVisibility(
