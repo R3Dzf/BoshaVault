@@ -15,7 +15,7 @@ assert '.from("lockvyn_admins")' in admin
 assert 'service.auth.admin.listUsers' in admin
 assert 'service.auth.resetPasswordForEmail' in admin
 assert 'service.rpc("lockvyn_claim_recovery"' in admin
-assert 'request.headers.get("origin") !== url.origin' in admin
+assert '[url.origin, dashboardOrigin].includes(request.headers.get("origin")' in admin
 assert 'Cache-Control": "no-store' in admin
 assert 'X-Frame-Options": "DENY"' in admin
 assert 'verify_jwt=false' in (root/"docs/ADMIN-DASHBOARD.md").read_text()
@@ -27,6 +27,10 @@ assert "interval '60 minutes'" in migration
 assert 'SUPABASE_SERVICE_ROLE_KEY' not in ui
 assert "localStorage" not in ui and "sessionStorage" not in ui
 assert "Master Passphrases cannot be reset" in ui
+worker=(root/"infra/cloudflare/lockvyn-admin-ui.js").read_text()
+assert "Content-Type\":\"text/html; charset=utf-8" in worker
+assert "Content-Security-Policy" in worker
+assert "addEventListener" in worker
 assert "Lockvyn-Android.apk" in (root/"tools/combine_releases.py").read_text()
 assert "SHA256SUMS-Android.txt" in (root/"tools/combine_releases.py").read_text()
 assert 'releases.win.json' in (root/"tools/combine_releases.py").read_text()
