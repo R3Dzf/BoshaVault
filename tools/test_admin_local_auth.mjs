@@ -415,6 +415,17 @@ assert.match(dashboardPage.headers.get("content-security-policy")||"",/script-sr
 const dashboardHtml=await dashboardPage.text();
 for(const required of [
   "Registered cloud sessions",
+  "Encrypted cloud sync",
+  "Cloud sync activity filters",
+  "id=\"cloud-sync-usage\" role=\"status\" aria-live=\"polite\"",
+  "id=\"pause-cloud-sync\" type=\"button\" hidden",
+  "id=\"resume-cloud-sync\" type=\"button\" hidden",
+  "id=\"cloud-sync-otp\" inputmode=\"numeric\" autocomplete=\"one-time-code\"",
+  "syncControl",
+  "SYNC_OUTCOME_LABELS",
+  "SYNC_ERROR_LABELS",
+  "cloud_sync_suspended",
+  "Offline vault data and encrypted cloud snapshots are preserved.",
   "Only sessions the user explicitly opted in appear here",
   "self-reported; they do not prove a physical device",
   "Fresh code from your own authenticator app",
