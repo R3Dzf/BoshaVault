@@ -162,7 +162,7 @@ footer{font-size:12px;color:#787284;margin-top:20px}
     <section class="sync-overview" aria-labelledby="cloud-sync-heading">
       <h4 id="cloud-sync-heading">Encrypted cloud sync</h4>
       <p id="cloud-sync-usage" role="status" aria-live="polite">Sync usage has not been loaded.</p>
-      <p id="cloud-sync-state" class="support-note" role="status" aria-live="polite">Cloud sync state has not been loaded.</p>
+      <p id="cloud-sync-state" class="support-note" role="status" aria-live="polite" tabindex="-1">Cloud sync state has not been loaded.</p>
       <div class="filters" role="group" aria-label="Cloud sync activity filters">
         <label>Platform
           <select id="cloud-device-platform"><option value="">All platforms</option>
