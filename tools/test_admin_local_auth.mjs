@@ -350,10 +350,10 @@ const oldClaims=JSON.parse(Buffer.from(oldAccessToken.split(".")[1],"base64url")
 assert.match(oldClaims.session_id,/^[a-f0-9-]{36}$/i,"JWT needs a session_id for revocation checks");
 const cipher=Buffer.alloc(102,0x5a).toString("base64");
 assert.equal(cipher.length,136,"synthetic ciphertext fixture meets minimum opaque length");
-const vaultSlot=randomUUID(),deviceSlot=randomUUID();
-const snapshotPath="opaque_device_snapshots?select=owner_id,vault_slot&owner_id=eq."+owner.id+"&vault_slot=eq."+vaultSlot;
+const logoutVaultSlot=randomUUID(),logoutDeviceSlot=randomUUID();
+const snapshotPath="opaque_device_snapshots?select=owner_id,vault_slot&owner_id=eq."+owner.id+"&vault_slot=eq."+logoutVaultSlot;
 const snapshotBody={
-  owner_id:owner.id,vault_slot:vaultSlot,device_slot:deviceSlot,
+  owner_id:owner.id,vault_slot:logoutVaultSlot,device_slot:logoutDeviceSlot,
   ciphertext_base64:cipher,ciphertext_sha256:createHash("sha256").update(cipher).digest("hex")
 };
 const savedSnapshot=await dataApi(snapshotPath,"POST",oldAccessToken,snapshotBody);
