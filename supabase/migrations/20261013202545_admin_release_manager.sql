@@ -14,11 +14,11 @@ create table lockvyn_private.release_policies (
   updated_by uuid,
   constraint release_candidate_tag_valid check (
     candidate_tag is null
-    or (platform='windows' and candidate_tag ~ '^windows-v(0|[1-9][0-9]{0,5})(\\.(0|[1-9][0-9]{0,5})){2}$')
-    or (platform='android' and candidate_tag ~ '^android-v(0|[1-9][0-9]{0,5})(\\.(0|[1-9][0-9]{0,5})){2}$')
+    or (platform='windows' and candidate_tag ~ '^windows-v(0|[1-9][0-9]{0,5})(\.(0|[1-9][0-9]{0,5})){2}$')
+    or (platform='android' and candidate_tag ~ '^android-v(0|[1-9][0-9]{0,5})(\.(0|[1-9][0-9]{0,5})){2}$')
   ),
   constraint release_minimum_version_valid check (
-    (platform='windows' and minimum_version ~ '^(0|[1-9][0-9]{0,5})(\\.(0|[1-9][0-9]{0,5})){2}$')
+    (platform='windows' and minimum_version ~ '^(0|[1-9][0-9]{0,5})(\.(0|[1-9][0-9]{0,5})){2}$')
     or
     (platform='android'
       and minimum_version ~ '^(0|[1-9][0-9]{0,9})$'
@@ -32,8 +32,8 @@ create table lockvyn_private.release_policies (
     candidate_tag is null
     or platform <> 'windows'
     or case
-      when candidate_tag ~ '^windows-v(0|[1-9][0-9]{0,5})(\\.(0|[1-9][0-9]{0,5})){2}$'
-       and minimum_version ~ '^(0|[1-9][0-9]{0,5})(\\.(0|[1-9][0-9]{0,5})){2}$'
+      when candidate_tag ~ '^windows-v(0|[1-9][0-9]{0,5})(\.(0|[1-9][0-9]{0,5})){2}$'
+       and minimum_version ~ '^(0|[1-9][0-9]{0,5})(\.(0|[1-9][0-9]{0,5})){2}$'
       then string_to_array(minimum_version,'.')::integer[]
            <= string_to_array(regexp_replace(candidate_tag,'^windows-v',''),'.')::integer[]
       else false
@@ -143,8 +143,8 @@ begin
 
   if p_platform='windows' then
     if (p_candidate_tag is not null and
-        p_candidate_tag !~ '^windows-v(0|[1-9][0-9]{0,5})(\\.(0|[1-9][0-9]{0,5})){2}$') or
-       p_minimum_version !~ '^(0|[1-9][0-9]{0,5})(\\.(0|[1-9][0-9]{0,5})){2}$' or
+        p_candidate_tag !~ '^windows-v(0|[1-9][0-9]{0,5})(\.(0|[1-9][0-9]{0,5})){2}$') or
+       p_minimum_version !~ '^(0|[1-9][0-9]{0,5})(\.(0|[1-9][0-9]{0,5})){2}$' or
        (p_candidate_tag is not null and
         string_to_array(p_minimum_version,'.')::integer[] >
         string_to_array(regexp_replace(p_candidate_tag,'^windows-v',''),'.')::integer[])
@@ -154,7 +154,7 @@ begin
     end if;
   else
     if (p_candidate_tag is not null and
-        p_candidate_tag !~ '^android-v(0|[1-9][0-9]{0,5})(\\.(0|[1-9][0-9]{0,5})){2}$') or
+        p_candidate_tag !~ '^android-v(0|[1-9][0-9]{0,5})(\.(0|[1-9][0-9]{0,5})){2}$') or
        p_minimum_version !~ '^(0|[1-9][0-9]{0,9})$' or
        case
          when p_minimum_version ~ '^(0|[1-9][0-9]{0,9})$'
