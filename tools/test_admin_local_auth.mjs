@@ -271,7 +271,7 @@ assert.equal(retainedDeviceSnapshot.status,200);
 assert.equal(retainedDeviceSnapshot.data.length,1,"Revocation does not delete encrypted data");
 // Phase 04: only bounded metadata from synthetic local identities is visible.
 await denied(owner.aal1,"AAL1 security feed",{action:"securityEvents"});
-await denied(strangerAAL2.aal2,"Nonadmin security feed",{action:"securityEvents"});
+await denied(secondAAL2,"Nonadmin security feed",{action:"securityEvents"});
 const securityFeed=await admin(freshOwnerToken,{action:"securityEvents",limit:100});
 assert.equal(securityFeed.status,200,"AAL2 allowlisted owner can load security activity: "+JSON.stringify(securityFeed.data));
 assert(Array.isArray(securityFeed.data.events));
