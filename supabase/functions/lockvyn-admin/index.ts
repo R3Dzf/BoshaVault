@@ -6,7 +6,8 @@ import { html } from "./ui.ts";
 const apiUrl = Deno.env.get("SUPABASE_URL") ?? "";
 const publicKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
 const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-const recoveryRedirect = Deno.env.get("LOCKVYN_RECOVERY_REDIRECT_URL") ??\n  (apiUrl ? new URL("/functions/v1/lockvyn-admin/recover", apiUrl).href : "");
+const recoveryRedirect = Deno.env.get("LOCKVYN_RECOVERY_REDIRECT_URL") ?? 
+  (apiUrl ? new URL("/functions/v1/lockvyn-admin/recover", apiUrl).href : "");
 const service = createClient(apiUrl, serviceKey, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
