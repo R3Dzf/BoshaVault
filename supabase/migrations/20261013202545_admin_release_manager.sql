@@ -106,8 +106,8 @@ begin
     raise exception 'A fresh active administrator session is required'
       using errcode='42501';
   end if;
-  if p_platform not in ('windows','android') or
-     p_candidate_tag is null or p_minimum_version is null or
+  if p_platform is null or p_platform not in ('windows','android') or
+     p_reason_code is null or p_candidate_tag is null or p_minimum_version is null or
      p_rollout_percent is null or p_rollout_percent not between 0 and 100 or
      p_reason_code not in ('planned_rollout','rollback','minimum_version','incident_response')
   then
