@@ -62,6 +62,13 @@ footer{font-size:12px;color:#787284;margin-top:20px}
 .support-note{font-size:13px;line-height:1.6;padding:12px;border:1px solid #e4e0f1;border-radius:9px}
 .case-history{list-style:none;padding:0;display:grid;gap:8px}
 .case-history li{padding:12px;border:1px solid #eeeaf7;border-radius:9px;font-size:13px;overflow-wrap:anywhere}
+.device-inventory{border-top:1px solid #eeeaf7;margin-top:22px;padding-top:20px}
+.device-list{list-style:none;padding:0;display:grid;gap:10px}
+.device-list li{padding:13px;border:1px solid #eeeaf7;border-radius:10px}
+.device-list h4{margin:0 0 5px;font-size:14px}
+.device-list p{margin:4px 0;font-size:13px}
+.device-list button{margin-top:8px}
+
 @media(max-width:620px){.support-grid{grid-template-columns:1fr}}
 </style>
 </head>
@@ -135,6 +142,26 @@ footer{font-size:12px;color:#787284;margin-top:20px}
   <p class="support-note">All support actions affect the cloud account only, never the encrypted vault on an offline device.
     A suspended user's existing access token may remain valid until its expiry.
     2FA recovery and account deletion create review cases only; they never silently change the account. A user can <a href="https://lockvyn-admin-ui.r3dzf-studio.workers.dev/security">revoke their own cloud sessions</a> with their credentials; administrators cannot impersonate them.</p>
+  <section class="device-inventory" aria-labelledby="cloud-device-heading">
+    <div class="toolbar"><div><h3 id="cloud-device-heading">Registered cloud sessions</h3>
+      <p class="note">Only sessions the user explicitly opted in appear here. Names and software versions are self-reported; they do not prove a physical device's identity.</p></div>
+      <button id="refresh-cloud-devices" type="button">Refresh sessions</button></div>
+    <p class="support-note">Revoking blocks this signed-in app session from cloud snapshots and pairing. It does not erase offline vault data or invalidate the Auth refresh token. A new sign-in creates a different session.</p>
+    <div id="cloud-device-state" role="status" aria-live="polite">Registered sessions have not been loaded.</div>
+    <ul id="cloud-device-list" class="device-list"></ul>
+    <div id="device-revoke-panel" hidden>
+      <h4>Confirm cloud session revocation</h4>
+      <p id="device-revoke-summary" class="note"></p>
+      <form id="device-revoke-form">
+        <label>Type the affected account's full email
+          <input id="device-revoke-email" type="email" autocomplete="off" required></label>
+        <label>Fresh code from your own authenticator app
+          <input id="device-revoke-otp" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required></label>
+        <div class="support-actions"><button class="primary" type="submit">Revoke this cloud session</button>
+          <button id="cancel-device-revoke" type="button">Cancel</button></div>
+      </form>
+    </div>
+  </section>
   <div class="support-grid">
     <label>Support action
       <select id="support-kind">
@@ -361,17 +388,125 @@ async function loadSupportStatus(){
   }
 }
 get("refresh-support-status").addEventListener("click",loadSupportStatus);
+let pendingDevice=null;
+function clearDeviceConfirmation(){
+  pendingDevice=null;
+  get("device-revoke-email").value="";
+  get("device-revoke-otp").value="";
+  visible("device-revoke-panel",false);
+}
+function renderCloudDevices(devices){
+  const list=get("cloud-device-list");list.replaceChildren();
+  for(const item of devices){
+    const li=document.createElement("li");
+    const title=document.createElement("h4");
+    title.textContent=item.display_name||"Unnamed app session";
+    li.append(title);
+    const platform=document.createElement("p");
+    platform.textContent=[item.platform,item.os_version?"OS "+item.os_version:"",item.app_version?"App "+item.app_version:""]
+      .filter(Boolean).join(" · ")||"Platform details not reported";
+    li.append(platform);
+    const dates=document.createElement("p");
+    dates.textContent="Registered "+date(item.registered_at)+
+      " · Last successful sync "+date(item.last_sync_at);
+    li.append(dates);
+    const state=document.createElement("p");
+    state.textContent=item.revoked_at
+      ?"Revoked "+new Date(item.revoked_at).toLocaleString()
+      :"Cloud access active";
+    li.append(state);
+    if(!item.revoked_at){
+      const button=document.createElement("button");
+      button.type="button";button.textContent="Revoke cloud access for this session";
+      button.addEventListener("click",()=>{
+        pendingDevice=item;
+        get("device-revoke-summary").textContent=
+          "This blocks "+(item.display_name||"this app session")+
+          " from cloud snapshots and pairing for "+supportTarget.email+
+          ". Offline data on the app remains.";
+        get("device-revoke-email").value="";
+        get("device-revoke-otp").value="";
+        visible("device-revoke-panel",true);
+        get("device-revoke-email").focus();
+      });
+      li.append(button);
+    }
+    list.append(li);
+  }
+  if(!devices.length){
+    const empty=document.createElement("li");
+    empty.textContent="No opted-in cloud sessions are registered for this account.";
+    list.append(empty);
+  }
+}
+async function loadCloudDevices(){
+  if(!supportTarget)return;
+  const id=supportTarget.id,state=get("cloud-device-state");
+  state.textContent="Loading registered cloud sessions…";
+  try{
+    const data=await api("deviceList",{id});
+    if(!supportTarget||supportTarget.id!==id)return;
+    if(!Array.isArray(data.devices))throw Error("Invalid session inventory response");
+    renderCloudDevices(data.devices);
+    state.textContent=data.devices.length
+      ?data.devices.length+" registered session"+(data.devices.length===1?"":"s")
+      :"No opted-in sessions are registered.";
+  }catch(error){
+    if(supportTarget&&supportTarget.id===id)
+      state.textContent="Could not load registered cloud sessions: "+error.message;
+  }
+}
+get("refresh-cloud-devices").addEventListener("click",loadCloudDevices);
+get("cancel-device-revoke").addEventListener("click",clearDeviceConfirmation);
+get("device-revoke-form").addEventListener("submit",async e=>{
+  e.preventDefault();
+  const selected=pendingDevice,target=supportTarget;
+  if(!selected||!target){alertText("Select an active registered session first.",true);return;}
+  const email=get("device-revoke-email").value.trim();
+  if(email.toLowerCase()!==target.email.toLowerCase()){
+    alertText("The confirmation email does not match.",true);return;
+  }
+  if(!confirm("Revoke cloud access for this app session? Offline vault data stays on the app."))return;
+  const button=get("device-revoke-form").querySelector('button[type="submit"]');
+  button.disabled=true;
+  try{
+    const user=await authFetch("user",null,"GET",accessToken);
+    const factor=(Array.isArray(user.factors)?user.factors:[])
+      .find(x=>x.factor_type==="totp"&&x.status==="verified");
+    if(!factor)throw Error("No verified administrator authenticator factor.");
+    const challenge=await authFetch("factors/"+encodeURIComponent(factor.id)+"/challenge",{},"POST",accessToken);
+    const fresh=await authFetch("factors/"+encodeURIComponent(factor.id)+"/verify",{
+      challenge_id:challenge.id,code:get("device-revoke-otp").value.trim(),
+    },"POST",accessToken);
+    get("device-revoke-otp").value="";
+    if(jwtAal(fresh.access_token)!=="aal2")throw Error("Fresh MFA verification did not succeed.");
+    accessToken=fresh.access_token;
+    await api("deviceRevoke",{id:target.id,deviceId:selected.device_id,confirmEmail:email});
+    clearDeviceConfirmation();
+    await loadCloudDevices();
+    alertText("Cloud access revoked for that signed-in app session. Offline vault data remains.");
+  }catch(error){
+    get("device-revoke-otp").value="";
+    alertText(error.message,true);
+  }finally{button.disabled=false;}
+});
 function openSupport(user){
   supportTarget={id:user.id,email:user.email,isSelf:user.isSelf};
   pendingSupport=null;visible("support-confirm",false);
   get("support-target").textContent="Selected: "+user.email;
   visible("account-support",true);
   void loadSupportStatus();
+  clearDeviceConfirmation();
+  get("cloud-device-list").replaceChildren();
+  get("cloud-device-state").textContent="Loading registered cloud sessions…";
+  void loadCloudDevices();
   get("account-support").scrollIntoView({block:"start",behavior:"instant"});
 }
 function closeSupport(){
   supportTarget=null;pendingSupport=null;
   get("support-email").value="";get("support-otp").value="";
+  clearDeviceConfirmation();get("cloud-device-list").replaceChildren();
+  get("cloud-device-state").textContent="Registered sessions have not been loaded.";
   visible("support-confirm",false);visible("account-support",false);
   get("support-cloud-state").textContent="Cloud login status has not been checked.";
 }
