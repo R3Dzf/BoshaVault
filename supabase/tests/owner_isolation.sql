@@ -4,8 +4,11 @@ begin;
 insert into auth.users(id,aud,role,email) values
  ('11111111-1111-4111-8111-111111111111','authenticated','authenticated','boshavault-rls-a@example.invalid'),
  ('22222222-2222-4222-8222-222222222222','authenticated','authenticated','boshavault-rls-b@example.invalid');
+insert into auth.sessions(id,user_id) values
+ ('31111111-1111-4111-8111-111111111111','11111111-1111-4111-8111-111111111111'),
+ ('32222222-2222-4222-8222-222222222222','22222222-2222-4222-8222-222222222222');
 set local role authenticated;
-select set_config('request.jwt.claims','{"sub":"11111111-1111-4111-8111-111111111111","role":"authenticated"}',true);
+select set_config('request.jwt.claims','{"sub":"11111111-1111-4111-8111-111111111111","role":"authenticated","aal":"aal1","session_id":"31111111-1111-4111-8111-111111111111"}',true);
 insert into public.opaque_device_snapshots(owner_id,vault_slot,device_slot,ciphertext_base64,ciphertext_sha256)
 values ('11111111-1111-4111-8111-111111111111','aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',repeat('A',200),repeat('0',64));
 do $$ begin
@@ -24,7 +27,7 @@ update public.opaque_device_snapshots set ciphertext_sha256=repeat('1',64),updat
 do $$ begin
  if not exists(select 1 from public.opaque_device_snapshots where ciphertext_sha256=repeat('1',64) and updated_at >= now()) then raise exception 'Owner UPDATE or timestamp trigger failed'; end if;
 end $$;
-select set_config('request.jwt.claims','{"sub":"22222222-2222-4222-8222-222222222222","role":"authenticated"}',true);
+select set_config('request.jwt.claims','{"sub":"22222222-2222-4222-8222-222222222222","role":"authenticated","aal":"aal1","session_id":"32222222-2222-4222-8222-222222222222"}',true);
 do $$ declare n integer; begin
  if exists(select 1 from public.opaque_device_snapshots) then raise exception 'Cross-owner SELECT exposed data'; end if;
  update public.opaque_device_snapshots set ciphertext_sha256=repeat('2',64); get diagnostics n=row_count;
@@ -42,7 +45,7 @@ do $$ begin
  begin delete from public.opaque_device_snapshots; raise exception 'Anon DELETE was allowed'; exception when insufficient_privilege then null; end;
 end $$;
 set local role authenticated;
-select set_config('request.jwt.claims','{"sub":"11111111-1111-4111-8111-111111111111","role":"authenticated"}',true);
+select set_config('request.jwt.claims','{"sub":"11111111-1111-4111-8111-111111111111","role":"authenticated","aal":"aal1","session_id":"31111111-1111-4111-8111-111111111111"}',true);
 delete from public.opaque_device_snapshots;
 do $$ begin if exists(select 1 from public.opaque_device_snapshots) then raise exception 'Owner DELETE failed'; end if; end $$;
 rollback;
