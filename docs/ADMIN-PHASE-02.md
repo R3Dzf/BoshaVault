@@ -117,6 +117,12 @@ cloud refresh sessions via the supported GoTrue
   reverting the Edge Function and Cloudflare Worker to their previous
   versions, leaving user Auth and encrypted vault records intact.
 
+## Public production delivery smoke test
+
+The existing Admin and release checks workflow now makes unauthenticated, read-only GET requests to both the public dashboard and the owner security page at /security. The smoke checks require HTTP 200, HTML, no-store and browser security headers, nonce-scoped inline scripts, the expected owner confirmation and offline-vault warning, and no browser storage or service-role material in the page.
+
+This proves page delivery and its public response safeguards only. It does not sign in, test a real MFA factor, revoke a session, or perform an account action. It sends no email, password, TOTP code, token, or user data. Keep authenticated production acceptance as an open Phase 02 gate.
+
 **Remaining Phase 02 gate:** production user acceptance, supported
 identity-proofed 2FA recovery, user-consented deletion with retention, and
 strict session invalidation for all sensitive application operations.
