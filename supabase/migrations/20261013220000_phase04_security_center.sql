@@ -29,8 +29,23 @@ create table lockvyn_private.lockvyn_admin_security_events (
     'mfa_review',
     'deletion_review'
   )),
-  expires_at timestamptz generated always as (occurred_at + interval '90 days') stored
+  expires_at timestamptz not null
 );
+create or replace function lockvyn_private.set_admin_security_event_expiry()
+returns trigger
+language plpgsql
+set search_path = ''
+as $
+begin
+  new.expires_at := new.occurred_at + interval '90 days';
+  return new;
+end;
+$;
+revoke all on function lockvyn_private.set_admin_security_event_expiry()
+  from public, anon, authenticated, service_role;
+create trigger lockvyn_admin_security_event_expiry
+  before insert on lockvyn_private.lockvyn_admin_security_events
+  for each row execute function lockvyn_private.set_admin_security_event_expiry();
 create index lockvyn_admin_security_events_recent_idx
   on lockvyn_private.lockvyn_admin_security_events(occurred_at desc);
 create index lockvyn_admin_security_events_actor_type_recent_idx
