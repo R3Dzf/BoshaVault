@@ -4,6 +4,10 @@
 > completed until its GitHub issue has every acceptance item checked and the
 > applicable CI, staging, security review and deployment evidence is linked.
 > Do not skip phases or silently remove requirements.
+>
+> **Zero-cost rule:** All phases must use no-charge tools only. See
+> [ZERO-COST-POLICY.md](ZERO-COST-POLICY.md). Hosted paid staging, cloud
+> paid branches, paid overages, and billing upgrades are prohibited.
 
 ## Work order
 
@@ -24,15 +28,15 @@
 ### Required delivery sequence per phase
 
 1. Inspect the deployed app/backend and existing data schema; identify gaps.
-2. Specify UX flows, permissions, privacy effects, rollback/compatibility strategy.
+2. Specify UX flows, permissions, privacy effects, rollback/compatibility strategy and a documented **$0 execution/test path**.
 3. Implement code and migrations on a **dedicated short-lived branch** (small commits).
-4. Add automated functional, security, regression and accessibility tests.
+4. Add automated functional, security, regression and accessibility tests on a free local or quota-limited runner; never create billable staging.
 5. Verify denial paths for unauthenticated, AAL1, unauthorized and suspended actors.
 6. Review and merge after CI succeeds on the **exact commit**.
 7. Deploy behind safe defaults; verify real behavior without exposing vault secrets.
 8. Record proof in the phase issue and close it before starting the next phase.
 
-**Gate:** a phase with unchecked requirements is not complete. Delayed work and
+**Gate:** no paid resource may be created, even temporarily. A phase with unchecked requirements is not complete. Delayed work and
 blocked features stay visible in their issue; do not silently defer or omit them.
 
 ## Existing capabilities to preserve
