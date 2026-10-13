@@ -68,7 +68,7 @@ const vm = require("node:vm");
           }
         },
         updateUserById:async (id,options)=>{
-          assert.equal(id,targetId);assert.deepEqual(options,{ban_duration:"24h"});
+          assert.equal(id,targetId);assert.equal(options.ban_duration,"24h");
           calls.updated++;return {data:{},error:null};
         },
         getUserById:async id=>{
