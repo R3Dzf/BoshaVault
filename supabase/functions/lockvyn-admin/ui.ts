@@ -130,6 +130,8 @@ footer{font-size:12px;color:#787284;margin-top:20px}
 <section id="account-support" hidden aria-labelledby="support-heading">
   <h2 id="support-heading">Cloud account support</h2>
   <p id="support-target" class="note"></p>
+  <p id="support-cloud-state" class="support-note" role="status" aria-live="polite">Cloud login status has not been checked.</p>
+  <button id="refresh-support-status" type="button">Refresh cloud login status</button>
   <p class="support-note">All support actions affect the cloud account only, never the encrypted vault on an offline device.
     A suspended user's existing access token may remain valid until its expiry.
     2FA recovery and account deletion create review cases only; they never silently change the account.</p>
@@ -339,17 +341,39 @@ async function sendRecovery(user){
 }
 get("retry-directory").addEventListener("click",()=>{if(accessToken)loadPage(page)});
 let supportTarget=null,pendingSupport=null;
+async function loadSupportStatus(){
+  if(!supportTarget)return;
+  const id=supportTarget.id;
+  const state=get("support-cloud-state");
+  state.textContent="Checking server-side cloud login status…";
+  try{
+    const data=await api("supportStatus",{id});
+    if(!supportTarget||supportTarget.id!==id)return;
+    const item=data.cloudLogin||{};
+    state.textContent=item.state==="suspended"
+      ? "Cloud sign-in suspended until "+new Date(item.until).toLocaleString()+". Existing JWTs may remain valid; offline vaults are unaffected."
+      : item.state==="active"
+      ? "Cloud login currently active. This does not indicate that all device sessions have signed out."
+      : "Cloud login status could not be determined. Do not assume the account is active.";
+  }catch(error){
+    if(supportTarget&&supportTarget.id===id)
+      state.textContent="Could not verify cloud login status: "+error.message;
+  }
+}
+get("refresh-support-status").addEventListener("click",loadSupportStatus);
 function openSupport(user){
   supportTarget={id:user.id,email:user.email,isSelf:user.isSelf};
   pendingSupport=null;visible("support-confirm",false);
   get("support-target").textContent="Selected: "+user.email;
   visible("account-support",true);
+  void loadSupportStatus();
   get("account-support").scrollIntoView({block:"start",behavior:"instant"});
 }
 function closeSupport(){
   supportTarget=null;pendingSupport=null;
   get("support-email").value="";get("support-otp").value="";
   visible("support-confirm",false);visible("account-support",false);
+  get("support-cloud-state").textContent="Cloud login status has not been checked.";
 }
 get("close-support").addEventListener("click",closeSupport);
 get("support-kind").addEventListener("change",()=>{pendingSupport=null;visible("support-confirm",false)});
@@ -393,7 +417,8 @@ get("support-form").addEventListener("submit",async e=>{
       id:selected.id,kind:selected.kind,reason:selected.reason,
       caseId:selected.caseId,confirmEmail:get("support-email").value.trim(),
     });
-    closeSupport();await loadPage(page);await loadHistory();
+    await loadSupportStatus();await loadPage(page);await loadHistory();
+    closeSupport();
     alertText("Support case recorded: "+done.status+". "+done.warning);
   }catch(error){get("support-otp").value="";alertText(error.message,true);}
   finally{confirmBtn.disabled=false;}
