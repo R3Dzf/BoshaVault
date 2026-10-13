@@ -113,7 +113,8 @@ Deno.serve(async (request) => {
   }
   if (body.action === "recover") {
     if (!/^https:\/\/[^\s]+$/.test(recoveryRedirect) ||
-        new URL(recoveryRedirect).origin !== new URL(apiUrl).origin ||\n        !new URL(recoveryRedirect).pathname.endsWith("/lockvyn-admin/recover")) {
+        new URL(recoveryRedirect).origin !== new URL(apiUrl).origin ||
+        !new URL(recoveryRedirect).pathname.endsWith("/lockvyn-admin/recover")) {
       return result({ error: "Account recovery link is not configured" }, 503);
     }
     const id = body.id;
