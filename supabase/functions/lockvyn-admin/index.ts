@@ -1,7 +1,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2.58.0";
 import { html } from "./ui.ts";
 import { verifiedUserGate, adminMembershipGate } from "./access.mjs";
-import { validSupportRequest, validCaseConfirmation, freshVerifiedTotp, safeTarget, isAutomaticAction } from "./support.mjs";
+import { validSupportRequest, validCaseConfirmation, freshVerifiedTotp, safeTarget, isAutomaticAction, cloudLoginStatus } from "./support.mjs";
 
 // The service-role key is only read inside this Edge Function. It is never
 // embedded in the HTML response, shipped to clients, or logged.
@@ -140,6 +140,24 @@ Deno.serve(async (request) => {
       return result({ error: "Unable to load account directory" }, 502);
     }
     return result(data);
+  }
+  if (body.action === "supportStatus") {
+    if (typeof body.id !== "string" ||
+        !/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(body.id))
+      return result({ error: "Invalid target" }, 400);
+    if (body.id === verified.user.id)
+      return result({ error: "Owner accounts are protected" }, 403);
+    const { data: targetAdmin, error: adminError } = await service
+      .from("lockvyn_admins").select("user_id").eq("user_id", body.id).maybeSingle();
+    if (adminError) return result({ error: "Cannot verify protected account" }, 503);
+    if (targetAdmin) return result({ error: "Administrator accounts are protected" }, 403);
+    const { data: target, error: targetError } =
+      await service.auth.admin.getUserById(body.id);
+    if (targetError || !target?.user) return result({ error: "Target not found" }, 404);
+    return result({
+      cloudLogin: cloudLoginStatus(target.user.banned_until),
+      caveat: "Cloud login only. Existing JWTs may remain valid until expiry; offline encrypted vaults remain accessible."
+    });
   }
   if (body.action === "supportHistory") {
     const { data, error } = await service.rpc("lockvyn_admin_support_recent", {
