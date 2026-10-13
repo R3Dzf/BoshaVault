@@ -32,5 +32,7 @@ jobs:
         run: python tools/test_admin_accessibility.py
       - name: Test public page safety assertions without credentials
         run: node tools/test_admin_live_ui.test.mjs
+      - name: Test self-service primary and backup authenticator flow
+        run: node tools/test_admin_security_factors.mjs
       - name: Verify deployed admin and owner security HTML (read-only)
         run: node tools/test_admin_live_ui.mjs

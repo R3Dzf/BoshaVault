@@ -15,6 +15,7 @@ section{border:1px solid #e2deed;border-radius:16px;background:white;padding:27p
 h1{font-size:26px;margin:0 0 12px}h2{font-size:18px;margin:0 0 12px}
 p,li{line-height:1.65;color:#57506e}label{display:grid;gap:7px;font-weight:650;font-size:14px}
 form{display:grid;gap:15px}input{font:inherit;width:100%;min-height:44px;padding:10px;border-radius:10px;border:1px solid #bcb5d2}
+select{font:inherit;width:100%;min-height:44px;padding:10px;border-radius:10px;border:1px solid #bcb5d2;background:#fff;color:#252039}
 button{font:inherit;font-weight:700;border:1px solid #5e50c0;color:#fff;background:#5e50c0;border-radius:10px;padding:12px;cursor:pointer;min-height:44px}
 button:disabled{opacity:.5;cursor:not-allowed}button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid #8d7cff;outline-offset:2px}
 #message{min-height:24px;margin:16px 0;font-weight:650}#message.error{color:#ab2537}
@@ -33,8 +34,15 @@ button:disabled{opacity:.5;cursor:not-allowed}button:focus-visible,input:focus-v
 <label>My cloud password<input id="password" type="password" autocomplete="current-password" required></label>
 <button type="submit">Verify my cloud account</button>
 </form>
+<div id="choose-factor" hidden>
+<h2>Choose an authenticator</h2>
+<p>If you have a separately enrolled backup authenticator, you can use it here.</p>
+<label>Verified TOTP authenticator<select id="factor-choice" required></select></label>
+<button id="start-factor" type="button">Continue with selected authenticator</button>
+</div>
 <form id="verify-otp" hidden>
 <h2>Authenticator confirmation</h2>
+<button id="choose-another" type="button" hidden>Use a different authenticator</button>
 <label>Code from my verified authenticator<input id="otp" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" required></label>
 <button type="submit">Verify authenticator</button>
 </form>
@@ -49,10 +57,42 @@ button:disabled{opacity:.5;cursor:not-allowed}button:focus-visible,input:focus-v
 "use strict";
 const BASE=${safe(apiUrl)},PUBLIC_KEY=${safe(publicKey)};
 const el=id=>document.getElementById(id);
-let accessToken="",factorId="",challengeId="",actorId="";
+let accessToken="",factorId="",challengeId="",actorId="",verifiedTotpFactors=[];
 function notice(text,bad=false){const box=el("message");box.textContent=text;box.className=bad?"error":"success";}
 function visible(id,value){el(id).hidden=!value;}
-function reset(){accessToken="";factorId="";challengeId="";actorId="";el("password").value="";el("otp").value="";}
+function reset(){
+  accessToken="";factorId="";challengeId="";actorId="";verifiedTotpFactors=[];
+  el("password").value="";el("otp").value="";el("factor-choice").replaceChildren();
+  visible("choose-factor",false);visible("verify-otp",false);
+  visible("choose-another",false);visible("confirm-box",false);
+}
+function validFactorId(id){return typeof id==="string"&&/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(id);}
+function loadVerifiedTotpFactors(factors){
+  const seen=new Set(),result=[];
+  if(!Array.isArray(factors))return result;
+  for(const factor of factors){
+    if(!factor||factor.status!=="verified"||factor.factor_type!=="totp"||
+        !validFactorId(factor.id)||seen.has(factor.id))continue;
+    seen.add(factor.id);
+    const raw=typeof factor.friendly_name==="string"?factor.friendly_name.trim():"";
+    const safeName=raw.length>0&&raw.length<=120&&!/[\u0000-\u001f\u007f]/.test(raw)
+      ?raw:"Authenticator "+(result.length+1);
+    result.push({id:factor.id,name:safeName});
+    if(result.length===10)break;
+  }
+  return result;
+}
+function renderFactorChoices(){
+  const select=el("factor-choice");
+  select.replaceChildren();
+  for(const [index,factor] of verifiedTotpFactors.entries()){
+    const option=document.createElement("option");
+    option.value=factor.id;
+    // Friendly names are account-controlled metadata; render them as text only.
+    option.textContent=factor.name||"Authenticator "+(index+1);
+    select.appendChild(option);
+  }
+}
 async function auth(endpoint,payload=null,method="POST",jwt=""){
   const response=await fetch(BASE+"/auth/v1/"+endpoint,{
     method,cache:"no-store",credentials:"omit",referrerPolicy:"no-referrer",
@@ -76,16 +116,14 @@ el("sign-in").addEventListener("submit",async e=>{
     const me=await auth("user",null,"GET",accessToken);
     if(me.id!==actorId)throw Error("Cloud identity changed");
     const factors=Array.isArray(me.factors)?me.factors:[];
-    const verified=factors.filter(x=>x.status==="verified");
+    const verified=factors.filter(x=>x&&x.status==="verified");
     if(verified.length){
-      const factor=verified.find(x=>x.factor_type==="totp");
-      if(!factor)throw Error("This account needs a supported verified authenticator method.");
-      factorId=factor.id;
-      const challenge=await auth("factors/"+encodeURIComponent(factorId)+"/challenge",{}, "POST",accessToken);
-      challengeId=challenge.id;
-      if(typeof challengeId!=="string")throw Error("Could not start authenticator verification");
-      visible("sign-in",false);visible("verify-otp",true);
-      notice("Confirm your existing authenticator. No sessions have been revoked.");
+      verifiedTotpFactors=loadVerifiedTotpFactors(verified);
+      if(!verifiedTotpFactors.length)
+        throw Error("This account needs a supported verified TOTP authenticator.");
+      renderFactorChoices();
+      visible("sign-in",false);visible("choose-factor",true);
+      notice("Choose an authenticator you can access. A registered backup device works here.");
     }else{
       visible("sign-in",false);visible("confirm-box",true);
       notice("Cloud account verified. Confirm the logout below.");
@@ -93,8 +131,32 @@ el("sign-in").addEventListener("submit",async e=>{
   }catch(error){reset();notice(error.message,true)}
   finally{button.disabled=false;el("password").value="";}
 });
+el("start-factor").addEventListener("click",async()=>{
+  const button=el("start-factor");if(button.disabled)return;
+  const chosen=el("factor-choice").value;
+  const factor=verifiedTotpFactors.find(item=>item.id===chosen);
+  if(!accessToken||!actorId||!factor){notice("Choose one of your verified authenticators.",true);return;}
+  button.disabled=true;
+  try{
+    const challenge=await auth("factors/"+encodeURIComponent(factor.id)+"/challenge",{},"POST",accessToken);
+    if(typeof challenge.id!=="string"||!challenge.id)throw Error("Could not start authenticator verification");
+    factorId=factor.id;challengeId=challenge.id;
+    visible("choose-factor",false);visible("verify-otp",true);
+    visible("choose-another",verifiedTotpFactors.length>1);
+    notice("Enter a current code from the selected authenticator.");
+  }catch(error){
+    factorId="";challengeId="";notice(error.message,true);
+  }finally{button.disabled=false;}
+});
+el("choose-another").addEventListener("click",()=>{
+  if(verifiedTotpFactors.length<2)return;
+  factorId="";challengeId="";el("otp").value="";
+  visible("verify-otp",false);visible("choose-factor",true);
+  notice("Choose another registered authenticator if your usual device is unavailable.");
+});
 el("verify-otp").addEventListener("submit",async e=>{
   e.preventDefault();
+  if(!factorId||!challengeId){notice("Choose and verify an authenticator first.",true);return;}
   const button=el("verify-otp").querySelector("button");button.disabled=true;
   try{
     const reply=await auth("factors/"+encodeURIComponent(factorId)+"/verify",

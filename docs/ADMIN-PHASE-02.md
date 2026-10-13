@@ -123,6 +123,12 @@ The existing Admin and release checks workflow now makes unauthenticated, read-o
 
 This proves page delivery and its public response safeguards only. It does not sign in, test a real MFA factor, revoke a session, or perform an account action. It sends no email, password, TOTP code, token, or user data. Keep authenticated production acceptance as an open Phase 02 gate.
 
+## User-owned backup authenticator selection
+
+The self-service /security page now lists the account owner's verified TOTP factors and lets the owner choose the factor they can access before a challenge is issued. If a code from one device is unavailable, the owner can return and use a separately enrolled backup TOTP. Factor labels are rendered as plain text. The chosen factor must still pass Supabase's challenge and verification flow, the resulting session must reach AAL2, and the owner must give final consent before global sign-out.
+
+This does not reset MFA, reveal factor secrets, or recover an account after every enrolled factor is lost. Supabase Auth does not provide recovery codes; the supported safety measure is enrolling a separate backup factor ([Supabase MFA guide](https://supabase.com/docs/guides/auth/auth-mfa)). No administrator MFA-reset bypass is enabled, so identity-proofed recovery remains an open Phase 02 gate.
+
 **Remaining Phase 02 gate:** production user acceptance, supported
 identity-proofed 2FA recovery, user-consented deletion with retention, and
 strict session invalidation for all sensitive application operations.
