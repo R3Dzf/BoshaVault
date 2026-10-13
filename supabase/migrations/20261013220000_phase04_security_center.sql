@@ -216,7 +216,7 @@ create or replace function public.lockvyn_admin_security_feed(
 )
 returns jsonb
 language plpgsql
-stable
+volatile
 security definer
 set search_path = ''
 as $$
@@ -254,9 +254,11 @@ begin
   select jsonb_build_object(
     'adminStepUpDenials15m', count(*) filter (
       where e.event_type = 'admin_step_up_denied'
+        and e.occurred_at > statement_timestamp() - interval '15 minutes'
     ),
     'adminAllowlistDenials15m', count(*) filter (
       where e.event_type = 'admin_allowlist_denied'
+        and e.occurred_at > statement_timestamp() - interval '15 minutes'
     ),
     'repeatedDeniedActors15m', (
       select count(*) from (
