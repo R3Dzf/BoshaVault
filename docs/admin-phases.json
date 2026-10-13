@@ -8,7 +8,8 @@
     "staging_acceptance",
     "rollback_documented",
     "production_verification",
-    "issue_checklist_complete"
+    "issue_checklist_complete",
+    "zero_cost_only"
   ],
   "phases": [
     {
