@@ -7,7 +7,7 @@
 
 The dashboard reads published GitHub release metadata from the fixed `R3Dzf/BoshaVault` repository. It displays stable tags, bounded changelog text, public CI check status, asset sizes and GitHub SHA256 digests. Android signing status is reported from the published `android-update.json`; clients still compare the signer fingerprint with the installed app. Windows Authenticode signing is not configured and is shown as unsigned. Unknown CI status remains unknown.
 
-The existing `windows-v*` and `android-v*` feeds stay in place. Release policy defaults to the latest stable feed, minimum version `0.0.0` / `0`, and 100% rollout. A policy may pin a published stable tag, set a minimum version, or reduce the rollout percentage.
+The existing `windows-v*` and `android-v*` feeds stay in place. Release policy defaults to the latest stable feed, minimum version `0.0.0` / `0`, and 100% rollout. A policy may pin a published stable tag, set a minimum version, or reduce the rollout percentage. A candidate can be selected only when its GitHub checks pass; Android candidates must match the latest published signer fingerprint.
 
 The policy table and audit history live in `lockvyn_private`. No direct Data API grants expose either table. Writes require the existing Edge Function's verified user, AAL2, active session and administrator allowlist, plus a fresh TOTP, a typed candidate tag (or `LATEST`), an enumerated reason, and the SQL-side five-writes-per-minute limit. The public GET route returns only the platform's candidate, minimum version, rollout percent, and update time.
 
