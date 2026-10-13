@@ -26,7 +26,7 @@ required={
   'safe event labels': 'SECURITY_EVENT_LABELS',
   'safe event rendering': 'meta.textContent=details.join',
   'sync usage status': 'id="cloud-sync-usage" role="status" aria-live="polite"',
-  'sync state status': 'id="cloud-sync-state" class="support-note" role="status" aria-live="polite"',
+  'sync state status': 'id="cloud-sync-state" class="support-note" role="status" aria-live="polite" tabindex="-1"',
   'sync activity filter group': 'aria-label="Cloud sync activity filters"',
   'cloud sync pause control': 'id="pause-cloud-sync" type="button" hidden',
   'cloud sync resume control': 'id="resume-cloud-sync" type="button" hidden',
