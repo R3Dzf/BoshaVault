@@ -16,7 +16,7 @@ const vm = require("node:vm");
     .replace("let body: Record<string, unknown>;","let body;")
     .replace("function result(data: unknown, status = 200): Response {",
              "function result(data, status = 200) {")
-    .replace("function nonce(): string {", "function nonce() {");
+    .replace("function nonce(): string {", "function nonce() {")
     .replace("async function recordSecuritySignal(actorId: string, signal: string): Promise<void> {",
              "async function recordSecuritySignal(actorId, signal) {");
   assert(!source.includes("let body: Record<string, unknown>;"),
