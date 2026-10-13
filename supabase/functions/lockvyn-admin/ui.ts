@@ -82,6 +82,9 @@ footer{font-size:12px;color:#787284;margin-top:20px}
 .device-list button{margin-top:8px}
 
 @media(max-width:620px){.support-grid{grid-template-columns:1fr}}
+.release-table{min-width:850px}
+.release-policy-block{border-top:1px solid #efecf5;margin-top:18px;padding-top:18px}
+.release-notes{white-space:pre-wrap;max-width:340px}
 </style>
 </head>
 <body>
@@ -111,11 +114,11 @@ footer{font-size:12px;color:#787284;margin-top:20px}
     <button id="refresh-releases" type="button">Refresh release status</button>
   </div>
   <p id="release-manager-state" role="status" aria-live="polite">Release status has not been loaded.</p>
-  <div class="scroll"><table style="min-width:850px">
+  <div class="scroll"><table class="release-table">
     <thead><tr><th>Platform / tag</th><th>Published</th><th>CI</th><th>Signature status</th><th>Assets and SHA256</th><th>Changelog</th></tr></thead>
     <tbody id="release-rows"></tbody>
   </table></div>
-  <div style="border-top:1px solid #efecf5;margin-top:18px;padding-top:18px">
+  <div class="release-policy-block">
     <h3>Client update policy</h3>
     <p id="release-policy-state" role="status" aria-live="polite">Policy has not been loaded.</p>
     <p class="note">The latest stable feed is the default. Rollback sets rollout to 0 and stops optional installs; clients below the minimum still receive the required newer release. Updates never downgrade or change encrypted vaults. A fresh TOTP login is required to save.</p>
@@ -891,7 +894,7 @@ function renderReleaseCatalog(data){
     const changelog=document.createElement("td");
     const details=document.createElement("details");
     const summary=document.createElement("summary");summary.textContent="View notes";
-    const notes=document.createElement("pre");notes.style.whiteSpace="pre-wrap";notes.style.maxWidth="340px";
+    const notes=document.createElement("pre");notes.className="release-notes";
     notes.textContent=release.changelog||"No changelog supplied.";
     details.append(summary,notes);changelog.append(details);
     row.append(identity,dateCell,ci,signature,assets,changelog);rows.append(row);
