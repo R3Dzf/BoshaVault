@@ -42,7 +42,6 @@ alter table lockvyn_private.cloud_device_registry enable row level security;
 alter table lockvyn_private.cloud_device_audit enable row level security;
 revoke all on lockvyn_private.cloud_device_registry from public, anon, authenticated;
 revoke all on lockvyn_private.cloud_device_audit from public, anon, authenticated;
-revoke all on sequence lockvyn_private.cloud_device_audit_id_seq from public, anon, authenticated;
 
 comment on table lockvyn_private.cloud_device_registry is
   'Explicit-consent registry of signed Lockvyn Auth sessions. Self-reported metadata only; no hardware fingerprint, IP, vault data, or recovery material.';
