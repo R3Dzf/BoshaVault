@@ -70,9 +70,9 @@ do $$
 declare
   v_feed jsonb;
 begin
-  if not has_table_privilege('anon','lockvyn_private.lockvyn_admin_security_events','select')
-     or not has_table_privilege('authenticated','lockvyn_private.lockvyn_admin_security_events','select')
-     or not has_table_privilege('service_role','lockvyn_private.lockvyn_admin_security_events','select') then
+  if has_table_privilege('anon','lockvyn_private.lockvyn_admin_security_events','select')
+     or has_table_privilege('authenticated','lockvyn_private.lockvyn_admin_security_events','select')
+     or has_table_privilege('service_role','lockvyn_private.lockvyn_admin_security_events','select') then
     raise exception 'Security event table must not be directly readable by API roles';
   end if;
   if has_function_privilege('authenticated',
