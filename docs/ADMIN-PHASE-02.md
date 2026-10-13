@@ -65,3 +65,23 @@ no paid branches/projects/SMTP or commercial monitoring. No vault decryption.
 - **Phase 02 remains open** until real supported session revocation, safe
   deletion/identity review, safety regression tests and production acceptance
   are complete. Do not advance to Phase 03 before closure.
+
+## Phase 02 incremental change: cloud login status display (2026-10-13)
+
+The support panel can now read the target account's current `banned_until` from
+the privileged Supabase Auth Admin API through the Edge Function's
+`supportStatus` action, without exposing service credentials. Owner/non-admin
+authorization and protected-target checks apply before this read. Unknown
+provider timestamps fail closed to an **unknown** display state.
+
+The UI refreshes this server-derived status on account selection and after
+confirmed actions; manual refresh is also available. It does not infer the
+current suspension state from prior audit cases. No new database tables,
+production user mutations, or paid resources are needed.
+
+**Important limitation:** this is not session revocation; JWTs already issued
+may remain usable until expiry, and local encrypted vaults remain untouched.
+Remaining Phase 02 acceptance items still block Phase 03.
+
+**Rollback:** revert the Edge Function and HTML UI to the previous deployed
+version; no SQL rollback is required for this read-only enhancement.
