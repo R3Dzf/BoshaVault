@@ -145,7 +145,7 @@ $phase05$;
 revoke all on function lockvyn_private.guard_cloud_snapshot_quota()
   from public, anon, authenticated, service_role;
 create trigger lockvyn_guard_cloud_snapshot_quota
-  before insert or update of owner_id, vault_slot, device_slot, ciphertext_base64
+  before insert or update of owner_id, vault_slot, device_slot, ciphertext_base64, ciphertext_bytes
   on public.opaque_device_snapshots
   for each row execute function lockvyn_private.guard_cloud_snapshot_quota();
 
