@@ -17,23 +17,24 @@ export function compareReleaseVersions(platform, left, right) {
   return 0;
 }
 export function validCandidateTag(platform, tag) {
+  if (tag === null) return platform === "windows" || platform === "android";
   if (typeof tag !== "string") return false;
   return platform === "windows"
-    ? /^v(0|[1-9][0-9]{0,5})(\.(0|[1-9][0-9]{0,5})){2}$/.test(tag)
+    ? /^windows-v(0|[1-9][0-9]{0,5})(\.(0|[1-9][0-9]{0,5})){2}$/.test(tag)
     : platform === "android"
       ? /^android-v(0|[1-9][0-9]{0,5})(\.(0|[1-9][0-9]{0,5})){2}$/.test(tag)
       : false;
 }
 export function validateReleasePolicy(input) {
   if (!input || !["windows", "android"].includes(input.platform)) return "Invalid platform";
-  if (!validCandidateTag(input.platform, input.candidateTag)) return "Select a published stable release";
+  if (!validCandidateTag(input.platform, input.candidateTag)) return "Select a published stable release or latest stable";
   if (!releaseVersion(input.platform, input.minimumVersion)) return "Invalid minimum client version";
   if (!Number.isSafeInteger(input.rolloutPercent) ||
       input.rolloutPercent < 0 || input.rolloutPercent > 100) return "Rollout must be from 0 to 100";
   if (!["planned_rollout", "rollback", "minimum_version", "incident_response"].includes(input.reasonCode))
     return "Select a valid reason";
-  if (input.platform === "windows") {
-    const candidate = input.candidateTag.slice(1);
+  if (input.platform === "windows" && input.candidateTag) {
+    const candidate = input.candidateTag.slice("windows-v".length);
     if (compareReleaseVersions("windows", input.minimumVersion, candidate) > 0)
       return "Minimum version cannot exceed the selected release";
   }
@@ -49,7 +50,7 @@ export function shouldOfferRelease({platform, currentVersion, availableVersion, 
       !Number.isSafeInteger(sample) || sample < 0 || sample > 99) return false;
   if (candidateTag && candidateTag !== availableTag) return false;
   const cmp = compareReleaseVersions(platform, availableVersion, currentVersion);
-  if (cmp === null || cmp <= 0) return false; // Never offer a downgrade.
+  if (cmp === null || cmp <= 0) return false;
   const belowFloor = compareReleaseVersions(platform, currentVersion, minimumVersion) < 0;
   return belowFloor || sample < rolloutPercent;
 }
