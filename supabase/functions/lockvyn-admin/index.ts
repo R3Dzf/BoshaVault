@@ -36,6 +36,17 @@ function nonce(): string {
   return btoa(String.fromCharCode(...b));
 }
 
+async function recordSecuritySignal(actorId: string, signal: string): Promise<void> {
+  try {
+    await service.rpc("lockvyn_admin_record_security_signal", {
+      p_actor: actorId,
+      p_signal: signal,
+    });
+  } catch {
+    // A telemetry write must never change a fail-closed authorization decision.
+  }
+}
+
 Deno.serve(async (request) => {
   const url = new URL(request.url);
   if (request.method === "OPTIONS" &&
@@ -117,7 +128,13 @@ Deno.serve(async (request) => {
     claims = JSON.parse(atob(encoded));
   } catch { return result({ error: "Unauthorized" }, 401); }
   const denied = verifiedUserGate(verified.user, claims);
-  if (denied) return result(denied.body, denied.status);
+  if (denied) {
+    if (denied.status === 403 && claims.sub === verified.user.id &&
+        claims.role === "authenticated") {
+      await recordSecuritySignal(verified.user.id, "admin_step_up_denied");
+    }
+    return result(denied.body, denied.status);
+  }
   // Supabase refresh-token revocation does not invalidate an already-issued
   // JWT by itself. Check the Auth session row before any privileged action.
   const sessionId = claims.session_id;
@@ -132,12 +149,17 @@ Deno.serve(async (request) => {
   if (sessionError || typeof sessionActive !== "boolean") {
     return result({ error: "Unable to validate active session" }, 503);
   }
-  if (!sessionActive) return result({ error: "Session is no longer active" }, 401);
+  if (!sessionActive) {
+    await recordSecuritySignal(verified.user.id, "admin_inactive_session");
+    return result({ error: "Session is no longer active" }, 401);
+  }
   const { data: admin, error: permissionError } = await service
     .from("lockvyn_admins").select("user_id").eq("user_id", verified.user.id).maybeSingle();
   if (permissionError) return result({ error: "Administration is not configured" }, 503);
-  if (!adminMembershipGate(admin, verified.user.id))
+  if (!adminMembershipGate(admin, verified.user.id)) {
+    await recordSecuritySignal(verified.user.id, "admin_allowlist_denied");
     return result({ error: "Not an authorized Lockvyn administrator" }, 403);
+  }
 
   let body: Record<string, unknown>;
   try {
@@ -147,6 +169,24 @@ Deno.serve(async (request) => {
     if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") throw new Error();
     body = parsed;
   } catch { return result({ error: "Invalid request" }, 400); }
+
+  if (body.action === "securityEvents") {
+    const limit = body.limit ?? 50;
+    if (typeof limit !== "number" || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+      return result({ error: "Invalid security event page size" }, 400);
+    }
+    const { data, error } = await service.rpc("lockvyn_admin_security_feed", {
+      p_actor: verified.user.id,
+      p_actor_session: sessionId,
+      p_actor_aal: claims.aal,
+      p_limit: limit,
+    });
+    if (error || !data || !Array.isArray(data.events) || !data.alerts ||
+        typeof data.alerts !== "object") {
+      return result({ error: "Unable to load security activity" }, 502);
+    }
+    return result(data);
+  }
 
   if (body.action === "list") {
     const page = body.page;
