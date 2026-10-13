@@ -324,10 +324,25 @@ for(const required of [
   "Fresh code from your own authenticator app",
   "It does not erase offline vault data or invalidate the Auth refresh token",
   "deviceRevoke",
+  "aria-labelledby=\"device-revoke-heading\"",
+  "aria-live=\"polite\" tabindex=\"-1\"",
+  "pendingDeviceTrigger",
+  "deviceRevocationBusy",
+  "supportTrigger",
+  "id=\"directory-heading\" tabindex=\"-1\"",
+  "id=\"cloud-device-heading\" tabindex=\"-1\"",
+  "restoreFocus:true",
+  "cloud-device-state\").focus()",
 ]){
   assert(dashboardHtml.includes(required),"Admin session UI must include: "+required);
 }
-console.log("PASS local admin inventory UI includes opt-in disclosure, no-hardware-proof caveat, fresh-TOTP confirmation, and cloud-only impact");
+const adminScriptStart=dashboardHtml.indexOf('<script nonce="');
+const adminScriptBodyStart=dashboardHtml.indexOf(">",adminScriptStart)+1;
+const adminScriptEnd=dashboardHtml.lastIndexOf("</script>");
+assert(adminScriptStart>=0&&adminScriptBodyStart>adminScriptStart&&adminScriptEnd>=adminScriptBodyStart,
+  "Admin script must be present");
+new Function(dashboardHtml.slice(adminScriptBodyStart,adminScriptEnd));
+console.log("PASS local admin session flow exposes named controls, focus return, busy guard, and syntactically valid UI script");
 const securePage=await fetch(endpoint+"/security",{method:"GET",redirect:"manual"});
 assert.equal(securePage.status,200,"Isolated user-owned security page is available");
 assert.match(securePage.headers.get("content-security-policy")||"",/script-src 'nonce-/);

@@ -22,6 +22,6 @@ The local Auth workflow applies repository migrations to disposable local Supaba
 
 ## Rollout boundary
 
-These migrations and client/admin code are repository changes only. No production Supabase migration or app deployment is included. Accessibility and compatibility review, production rollback planning, and the production rollout decision remain Phase 03 follow-up work.
+These migrations and client/admin code are repository changes only. No hosted Supabase migration or app deployment is included. The merged code passed its local synthetic SQL, GoTrue, Edge Function, Android, Windows, and browser CI suites. A static accessibility/security review was recorded, and its focus-management findings are addressed in the current follow-up. Independent review and hosted non-customer staging remain open.
 
-Do not roll back the revocation guard after any real session has been revoked: removing the guard would restore cloud access to those sessions. A rollback must preserve revoked session IDs and denial checks in a forward-compatible guard.
+See [the Phase 03 rollout and rollback runbook](ADMIN-PHASE-03-ROLLOUT-ROLLBACK.md) for the migration order, staging gates, validation checklist, and forward-only recovery guidance. Do not roll back the revocation guard after any real session has been revoked: removing the guard would restore cloud access to those sessions. Preserve revoked session IDs and denial checks in a forward-compatible guard.

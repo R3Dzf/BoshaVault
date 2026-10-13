@@ -104,7 +104,7 @@ footer{font-size:12px;color:#787284;margin-top:20px}
   </div>
 </section>
 <section id="directory-section" aria-labelledby="directory-heading">
-  <div class="table-head"><div><h2 id="directory-heading">Account directory</h2>
+  <div class="table-head"><div><h2 id="directory-heading" tabindex="-1">Account directory</h2>
     <p class="note">Search and filters cover all registered accounts, not only the current page.</p></div>
     <div class="muted" id="filtered-count" aria-live="polite">Loading account count…</div>
   </div>
@@ -135,7 +135,7 @@ footer{font-size:12px;color:#787284;margin-top:20px}
   </div>
 </section>
 <section id="account-support" hidden aria-labelledby="support-heading">
-  <h2 id="support-heading">Cloud account support</h2>
+  <h2 id="support-heading" tabindex="-1">Cloud account support</h2>
   <p id="support-target" class="note"></p>
   <p id="support-cloud-state" class="support-note" role="status" aria-live="polite">Cloud login status has not been checked.</p>
   <button id="refresh-support-status" type="button">Refresh cloud login status</button>
@@ -143,14 +143,14 @@ footer{font-size:12px;color:#787284;margin-top:20px}
     A suspended user's existing access token may remain valid until its expiry.
     2FA recovery and account deletion create review cases only; they never silently change the account. A user can <a href="https://lockvyn-admin-ui.r3dzf-studio.workers.dev/security">revoke their own cloud sessions</a> with their credentials; administrators cannot impersonate them.</p>
   <section class="device-inventory" aria-labelledby="cloud-device-heading">
-    <div class="toolbar"><div><h3 id="cloud-device-heading">Registered cloud sessions</h3>
+    <div class="toolbar"><div><h3 id="cloud-device-heading" tabindex="-1">Registered cloud sessions</h3>
       <p class="note">Only sessions the user explicitly opted in appear here. Names and software versions are self-reported; they do not prove a physical device's identity.</p></div>
       <button id="refresh-cloud-devices" type="button">Refresh sessions</button></div>
     <p class="support-note">Revoking blocks this signed-in app session from cloud snapshots and pairing. It does not erase offline vault data or invalidate the Auth refresh token. A new sign-in creates a different session.</p>
-    <div id="cloud-device-state" role="status" aria-live="polite">Registered sessions have not been loaded.</div>
+    <div id="cloud-device-state" role="status" aria-live="polite" tabindex="-1">Registered sessions have not been loaded.</div>
     <ul id="cloud-device-list" class="device-list"></ul>
-    <div id="device-revoke-panel" hidden>
-      <h4>Confirm cloud session revocation</h4>
+    <div id="device-revoke-panel" role="group" aria-labelledby="device-revoke-heading" hidden>
+      <h4 id="device-revoke-heading">Confirm cloud session revocation</h4>
       <p id="device-revoke-summary" class="note"></p>
       <form id="device-revoke-form">
         <label>Type the affected account's full email
@@ -305,7 +305,8 @@ function display(){
     if(!user.isSelf){
       const manage=document.createElement("button");
       manage.type="button";manage.textContent="Manage";manage.style.marginLeft="8px";
-      manage.addEventListener("click",()=>openSupport(user));
+      manage.setAttribute("aria-label","Manage cloud access and support for "+user.email);
+      manage.addEventListener("click",()=>openSupport(user,manage));
       action.append(manage);
     }
     row.append(action);body.append(row);
@@ -319,6 +320,7 @@ function setLoading(value){
   get("directory-state").textContent=value?"Loading accounts…":"";
 }
 async function loadPage(n){
+  if(deviceRevocationBusy)return;
   const seq=++loadSequence;
   setLoading(true);
   try{
@@ -367,7 +369,7 @@ async function sendRecovery(user){
   catch(error){alertText(error.message,true);}
 }
 get("retry-directory").addEventListener("click",()=>{if(accessToken)loadPage(page)});
-let supportTarget=null,pendingSupport=null;
+let supportTarget=null,pendingSupport=null,supportTrigger=null;
 async function loadSupportStatus(){
   if(!supportTarget)return;
   const id=supportTarget.id;
@@ -388,12 +390,29 @@ async function loadSupportStatus(){
   }
 }
 get("refresh-support-status").addEventListener("click",loadSupportStatus);
-let pendingDevice=null;
-function clearDeviceConfirmation(){
-  pendingDevice=null;
+let pendingDevice=null,pendingDeviceTrigger=null,deviceRevocationBusy=false;
+function clearDeviceConfirmation({restoreFocus=false,force=false}={}){
+  if(deviceRevocationBusy&&!force)return;
+  const trigger=pendingDeviceTrigger;
+  pendingDevice=null;pendingDeviceTrigger=null;
   get("device-revoke-email").value="";
   get("device-revoke-otp").value="";
   visible("device-revoke-panel",false);
+  if(restoreFocus){
+    if(trigger?.isConnected)trigger.focus();
+    else get("cloud-device-heading").focus();
+  }
+}
+function setDeviceRevocationBusy(busy){
+  deviceRevocationBusy=busy;
+  const panel=get("device-revoke-panel"),form=get("device-revoke-form");
+  panel.setAttribute("aria-busy",String(busy));
+  for(const control of form.querySelectorAll("input,button"))control.disabled=busy;
+  get("refresh-cloud-devices").disabled=busy;
+  get("close-support").disabled=busy;
+  get("logout").disabled=busy;
+  for(const control of get("cloud-device-list").querySelectorAll("button"))control.disabled=busy;
+  if(busy)get("cloud-device-state").textContent="Revocation is in progress. Keep this page open for the result.";
 }
 function renderCloudDevices(devices){
   const list=get("cloud-device-list");list.replaceChildren();
@@ -418,8 +437,12 @@ function renderCloudDevices(devices){
     if(!item.revoked_at){
       const button=document.createElement("button");
       button.type="button";button.textContent="Revoke cloud access for this session";
+      button.setAttribute("aria-label","Revoke cloud access for "+
+        (item.display_name||"unnamed app session")+" for "+supportTarget.email);
+      button.disabled=deviceRevocationBusy;
       button.addEventListener("click",()=>{
-        pendingDevice=item;
+        if(deviceRevocationBusy)return;
+        pendingDevice=item;pendingDeviceTrigger=button;
         get("device-revoke-summary").textContent=
           "This blocks "+(item.display_name||"this app session")+
           " from cloud snapshots and pairing for "+supportTarget.email+
@@ -457,9 +480,10 @@ async function loadCloudDevices(){
   }
 }
 get("refresh-cloud-devices").addEventListener("click",loadCloudDevices);
-get("cancel-device-revoke").addEventListener("click",clearDeviceConfirmation);
+get("cancel-device-revoke").addEventListener("click",()=>clearDeviceConfirmation({restoreFocus:true}));
 get("device-revoke-form").addEventListener("submit",async e=>{
   e.preventDefault();
+  if(deviceRevocationBusy)return;
   const selected=pendingDevice,target=supportTarget;
   if(!selected||!target){alertText("Select an active registered session first.",true);return;}
   const email=get("device-revoke-email").value.trim();
@@ -467,8 +491,7 @@ get("device-revoke-form").addEventListener("submit",async e=>{
     alertText("The confirmation email does not match.",true);return;
   }
   if(!confirm("Revoke cloud access for this app session? Offline vault data stays on the app."))return;
-  const button=get("device-revoke-form").querySelector('button[type="submit"]');
-  button.disabled=true;
+  setDeviceRevocationBusy(true);
   try{
     const user=await authFetch("user",null,"GET",accessToken);
     const factor=(Array.isArray(user.factors)?user.factors:[])
@@ -482,15 +505,18 @@ get("device-revoke-form").addEventListener("submit",async e=>{
     if(jwtAal(fresh.access_token)!=="aal2")throw Error("Fresh MFA verification did not succeed.");
     accessToken=fresh.access_token;
     await api("deviceRevoke",{id:target.id,deviceId:selected.device_id,confirmEmail:email});
-    clearDeviceConfirmation();
+    clearDeviceConfirmation({force:true});
     await loadCloudDevices();
+    get("cloud-device-state").focus();
     alertText("Cloud access revoked for that signed-in app session. Offline vault data remains.");
   }catch(error){
     get("device-revoke-otp").value="";
     alertText(error.message,true);
-  }finally{button.disabled=false;}
+  }finally{setDeviceRevocationBusy(false);}
 });
-function openSupport(user){
+function openSupport(user,trigger=null){
+  if(deviceRevocationBusy){alertText("A cloud session revocation is still being processed. Wait for its result.",true);return;}
+  supportTrigger=trigger;
   supportTarget={id:user.id,email:user.email,isSelf:user.isSelf};
   pendingSupport=null;visible("support-confirm",false);
   get("support-target").textContent="Selected: "+user.email;
@@ -501,14 +527,20 @@ function openSupport(user){
   get("cloud-device-state").textContent="Loading registered cloud sessions…";
   void loadCloudDevices();
   get("account-support").scrollIntoView({block:"start",behavior:"instant"});
+  get("support-heading").focus();
 }
 function closeSupport(){
+  if(deviceRevocationBusy){alertText("A cloud session revocation is still being processed. Wait for its result.",true);return;}
+  const trigger=supportTrigger;
+  supportTrigger=null;
   supportTarget=null;pendingSupport=null;
   get("support-email").value="";get("support-otp").value="";
   clearDeviceConfirmation();get("cloud-device-list").replaceChildren();
   get("cloud-device-state").textContent="Registered sessions have not been loaded.";
   visible("support-confirm",false);visible("account-support",false);
   get("support-cloud-state").textContent="Cloud login status has not been checked.";
+  if(trigger?.isConnected)trigger.focus();
+  else get("directory-heading").focus();
 }
 get("close-support").addEventListener("click",closeSupport);
 get("support-kind").addEventListener("change",()=>{pendingSupport=null;visible("support-confirm",false)});
@@ -584,11 +616,12 @@ get("clear-filters").addEventListener("click",()=>{
 get("prev").addEventListener("click",()=>{if(page>1&&!get("prev").disabled)loadPage(page-1);});
 get("next").addEventListener("click",()=>{if(!get("next").disabled)loadPage(page+1);});
 get("logout").addEventListener("click",()=>{
+  if(deviceRevocationBusy){alertText("A cloud session revocation is still being processed. Wait for its result.",true);return;}
   ++loadSequence;clearTimeout(searchDelay);
   accessToken="";accounts=[];matching=0;closeSupport();
   get("support-history").replaceChildren();
   visible("dashboard",false);visible("login",true);
-  visible("logout",false);alertText("Signed out.");
+  visible("logout",false);alertText("Signed out.");get("email").focus();
 });
 if(RECOVERY){
   const params=new URLSearchParams(location.hash.slice(1));
