@@ -99,7 +99,7 @@ declare
 begin
   if coalesce(auth.role(),'') <> 'service_role' or
      p_actor is null or p_actor_session is null or
-     p_actor_aal <> 'aal2' or p_fresh_totp is distinct from true or
+     p_actor_aal is distinct from 'aal2' or p_fresh_totp is distinct from true or
      not exists(select 1 from public.lockvyn_admins where user_id=p_actor) or
      not public.lockvyn_auth_session_is_active(p_actor,p_actor_session)
   then
