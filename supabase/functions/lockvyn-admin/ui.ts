@@ -50,9 +50,14 @@ footer{font-size:12px;color:#787284;margin-top:20px}
 .status.unknown{background:#f0eef5;color:#615c70}
 @media(max-width:800px){.cards{grid-template-columns:repeat(2,minmax(0,1fr))}.metric{padding:12px}}
 @media(max-width:520px){.filters label{max-width:none;flex:1 1 100%}.cards{gap:8px}.metric strong{font-size:23px}main{padding:18px 12px 70px}.table-head{align-items:start}}
+.skip-link{position:absolute;left:12px;top:-70px;background:#fff;border:2px solid #6a5bd6;padding:12px;z-index:20;border-radius:8px}
+.skip-link:focus{top:8px}
+#directory-table:focus-visible{outline:3px solid #6a5bd6;outline-offset:3px}
+@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
 </style>
 </head>
 <body>
+<a class="skip-link" href="#directory-section">Skip to account directory</a>
 <main>
 <header><div class="brand"><span class="logo">◇</span>Lockvyn <span class="muted">/ Admin</span></div>
 <button id="logout" hidden>Sign out</button></header>
@@ -82,8 +87,8 @@ footer{font-size:12px;color:#787284;margin-top:20px}
     <article class="metric"><small>Active last 30 days</small><strong id="active-stat">—</strong><small>By last sign-in timestamp</small></article>
   </div>
 </section>
-<section>
-  <div class="table-head"><div><h2>Account directory</h2>
+<section id="directory-section" aria-labelledby="directory-heading">
+  <div class="table-head"><div><h2 id="directory-heading">Account directory</h2>
     <p class="note">Search and filters cover all registered accounts, not only the current page.</p></div>
     <div class="muted" id="filtered-count" aria-live="polite">Loading account count…</div>
   </div>
@@ -99,13 +104,14 @@ footer{font-size:12px;color:#787284;margin-top:20px}
     <button id="clear-filters" type="button">Clear filters</button>
   </div>
   <div id="directory-state" role="status" aria-live="polite"></div>
-  <div class="scroll" id="directory-table" aria-busy="false">
+  <div class="scroll" id="directory-table" role="region" aria-label="Accounts table (scroll horizontally on narrow screens)" tabindex="0" aria-busy="false">
     <table><thead><tr><th scope="col">Email</th><th scope="col">Registered</th>
     <th scope="col">Last sign-in</th><th scope="col">Email status</th>
     <th scope="col">2FA</th><th scope="col">Support</th></tr></thead>
     <tbody id="users"></tbody></table>
   </div>
-  <div id="empty" hidden>No accounts match these filters. Try clearing the search.</div>
+  <div id="empty" hidden role="status">No accounts match these filters. Try clearing the search.</div>
+  <button id="retry-directory" type="button" hidden>Retry loading accounts</button>
   <div class="toolbar" style="margin-top:20px">
     <button id="prev" type="button">Previous</button>
     <span class="muted" id="page-label">Page 1</span>
@@ -239,13 +245,13 @@ async function loadPage(n){
       data.total.toLocaleString()+" total";
     const pageCount=Math.max(1,Math.ceil(matching/30));
     get("page-label").textContent="Page "+page+" of "+pageCount;
-    display();alertText("");
+    visible("retry-directory",false);display();alertText("");
   }catch(error){
     if(seq!==loadSequence)return;
     accounts=[];matching=0;
     get("users").replaceChildren();visible("empty",false);
     get("directory-state").textContent="Unable to load accounts. Retry or adjust filters.";
-    alertText(error.message,true);
+    visible("retry-directory",true);alertText(error.message,true);
   }finally{
     if(seq===loadSequence){
       const state=get("directory-state").textContent;
@@ -266,6 +272,7 @@ async function sendRecovery(user){
   try{await api("recover",{id:user.id});alertText("Recovery email requested for "+user.email+". Check the inbox and spam folder.");}
   catch(error){alertText(error.message,true);}
 }
+get("retry-directory").addEventListener("click",()=>{if(accessToken)loadPage(page)});
 get("search").addEventListener("input",scheduleSearch);
 get("email-filter").addEventListener("change",()=>{if(accessToken)loadPage(1)});
 get("mfa-filter").addEventListener("change",()=>{if(accessToken)loadPage(1)});
