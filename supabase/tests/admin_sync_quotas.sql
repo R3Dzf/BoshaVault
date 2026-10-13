@@ -109,6 +109,17 @@ select set_config('request.jwt.claims',
 select public.lockvyn_record_cloud_sync_outcome('failure',204,'network');
 reset role;
 
+-- Assert private-table grants as the fixture owner. service_role intentionally
+-- cannot resolve objects in lockvyn_private directly.
+do $phase05$
+begin
+  if has_table_privilege('service_role','lockvyn_private.cloud_sync_admin_audit','select')
+     or has_table_privilege('authenticated','lockvyn_private.cloud_sync_suspensions','select') then
+    raise exception 'Private sync tables are directly readable';
+  end if;
+end;
+$phase05$;
+
 -- Seed recent synthetic audit history as the migration-test owner. The service role
 -- itself has no direct access to this private table, which the checks below preserve.
 insert into lockvyn_private.cloud_sync_admin_audit(
@@ -130,8 +141,7 @@ begin
        'public.lockvyn_admin_cloud_sync_overview(uuid,uuid,text,uuid,text,text,integer,text)','execute')
      or not has_function_privilege('service_role',
        'public.lockvyn_admin_cloud_sync_overview(uuid,uuid,text,uuid,text,text,integer,text)','execute')
-     or has_table_privilege('service_role','lockvyn_private.cloud_sync_admin_audit','select')
-     or has_table_privilege('authenticated','lockvyn_private.cloud_sync_suspensions','select') then
+then
     raise exception 'Sync admin APIs or private-table grants are too broad';
   end if;
 
