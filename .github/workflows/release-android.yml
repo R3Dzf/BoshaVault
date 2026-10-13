@@ -20,7 +20,7 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: write
-      actions: read
+      actions: write
     steps:
       - uses: actions/checkout@v4
       - name: Require successful acceptance on this exact source commit
@@ -72,6 +72,11 @@ jobs:
           shopt -s nullglob
           DELTAS=(dist/Lockvyn-Android-from-*.lvdelta.gz)
           gh release create "$TAG" dist/Lockvyn-Android.apk dist/android-update.json dist/SHA256SUMS-Android.txt "${DELTAS[@]}" "${OPTIONS[@]}"
+      - name: Combine platform downloads
+        if: github.event_name == 'push' || inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run combine-releases.yml --repo '${{ github.repository }}' --ref main
       - name: Retain public release assets
         uses: actions/upload-artifact@v4
         with:
