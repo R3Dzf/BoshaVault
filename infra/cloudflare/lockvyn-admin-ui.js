@@ -2,8 +2,8 @@
 const upstream = "https://ghmbcfqiomggoxgwghjs.supabase.co/functions/v1/lockvyn-admin";
 const authOrigin = "https://ghmbcfqiomggoxgwghjs.supabase.co";
 
-export default {
-  async fetch(request) {
+addEventListener('fetch', event => event.respondWith(handle(event.request)));
+async function handle(request) {
     const url = new URL(request.url);
     if (request.method !== "GET" || !["/", "/recover"].includes(url.pathname))
       return new Response("Not found", {status:404});
@@ -31,5 +31,4 @@ export default {
           "img-src 'self' data:; connect-src 'self' " + authOrigin + "; form-action 'self'",
       }
     });
-  }
-};
+}
