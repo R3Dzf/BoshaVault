@@ -15,14 +15,22 @@ assert 'adminMembershipGate(admin, verified.user.id)' in admin
 assert 'service.auth.getUser(token)' in admin
 assert '"./access.mjs"' in admin
 assert '.from("lockvyn_admins")' in admin
-assert 'service.auth.admin.listUsers' in admin
-assert "service.auth.admin.mfa.listFactors({ userId: user.id })" in admin
-assert "mfa = factorsError || !Array.isArray(factors?.factors)" in admin
-assert "mfa: Boolean(user.factors?" not in admin
-assert 'user.mfa===true?"Enabled":user.mfa===false?"Off":"Unknown"' in ui
+assert 'service.rpc("lockvyn_admin_directory"' in admin
+assert 'p_actor: verified.user.id' in admin
+assert 'p_search: search.trim()' in admin
+assert 'p_mfa_state: mfaState' in admin
+directory=(root/"supabase/migrations/20261013173000_admin_directory.sql").read_text()
+assert "security definer" in directory
+assert "lockvyn_admins" in directory
+assert "revoke all on function public.lockvyn_admin_directory" in directory
+assert "to service_role" in directory
+assert "auth.mfa_factors" in directory
+assert "Master Passphrases cannot be reset" in ui
+assert 'id="email-filter"' in ui and 'id="mfa-filter"' in ui
+assert 'matching' in ui and 'verified-stat' in ui
 assert 'service.auth.resetPasswordForEmail' in admin
 assert 'Use your own account recovery flow' not in admin
-assert 'isSelf: user.id === verified.user.id' in admin
+assert "'isSelf',(pr.id=p_actor)" in directory
 assert 'user.isSelf?"Reset my cloud password":"Send recovery email"' in ui
 assert "service.rpc(\"lockvyn_claim_recovery\"" in admin
 assert 'service.rpc("lockvyn_claim_recovery"' in admin

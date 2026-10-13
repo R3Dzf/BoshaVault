@@ -29,6 +29,27 @@ td:last-child,th:last-child{text-align:right}
 #alert{min-height:24px;font-weight:600}#alert.error{color:#ae3044}#alert.success{color:#126848}
 footer{font-size:12px;color:#787284;margin-top:20px}
 [hidden]{display:none!important}@media(max-width:640px){main{padding:22px 12px}section{padding:16px}h1{font-size:22px}}
+
+/* Phase 01: responsive account overview and explicit global-vs-filtered totals */
+.overview{background:linear-gradient(135deg,#fff 0%,#f1efff 100%);border-color:#e3dafa}
+.eyebrow{font-size:11px;letter-spacing:.085em;text-transform:uppercase;color:#7467aa;font-weight:750}
+.cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:18px 0 24px}
+.metric{border:1px solid #e4e0f1;background:white;padding:16px;border-radius:14px}
+.metric strong{font-size:28px;line-height:1.4;display:block;font-variant-numeric:tabular-nums}
+.metric small{color:#78718a;line-height:1.5}
+.filters{display:flex;gap:10px;align-items:end;flex-wrap:wrap;margin:18px 0 12px}
+.filters label{flex:1 1 170px;max-width:370px}.filters select{min-height:44px;padding:10px 12px;border:1px solid #d9d6e4;border-radius:10px;background:white;color:#211b38;font:inherit;width:100%}
+.filters .search-label{flex:2 1 230px;max-width:none}
+.table-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+#directory-state{font-size:13px;margin:12px 0;min-height:20px;color:#716b84}
+#empty{padding:32px 12px;text-align:center;color:#716b84}
+#directory-table[aria-busy="true"]{opacity:.6}
+.status{font-weight:650;font-size:12px;padding:5px 9px;border-radius:7px;display:inline-block;background:#f0eef8}
+.status.yes{background:#e4f6eb;color:#13613d}
+.status.no{background:#fff0ea;color:#94482c}
+.status.unknown{background:#f0eef5;color:#615c70}
+@media(max-width:800px){.cards{grid-template-columns:repeat(2,minmax(0,1fr))}.metric{padding:12px}}
+@media(max-width:520px){.filters label{max-width:none;flex:1 1 100%}.cards{gap:8px}.metric strong{font-size:23px}main{padding:18px 12px 70px}.table-head{align-items:start}}
 </style>
 </head>
 <body>
@@ -49,18 +70,51 @@ footer{font-size:12px;color:#787284;margin-top:20px}
 <button class="primary" type="submit">Verify and open dashboard</button></form>
 </section>
 <div id="dashboard" hidden>
-<section><div class="toolbar"><div><h1>Users</h1><p class="note">Cloud account metadata only. Passwords, vault contents and recovery keys are never available here.</p></div>
-<div class="stat"><div><strong id="total">—</strong><div class="muted">accounts</div></div></div></div></section>
-<section>
-<div class="toolbar"><h2>Registered accounts</h2><label>Search this page<input id="search" type="search" placeholder="Email address"></label></div>
-<div class="scroll"><table><thead><tr><th>Email</th><th>Registered</th><th>Last sign-in</th><th>Email</th><th>2FA</th><th>Support</th></tr></thead>
-<tbody id="users"></tbody></table></div>
-<div class="toolbar" style="margin-top:20px"><button id="prev">Previous</button>
-<span class="muted" id="page-label">Page 1</span><button id="next">Next</button></div>
+<section class="overview">
+  <div class="eyebrow">Overview · Account administration</div>
+  <div class="toolbar"><div><h1>Users & access</h1>
+    <p class="note">Live cloud account metadata. No passwords, vault records or recovery keys are available to administrators.</p></div>
+  </div>
+  <div class="cards" aria-label="All account statistics">
+    <article class="metric"><small>Total registered</small><strong id="total">—</strong><small>All cloud accounts</small></article>
+    <article class="metric"><small>Verified emails</small><strong id="verified-stat">—</strong><small>All cloud accounts</small></article>
+    <article class="metric"><small>2FA enabled</small><strong id="mfa-stat">—</strong><small>Verified MFA enrollment</small></article>
+    <article class="metric"><small>Active last 30 days</small><strong id="active-stat">—</strong><small>By last sign-in timestamp</small></article>
+  </div>
 </section>
-<section><h2>What can I reset?</h2><p>Send a password recovery email for the user's <strong>cloud login account</strong>.
-The user chooses the new password through their own verified email.
-<strong>Master Passphrases cannot be reset by the administrator</strong>: doing so would compromise Lockvyn's end-to-end encryption model.</p></section>
+<section>
+  <div class="table-head"><div><h2>Account directory</h2>
+    <p class="note">Search and filters cover all registered accounts, not only the current page.</p></div>
+    <div class="muted" id="filtered-count" aria-live="polite">Loading account count…</div>
+  </div>
+  <div class="filters" role="group" aria-label="Account directory filters">
+    <label class="search-label">Search email across all users
+      <input id="search" type="search" placeholder="Search by email" autocomplete="off" maxlength="120"></label>
+    <label>Email status
+      <select id="email-filter"><option value="all">All email statuses</option>
+      <option value="verified">Verified</option><option value="pending">Pending</option></select></label>
+    <label>2FA status
+      <select id="mfa-filter"><option value="all">All 2FA statuses</option>
+      <option value="enabled">Enabled</option><option value="disabled">Off</option></select></label>
+    <button id="clear-filters" type="button">Clear filters</button>
+  </div>
+  <div id="directory-state" role="status" aria-live="polite"></div>
+  <div class="scroll" id="directory-table" aria-busy="false">
+    <table><thead><tr><th scope="col">Email</th><th scope="col">Registered</th>
+    <th scope="col">Last sign-in</th><th scope="col">Email status</th>
+    <th scope="col">2FA</th><th scope="col">Support</th></tr></thead>
+    <tbody id="users"></tbody></table>
+  </div>
+  <div id="empty" hidden>No accounts match these filters. Try clearing the search.</div>
+  <div class="toolbar" style="margin-top:20px">
+    <button id="prev" type="button">Previous</button>
+    <span class="muted" id="page-label">Page 1</span>
+    <button id="next" type="button">Next</button>
+  </div>
+</section>
+<section><h2>About account recovery</h2><p>Send a password recovery email for a user's <strong>cloud login account</strong>.
+The user chooses a new cloud password using their own verified email.
+<strong>Master Passphrases cannot be reset by the administrator</strong>: private vault encryption remains independent.</p></section>
 </div>
 <section id="recovery" ${recovering?"":"hidden"}>
 <h1>Reset cloud account password</h1><p>This only changes your Lockvyn cloud sign-in password. It does not change the passphrase that encrypts your vault.</p>
@@ -134,26 +188,75 @@ get("mfa-form").addEventListener("submit",async e=>{
   }catch(error){alertText(error.message,true);}
 });
 function td(row,value){const cell=document.createElement("td");cell.textContent=value;row.append(cell);return cell;}
+function statusCell(row,value,state){
+  const cell=document.createElement("td"),badge=document.createElement("span");
+  badge.className="status "+state;badge.textContent=value;cell.append(badge);row.append(cell);
+}
+let matching=0,loadSequence=0,searchDelay=null;
 function display(){
   const body=get("users");body.replaceChildren();
-  const search=get("search").value.toLowerCase().trim();
-  for(const user of accounts.filter(u=>u.email.toLowerCase().includes(search))){
+  for(const user of accounts){
     const row=document.createElement("tr");
-    td(row,user.email);td(row,date(user.createdAt));td(row,date(user.lastSignInAt));
-    td(row,user.confirmed?"Verified":"Pending");td(row,user.mfa===true?"Enabled":user.mfa===false?"Off":"Unknown");
+    td(row,user.email);
+    td(row,date(user.createdAt));
+    td(row,date(user.lastSignInAt));
+    statusCell(row,user.confirmed?"Verified":"Pending",user.confirmed?"yes":"no");
+    statusCell(row,user.mfa===true?"Enabled":user.mfa===false?"Off":"Unknown",
+      user.mfa===true?"yes":user.mfa===false?"no":"unknown");
     const action=document.createElement("td"),btn=document.createElement("button");
-    btn.textContent=user.isSelf?"Reset my cloud password":"Send recovery email";btn.disabled=!user.confirmed;
-    btn.addEventListener("click",()=>sendRecovery(user));action.append(btn);row.append(action);body.append(row);
+    btn.type="button";
+    btn.textContent=user.isSelf?"Reset my cloud password":"Send recovery email";
+    btn.disabled=!user.confirmed;
+    btn.addEventListener("click",()=>sendRecovery(user));
+    action.append(btn);row.append(action);body.append(row);
   }
+  visible("empty",accounts.length===0);
+}
+function setLoading(value){
+  get("directory-table").setAttribute("aria-busy",String(value));
+  get("prev").disabled=value||page<=1;
+  get("next").disabled=value||page*30>=matching;
+  get("directory-state").textContent=value?"Loading accounts…":"";
 }
 async function loadPage(n){
+  const seq=++loadSequence;
+  setLoading(true);
   try{
-    const data=await api("list",{page:n});page=n;accounts=data.users;
-    get("page-label").textContent="Page "+page;
-    get("total").textContent=data.total??"—";
-    get("prev").disabled=page===1;get("next").disabled=accounts.length<30;
+    const data=await api("list",{
+      page:n,search:get("search").value.trim(),
+      emailState:get("email-filter").value,
+      mfaState:get("mfa-filter").value,
+    });
+    if(seq!==loadSequence||!accessToken)return;
+    if(!Array.isArray(data.users)||typeof data.total!=="number"||
+       typeof data.matching!=="number"||!data.stats)throw Error("Invalid directory response");
+    page=n;accounts=data.users;matching=data.matching;
+    get("total").textContent=data.total.toLocaleString();
+    get("verified-stat").textContent=data.stats.verified.toLocaleString();
+    get("mfa-stat").textContent=data.stats.mfaEnabled.toLocaleString();
+    get("active-stat").textContent=data.stats.active30Days.toLocaleString();
+    get("filtered-count").textContent=matching.toLocaleString()+" matching / "+
+      data.total.toLocaleString()+" total";
+    const pageCount=Math.max(1,Math.ceil(matching/30));
+    get("page-label").textContent="Page "+page+" of "+pageCount;
     display();alertText("");
-  }catch(error){alertText(error.message,true);}
+  }catch(error){
+    if(seq!==loadSequence)return;
+    accounts=[];matching=0;
+    get("users").replaceChildren();visible("empty",false);
+    get("directory-state").textContent="Unable to load accounts. Retry or adjust filters.";
+    alertText(error.message,true);
+  }finally{
+    if(seq===loadSequence){
+      const state=get("directory-state").textContent;
+      setLoading(false);
+      if(state.startsWith("Unable"))get("directory-state").textContent=state;
+    }
+  }
+}
+function scheduleSearch(){
+  clearTimeout(searchDelay);
+  searchDelay=setTimeout(()=>{if(accessToken)loadPage(1)},350);
 }
 async function sendRecovery(user){
   const message=user.isSelf
@@ -163,10 +266,21 @@ async function sendRecovery(user){
   try{await api("recover",{id:user.id});alertText("Recovery email requested for "+user.email+". Check the inbox and spam folder.");}
   catch(error){alertText(error.message,true);}
 }
-get("search").addEventListener("input",display);
-get("prev").addEventListener("click",()=>{if(page>1)loadPage(page-1);});
-get("next").addEventListener("click",()=>loadPage(page+1));
-get("logout").addEventListener("click",()=>{accessToken="";accounts=[];visible("dashboard",false);visible("login",true);visible("logout",false);alertText("Signed out.");});
+get("search").addEventListener("input",scheduleSearch);
+get("email-filter").addEventListener("change",()=>{if(accessToken)loadPage(1)});
+get("mfa-filter").addEventListener("change",()=>{if(accessToken)loadPage(1)});
+get("clear-filters").addEventListener("click",()=>{
+  get("search").value="";get("email-filter").value="all";
+  get("mfa-filter").value="all";if(accessToken)loadPage(1);
+});
+get("prev").addEventListener("click",()=>{if(page>1&&!get("prev").disabled)loadPage(page-1);});
+get("next").addEventListener("click",()=>{if(!get("next").disabled)loadPage(page+1);});
+get("logout").addEventListener("click",()=>{
+  ++loadSequence;clearTimeout(searchDelay);
+  accessToken="";accounts=[];matching=0;
+  visible("dashboard",false);visible("login",true);
+  visible("logout",false);alertText("Signed out.");
+});
 if(RECOVERY){
   const params=new URLSearchParams(location.hash.slice(1));
   const token=params.get("access_token"),type=params.get("type");

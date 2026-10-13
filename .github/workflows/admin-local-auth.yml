@@ -61,6 +61,7 @@ jobs:
           container="$(docker ps --filter name=supabase_db_ --format '{{.ID}}' | head -n 1)"
           if [ -z "$container" ]; then echo 'No local Postgres container'; exit 1; fi
           docker exec -i "$container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 < supabase/migrations/20261013123000_admin_console.sql
+          docker exec -i "$container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 < supabase/migrations/20261013173000_admin_directory.sql
       - name: Start real local Edge Function
         shell: bash
         run: |

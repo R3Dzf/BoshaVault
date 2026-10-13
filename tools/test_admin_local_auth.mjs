@@ -108,6 +108,12 @@ async function denied(token,label,body={action:"list",page:1},origin=root){
 
 const owner=await createUser("approved-owner");
 const stranger=await createUser("unapproved-user");
+// A third synthetic account without verified email proves server-side filters.
+const pendingEmail="pending-"+suite+"@example.invalid";
+const pending=await invoke("/auth/v1/admin/users","POST",service,service,
+  {email:pendingEmail,password,email_confirm:false});
+assert.equal(pending.status,200,"Create pending local account");
+accountWrites++;
 const ownerAAL2=await totpChallenge(owner);
 const strangerAAL2=await totpChallenge(stranger);
 const grant=await invoke("/rest/v1/lockvyn_admins","POST",service,service,
@@ -126,11 +132,37 @@ const gotStranger=allowed.data.users.find(u=>u.id===stranger.id);
 assert(gotOwner && gotOwner.mfa===true && gotOwner.confirmed===true,
   "Owner factor was not returned as verified");
 assert(gotStranger && gotStranger.mfa===true,"Verified factor should report enabled");
+assert.equal(allowed.data.total,3,"Global account totals include all users");
+assert.equal(allowed.data.matching,3,"Unfiltered directory count");
+assert.equal(allowed.data.stats.verified,2,"Global verified email count");
+assert.equal(allowed.data.stats.mfaEnabled,2,"Global enrolled MFA count");
+const search=await admin(ownerAAL2.aal2,{
+  action:"list",page:1,search:"UNAPPROVED-USER"});
+assert.equal(search.status,200,"Case-insensitive account search");
+assert.equal(search.data.matching,1);
+assert.equal(search.data.users[0].id,stranger.id);
+const pendingFilter=await admin(ownerAAL2.aal2,{
+  action:"list",page:1,emailState:"pending"});
+assert.equal(pendingFilter.status,200);
+assert.equal(pendingFilter.data.matching,1);
+assert.equal(pendingFilter.data.users[0].email,pendingEmail);
+const mfaOnly=await admin(ownerAAL2.aal2,{
+  action:"list",page:1,mfaState:"enabled"});
+assert.equal(mfaOnly.status,200);
+assert.equal(mfaOnly.data.matching,2);
+const paged=await admin(ownerAAL2.aal2,{
+  action:"list",page:2});
+assert.equal(paged.status,200);
+assert.equal(paged.data.matching,3);
+assert.equal(paged.data.users.length,0,"Offset must be applied on the server");
+const invalid=await admin(ownerAAL2.aal2,{
+  action:"list",page:1,mfaState:"bogus"});
+assert.equal(invalid.status,400,"Reject unauthorized filter values");
 assert.equal(gotOwner.isSelf,true,"Admin owner shown as self");
 assert.equal(gotStranger.isSelf,false,"Nonadmin not labelled self");
 await denied(strangerAAL2.aal2,"Unapproved user recovery",{action:"recover",id:owner.id});
 await denied(owner.aal1,"Owner AAL1 recovery",{action:"recover",id:stranger.id});
 assert.equal(recoveryEmails,0,"No password reset mails");
-assert.equal(accountWrites,2,"Only disposable local identities were created");
+assert.equal(accountWrites,3,"Only disposable local identities were created");
 console.log("PASS real local GoTrue AAL1/AAL2 JWT verification, admin allowlist and read access");
 console.log("PASS recovery rejected for nonadmin and AAL1; no recovery messages sent");
