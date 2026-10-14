@@ -47,8 +47,8 @@ async function roleManagementRequest(body, actorId, sessionId, claims) {
     roleAssign:"assign", roleRevoke:"revoke",
   };
   const requested=typeof body.action==="string"?body.action:"";
+  if (!Object.hasOwn(actions,requested)) return result({error:"Invalid administrator role action"},400);
   const action = actions[requested];
-  if (!action) return result({error:"Invalid administrator role action"},400);
   const mutation = ["bootstrap","assign","revoke"].includes(action);
   const {data,error}=await service.rpc("lockvyn_admin_manage_roles",{
     p_actor:actorId,p_actor_session:sessionId,p_actor_aal:claims.aal,

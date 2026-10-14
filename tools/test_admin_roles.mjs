@@ -3,6 +3,8 @@ import {adminRoleAllows,adminRoleActions,isAdminRole} from "../supabase/function
 assert.equal(isAdminRole("owner"),true);
 assert.equal(isAdminRole("superadmin"),false);
 assert.equal(isAdminRole(null),false);
+assert.equal(isAdminRole("toString"),false);
+assert.equal(adminRoleAllows("toString","list"),false);
 assert.equal(adminRoleAllows("owner",{}),false);
 assert.equal(adminRoleAllows(null,"list"),false,"Unassigned administrators are denied by default");
 assert.equal(adminRoleAllows("support","ticketAdminReply"),true);

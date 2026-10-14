@@ -12,6 +12,6 @@ const ROLE_ACTIONS={
 };
 export function isAdminRole(role){return typeof role==="string"&&Object.hasOwn(ROLE_ACTIONS,role);}
 export function adminRoleAllows(role,action){
-  return typeof role==="string"&&typeof action==="string"&&Boolean(ROLE_ACTIONS[role]?.has(action));
+  return typeof role==="string"&&typeof action==="string"&&Object.hasOwn(ROLE_ACTIONS,role)&&ROLE_ACTIONS[role].has(action);
 }
-export function adminRoleActions(role){return typeof role==="string"?[...(ROLE_ACTIONS[role]||[])].sort():[];}
+export function adminRoleActions(role){return typeof role==="string"&&Object.hasOwn(ROLE_ACTIONS,role)?[...ROLE_ACTIONS[role]].sort():[];}
