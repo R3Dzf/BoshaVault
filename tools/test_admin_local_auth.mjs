@@ -200,7 +200,18 @@ assert.equal(invalid.status,400,"Reject unauthorized filter values");
 assert.equal(gotOwner.isSelf,true,"Admin owner shown as self");
 assert.equal(gotStranger.isSelf,false,"Nonadmin not labelled self");
 
-// Phase 08: real local GoTrue AAL1 owner flow and AAL2 agent workflow.
+// Phase 08: real local GoTrue AAL1 support flow and AAL2 agent workflow.
+const supportUser=await createUser("support-requester");
+const supportClaims=JSON.parse(Buffer.from(supportUser.aal1.split(".")[1],"base64url").toString("utf8"));
+const activeTicketSession=await dataApi("rpc/lockvyn_auth_session_is_active","POST",service,{
+  p_user_id:supportUser.id,p_session_id:supportClaims.session_id,
+},service);
+assert.equal(activeTicketSession.status,200,"Service role can verify the requester Auth session: "+JSON.stringify(activeTicketSession.data));
+assert.equal(activeTicketSession.data,true,"New AAL1 Auth session is active");
+const serviceTicketList=await dataApi("rpc/lockvyn_support_ticket_user_manage","POST",service,{
+  p_action:"list",p_actor:supportUser.id,p_actor_session:supportClaims.session_id,p_ticket_id:null,p_payload:{},
+},service);
+assert.equal(serviceTicketList.status,200,"Service role can call the user ticket RPC: "+JSON.stringify(serviceTicketList.data));
 const ticketPreflight=await fetch(ticketsEndpoint,{method:"OPTIONS",headers:{
   Origin:root,"Access-Control-Request-Method":"POST",
   "Access-Control-Request-Headers":"authorization,content-type",
@@ -210,32 +221,32 @@ assert(["*",root].includes(ticketPreflight.headers.get("access-control-allow-ori
   "Local Supabase may normalize preflight origin; browser API still requires allowlisted POST origin.");
 assert.match(ticketPreflight.headers.get("access-control-allow-methods")||"",/POST/);
 assert.match(ticketPreflight.headers.get("access-control-allow-headers")||"",/authorization.*content-type/i);
-const foreignOriginTicket=await ticketRequest(stranger.aal1,{action:"ticketList"},"https://attacker.invalid");
+const foreignOriginTicket=await ticketRequest(supportUser.aal1,{action:"ticketList"},"https://attacker.invalid");
 assert.equal(foreignOriginTicket.status,403,"Actual ticket API requests reject untrusted browser origins");
-const createdSupportTicket=await ticketRequest(stranger.aal1,{action:"ticketCreate",ticket:{
+const createdSupportTicket=await ticketRequest(supportUser.aal1,{action:"ticketCreate",ticket:{
   subject:"Synthetic local sync issue",body:"Local test report with no account or vault data.",
   diagnosticConsent:true,diagnostics:{platform:"windows",appVersion:"3.1.0",osVersion:"Windows 11",errorCode:"SYNTHETIC_503"},
 }});
 assert.equal(createdSupportTicket.status,200,"Confirmed AAL1 user can create a ticket: "+JSON.stringify(createdSupportTicket.data));
 const localTicketId=createdSupportTicket.data.ticket.id;
 assert.match(localTicketId,/^[a-f0-9-]{36}$/i);
-const otherOwnerRead=await ticketRequest(owner.aal1,{action:"ticketGet",ticketId:localTicketId});
+const otherOwnerRead=await ticketRequest(strangerAAL2.aal2,{action:"ticketGet",ticketId:localTicketId});
 assert.equal(otherOwnerRead.status,404,"Ticket content is private to its requester");
-const ownSupportTicket=await ticketRequest(stranger.aal1,{action:"ticketGet",ticketId:localTicketId});
+const ownSupportTicket=await ticketRequest(supportUser.aal1,{action:"ticketGet",ticketId:localTicketId});
 assert.equal(ownSupportTicket.status,200,"Requester can read own ticket at AAL1");
 assert.equal(ownSupportTicket.data.diagnostics.payload.errorCode,"SYNTHETIC_503");
 assert.equal(ownSupportTicket.data.ticket.requester_id,undefined,"Ticket response omits requester identifiers");
-const unsupportedFile=await ticketRequest(stranger.aal1,{action:"ticketCreate",ticket:{
+const unsupportedFile=await ticketRequest(supportUser.aal1,{action:"ticketCreate",ticket:{
   subject:"Synthetic file attempt",body:"This fixture must not store arbitrary files.",
   diagnosticConsent:false,diagnostics:null,attachments:[{filename:"vault.json",content:"synthetic"}],
 }});
 assert.equal(unsupportedFile.status,400,"Arbitrary file attachments are explicitly rejected");
-const noConsent=await ticketRequest(stranger.aal1,{action:"ticketCreate",ticket:{
+const noConsent=await ticketRequest(supportUser.aal1,{action:"ticketCreate",ticket:{
   subject:"Synthetic consent check",body:"No diagnostics should be accepted without consent.",
   diagnosticConsent:false,diagnostics:{platform:"windows"},
 }});
 assert.equal(noConsent.status,400,"Diagnostics require explicit consent");
-const deniedAal1Agent=await ticketRequest(owner.aal1,{action:"ticketAdminList"});
+const deniedAal1Agent=await ticketRequest(supportUser.aal1,{action:"ticketAdminList"});
 assert.equal(deniedAal1Agent.status,403,"AAL1 administrator cannot read the agent queue");
 const deniedNonadminAgent=await ticketRequest(strangerAAL2.aal2,{action:"ticketAdminList"});
 assert.equal(deniedNonadminAgent.status,403,"AAL2 nonadministrator cannot read the agent queue");
@@ -266,7 +277,7 @@ const agentReply=await ticketRequest(await verifyExistingTotp(ownerAAL2,owner.aa
   action:"ticketAdminReply",ticketId:localTicketId,body:"Synthetic local agent response.",confirmId:localTicketId,
 });
 assert.equal(agentReply.status,200,"Agent can reply after fresh TOTP");
-const visibleReply=await ticketRequest(stranger.aal1,{action:"ticketGet",ticketId:localTicketId});
+const visibleReply=await ticketRequest(supportUser.aal1,{action:"ticketGet",ticketId:localTicketId});
 assert.equal(visibleReply.status,200);
 assert(visibleReply.data.messages.some(message=>message.senderRole==="agent"&&message.body==="Synthetic local agent response."));
 console.log("PASS real local Phase 08: AAL1 ownership, consented diagnostics, file rejection, allowlisted AAL2 assignment/escalation/status/reply and typed ID");
@@ -484,7 +495,7 @@ assert(supportLog.data.cases.some(c=>c.id===createdCase.data.caseId &&
   c.state==="completed" && c.kind==="suspend_24h"),"Support action must be logged");
 console.log("PASS real local support: AAL1/nonadmin/self denied, typed email, finite ban and no replay");
 assert.equal(recoveryEmails,0,"No password reset mails");
-assert.equal(accountWrites,3,"Only disposable local identities were created");
+assert.equal(accountWrites,4,"Only disposable local identities were created");
 console.log("PASS real local GoTrue AAL1/AAL2 JWT verification, admin allowlist and read access");
 console.log("PASS recovery rejected for nonadmin and AAL1; no recovery messages sent");
 
