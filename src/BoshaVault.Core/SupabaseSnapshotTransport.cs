@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 
 namespace BoshaVault.Core;
 
@@ -79,6 +80,59 @@ public sealed class SupabaseSnapshotTransport(HttpClient http, Uri projectUrl,
                 throw new VaultException("Cloud did not accept the sync result.");
         }
         catch(JsonException ex){throw new VaultException("Cloud returned an invalid sync result.",ex);}
+        finally{CryptographicOperations.ZeroMemory(response);}
+    }
+
+    public async Task<bool> GetAnalyticsConsentAsync(CancellationToken ct = default)
+    {
+        byte[] response=await InventoryRpcAsync("lockvyn_analytics_consent_status",new { },ct);
+        try
+        {
+            using var json=JsonDocument.Parse(response,new JsonDocumentOptions{MaxDepth=2});
+            if(json.RootElement.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                throw new VaultException("Cloud returned an invalid privacy choice.");
+            return json.RootElement.GetBoolean();
+        }
+        catch(JsonException ex){throw new VaultException("Cloud returned an invalid privacy choice.",ex);}
+        finally{CryptographicOperations.ZeroMemory(response);}
+    }
+
+    public async Task SetAnalyticsConsentAsync(bool enabled,CancellationToken ct=default)
+    {
+        byte[] response=await InventoryRpcAsync("lockvyn_analytics_set_consent",new { p_enabled=enabled },ct);
+        try
+        {
+            using var json=JsonDocument.Parse(response,new JsonDocumentOptions{MaxDepth=2});
+            if(json.RootElement.ValueKind is not (JsonValueKind.True or JsonValueKind.False) ||
+               json.RootElement.GetBoolean()!=enabled)
+                throw new VaultException("Cloud did not confirm the privacy choice.");
+        }
+        catch(JsonException ex){throw new VaultException("Cloud returned an invalid privacy choice.",ex);}
+        finally{CryptographicOperations.ZeroMemory(response);}
+    }
+
+    public async Task RecordAnalyticsEventAsync(string eventType,string platform,string appVersion,
+        string? outcome,string? resourceBucket,CancellationToken ct=default)
+    {
+        bool versionValid=appVersion=="unknown"||
+            Regex.IsMatch(appVersion,@"^([0-9]{1,5}(\.[0-9]{1,5}){0,3}(-[A-Za-z0-9.-]{1,20})?)$");
+        bool validActivity=eventType=="app_active"&&outcome is null&&resourceBucket is null;
+        bool validSync=eventType=="sync_result"&&(outcome is "success" or "failure")&&
+            (resourceBucket is "none" or "lt_1mib" or "1_10mib" or "gt_10mib");
+        if(platform is not ("windows" or "android")||!versionValid||(!validActivity&&!validSync))
+            throw new VaultException("Invalid privacy analytics event.");
+        byte[] response=await InventoryRpcAsync("lockvyn_analytics_record_event",new
+        {
+            p_event=eventType,p_platform=platform,p_app_version=appVersion,
+            p_outcome=outcome,p_resource_bucket=resourceBucket
+        },ct);
+        try
+        {
+            using var json=JsonDocument.Parse(response,new JsonDocumentOptions{MaxDepth=2});
+            if(json.RootElement.ValueKind!=JsonValueKind.True)
+                throw new VaultException("Cloud did not accept the privacy analytics event.");
+        }
+        catch(JsonException ex){throw new VaultException("Cloud returned an invalid analytics response.",ex);}
         finally{CryptographicOperations.ZeroMemory(response);}
     }
 

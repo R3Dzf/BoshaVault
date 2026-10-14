@@ -28,7 +28,8 @@ public final class CloudSyncJob extends JobService {
                     try{id=VaultEngine.parse(bytes).getString("vaultId");}finally{Arrays.fill(bytes,(byte)0);}
                     CloudSettingsStore store=new CloudSettingsStore(this);profile=store.load(id);
                     if(profile==null||!profile.optBoolean("autoSync",true))return;
-                    client=new CloudClient(()->{if(Thread.currentThread().isInterrupted())throw new InterruptedException();});
+                    String version="unknown";try{version=getPackageManager().getPackageInfo(getPackageName(),0).versionName;}catch(Exception ignored){}
+                    client=new CloudClient(()->{if(Thread.currentThread().isInterrupted())throw new InterruptedException();},version);
                     CloudAuth.Session signed=client.refresh(profile,store);
                     if(!client.auth.factors(signed).requiresChallenge(signed))client.syncAutomatic(null,file,profile,store,signed);
                 }

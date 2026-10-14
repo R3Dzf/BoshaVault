@@ -46,8 +46,15 @@ public static class AutomaticCloudSync
         profile.Validate(profile.VaultId); ct.ThrowIfCancellationRequested();
         byte[]? local = null; var remote = new List<RemoteEncryptedSnapshot>();
         bool downloaded = false, uploaded = false; int conflicts = 0; long transferBytes = 0;
+        string telemetryVersion=typeof(CloudProject).Assembly.GetName().Version?.ToString()??"unknown";
         try
         {
+            if(profile.AnalyticsConsent)
+            {
+                try{await transport.RecordAnalyticsEventAsync("app_active","windows",telemetryVersion,null,null,ct);}
+                catch(OperationCanceledException) when(ct.IsCancellationRequested){throw;}
+                catch{}
+            }
             CloudSyncStatus status = await transport.GetCloudSyncStatusAsync(ct);
             if (status.Suspended)
                 throw new VaultException("Cloud sync is paused. Offline vault data and encrypted cloud snapshots are preserved.");
@@ -123,11 +130,22 @@ public static class AutomaticCloudSync
                 save();
             }
             if (uploaded || downloaded || profile.LastSyncUtc.Length == 0 || !DateTimeOffset.TryParse(profile.LastSyncUtc, out var last) || DateTimeOffset.UtcNow - last > TimeSpan.FromMinutes(1)) { profile.LastSyncUtc = DateTimeOffset.UtcNow.ToString("O"); save(); }
+            if(profile.AnalyticsConsent)
+            {
+                try{await transport.RecordAnalyticsEventAsync("sync_result","windows",telemetryVersion,"success",ResourceBucket(transferBytes),ct);}
+                catch(OperationCanceledException) when(ct.IsCancellationRequested){throw;}
+                catch{}
+            }
             return new(uploaded, downloaded, conflicts, profile.DownloadedStamp != profile.MergedStamp);
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex)
         {
+            if(profile.AnalyticsConsent)
+            {
+                try{await transport.RecordAnalyticsEventAsync("sync_result","windows",telemetryVersion,"failure",ResourceBucket(transferBytes),ct);}
+                catch{}
+            }
             if (profile.DeviceInventoryConsent)
             {
                 try
@@ -147,6 +165,9 @@ public static class AutomaticCloudSync
         }
         finally { if (local != null) CryptographicOperations.ZeroMemory(local); foreach (var row in remote) CryptographicOperations.ZeroMemory(row.Blob); }
     }
+
+    private static string ResourceBucket(long bytes) =>
+        bytes<=0?"none":bytes<=1_048_576?"lt_1mib":bytes<=10_485_760?"1_10mib":"gt_10mib";
 
     private static string BoundedSyncErrorCode(Exception ex)
     {

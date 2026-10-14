@@ -50,3 +50,7 @@ Windows and Android store the alert preference locally, disabled by default. The
 
 ## Browser HTML hosting
 Supabase Edge Functions serve HTML as text on their default project domain. The login page is served through a dedicated Cloudflare Worker (`infra/cloudflare/lockvyn-admin-ui.js`) that renders HTML with a strict nonce-based CSP. The browser signs in directly with Supabase Auth and sends only authorized admin API requests to the Edge Function from the explicitly allowed Cloudflare origin. No administrative service-role secret is shipped to the Worker or browser.
+
+
+## Privacy-conscious analytics
+Phase 09 adds account-level analytics with explicit opt-in, off by default on Windows and Android. While opted in, the service records daily app version, inferred update transitions, sync success/failure, coarse transfer-size buckets, and signup day. Reports never return account identifiers and suppress groups under five. They exclude vault content, email, device identifiers, IP addresses, and raw errors. Event rows expire after 90 days; administrator report reads are audited for 180 days and rate limited. Opting out deletes that account's consent and analytics events. The dashboard restricts report access to the verified AAL2 admin allowlist and provides date filters and aggregate-only CSV export. Client UI explains the collection and offers a server-backed refresh and opt-out control. No hosted migration or production deployment has been performed; see [Phase 09 record](ADMIN-PHASE-09.md).

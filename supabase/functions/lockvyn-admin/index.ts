@@ -2,6 +2,7 @@ import { createClient } from "npm:@supabase/supabase-js@2.58.0";
 import { html } from "./ui.ts";
 import { announcementInputError, announcementQueryError } from "./announcements.mjs";
 import { parseUserTicketRequest, parseAdminTicketRequest, isAdminTicketAction } from "./tickets.mjs";
+import { parseAnalyticsQuery, sanitizeAnalyticsReport } from "./analytics.mjs";
 import { validCandidateTag, validateReleasePolicy, compareReleaseVersions } from "./release.mjs";
 import { securityHtml } from "./security.ts";
 import { verifiedUserGate, adminMembershipGate } from "./access.mjs";
@@ -399,6 +400,24 @@ Deno.serve(async (request) => {
   if (!adminMembershipGate(admin, verified.user.id)) {
     await recordSecuritySignal(verified.user.id, "admin_allowlist_denied");
     return result({ error: "Not an authorized Lockvyn administrator" }, 403);
+  }
+
+  if(body.action==="privacyAnalytics"){
+    const query=parseAnalyticsQuery(body);
+    if(!query.ok)return result({error:query.error},400);
+    const {data,error}=await service.rpc("lockvyn_admin_privacy_analytics",{
+      p_actor:verified.user.id,p_actor_session:sessionId,p_actor_aal:claims.aal,
+      p_from:query.fromDate,p_to:query.toDate,
+    });
+    if(error){
+      if(error.code==="54000")return result({error:"Analytics report rate limit reached. Wait before trying again."},429);
+      if(error.code==="42501")return result({error:"An active allowlisted AAL2 administrator is required"},403);
+      if(error.code==="22023"||error.code==="22007")return result({error:"Choose dates within the last 90 days."},400);
+      return result({error:"Unable to load privacy analytics"},502);
+    }
+    const report=sanitizeAnalyticsReport(data,query);
+    if(!report)return result({error:"Analytics report did not match its privacy-safe schema"},502);
+    return result(report);
   }
 
   if(body.action==="announcements"){
