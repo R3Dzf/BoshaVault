@@ -63,7 +63,7 @@ begin
  then raise exception 'Aggregate response exposed account data'; end if;
  if not exists(select 1 from jsonb_array_elements(rows) r where r->>'metric'='active_app_versions'
    and r->>'appVersion'='3.2.0' and (r->>'users')::integer=5)
- then raise exception 'Version cohort missing'; end if;
+ then raise exception 'Version cohort missing: %',report; end if;
  if not exists(select 1 from jsonb_array_elements(rows) r where r->>'metric'='update_uptake'
    and (r->>'users')::integer=5)
  then raise exception 'Update uptake missing'; end if;
