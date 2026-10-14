@@ -111,7 +111,7 @@ public final class MainActivity extends Activity {
                     if(profile==null)return;
                     if(!profile.optBoolean("autoSync",true)){result="Cloud paused on this phone";return;}
                     result="Cloud synced · up to date";
-                    client=new CloudClient(()->{if(!active||stamp!=epoch||cloudOpen||!engine.isOpen())throw new IOException("Cloud operation cancelled.");});autoClient=client;
+                    client=new CloudClient(()->{if(!active||stamp!=epoch||cloudOpen||!engine.isOpen())throw new IOException("Cloud operation cancelled.");},getPackageVersion());autoClient=client;
                     CloudAuth.Session signed=autoSession;
                     if(signed==null||SystemClock.elapsedRealtime()>=autoSessionUntil||!signed.owner.equals(profile.getString("ownerId"))||!profile.getString("vaultSlot").equals(autoSessionSlot)){
                         signed=client.refresh(profile,store);
@@ -454,7 +454,7 @@ public final class MainActivity extends Activity {
         // Retain in-memory AAL2 while unlocked to avoid repeated prompts.
         cloudOpen=true;
         final CloudSettingsStore store=new CloudSettingsStore(this);final int stamp=epoch;
-        final CloudClient client=new CloudClient(()->{if(!active||stamp!=epoch||!engine.isOpen())throw new IOException("Cloud operation cancelled.");});
+        final CloudClient client=new CloudClient(()->{if(!active||stamp!=epoch||!engine.isOpen())throw new IOException("Cloud operation cancelled.");},getPackageVersion());
         JSONObject saved=null;String vaultId;
         try{vaultId=engine.snapshot().getString("vaultId");saved=store.load(vaultId);}catch(Exception e){
             LinearLayout b=Ui.column(this);b.addView(Ui.text(this,"Saved cloud settings could not be opened. Your local vault is available.",13,Ui.MUTED,false));AlertDialog d=dialog("Encrypted cloud sync",b);
@@ -467,6 +467,47 @@ public final class MainActivity extends Activity {
             b.addView(Ui.text(this,"Connected to "+profile.optString("email")+". New logins sync automatically when connected. Unlock to apply incoming changes.",13,Ui.MUTED,false));
             b.addView(Ui.text(this,profile.optString("lastSyncUtc").isEmpty()?"No successful sync yet.":"Last successful sync: "+profile.optString("lastSyncUtc"),12,Ui.MUTED,false));
             CheckBox auto=check(b,"Sync automatically on this device",profile.optBoolean("autoSync",true));auto.setOnCheckedChangeListener((button,enabled)->cloudTask(status,()->{synchronized(CloudClient.GATE){JSONObject latest=store.load(profile.getString("vaultId"));if(latest==null)throw new IOException("Cloud is disconnected on this device.");try{latest.put("autoSync",enabled);store.save(latest);profile.put("autoSync",enabled);}finally{CloudSettingsStore.clear(latest);}}},()->{status.setText(enabled?"Automatic sync is on.":"Automatic sync is paused on this device.");if(enabled)nextCloudCheck=0;}));
+            b.addView(Ui.text(this,"Optional analytics is off until you choose it. If enabled, this account contributes daily app version, detected update transitions, sync success/failure, coarse transfer-size buckets, and signup day while opted in. Reports hide groups below five. No vault data, email, device ID, IP address, or raw errors are sent. Turning it off deletes stored analytics events.",12,Ui.MUTED,false));
+            CheckBox analytics=check(b,"Share privacy-safe analytics for this cloud account",profile.optBoolean("analyticsConsent",false));
+            analytics.setContentDescription("Optional account analytics, off by default. Opting out deletes analytics events.");
+            final boolean[] changingAnalytics={false};
+            analytics.setOnCheckedChangeListener((button,enabled)->{
+                if(changingAnalytics[0])return;
+                changingAnalytics[0]=true;analytics.setChecked(!enabled);changingAnalytics[0]=false;
+                String message=enabled
+                    ?"Opt in to daily app version, detected update transitions, sync outcomes, coarse transfer-size buckets, and signup day while opted in? Reports hide groups below five. No vault content, email, device ID, IP address, or raw errors are sent."
+                    :"Opt out and delete this account's stored analytics events now? Cloud sync and your offline vault remain available.";
+                new AlertDialog.Builder(this).setTitle(enabled?"Enable privacy analytics":"Delete analytics and opt out")
+                    .setMessage(message).setNegativeButton("Cancel",(dialog,which)->{})
+                    .setPositiveButton(enabled?"Enable":"Opt out",(dialog,which)->cloudRefresh(client,profile,store,status,signedIn->cloudTask(status,()->{
+                        if(!signedIn.owner.equals(profile.getString("ownerId")))throw new IOException("Cloud account changed.");
+                        if(client.setAnalyticsConsent(signedIn,enabled)!=enabled)throw new IOException("Cloud did not confirm the privacy choice.");
+                        if(enabled)try{client.recordAnalyticsEvent(signedIn,"app_active",null,null);}catch(Exception ignored){}
+                        synchronized(CloudClient.GATE){
+                            JSONObject latest=store.load(profile.getString("vaultId"));
+                            if(latest==null)throw new IOException("Cloud is disconnected on this device.");
+                            try{latest.put("analyticsConsent",enabled);store.save(latest);profile.put("analyticsConsent",enabled);}
+                            finally{CloudSettingsStore.clear(latest);}
+                        }
+                    },()->{
+                        changingAnalytics[0]=true;analytics.setChecked(enabled);changingAnalytics[0]=false;
+                        status.setText(enabled?"Privacy analytics enabled; you can opt out here at any time.":"Opted out. Stored analytics events were deleted; cloud sync and your offline vault remain available.");
+                    })))
+                    .show();
+            });
+            b.addView(analytics);
+            b.addView(Ui.button(this,"Refresh privacy choice",false,()->cloudRefresh(client,profile,store,status,signedIn->cloudTask(status,()->{
+                boolean enabled=client.analyticsConsent(signedIn);
+                synchronized(CloudClient.GATE){
+                    JSONObject latest=store.load(profile.getString("vaultId"));
+                    if(latest==null)throw new IOException("Cloud is disconnected on this device.");
+                    try{latest.put("analyticsConsent",enabled);store.save(latest);profile.put("analyticsConsent",enabled);}
+                    finally{CloudSettingsStore.clear(latest);}
+                }
+            },()->{
+                changingAnalytics[0]=true;analytics.setChecked(profile.optBoolean("analyticsConsent",false));changingAnalytics[0]=false;
+                status.setText(profile.optBoolean("analyticsConsent",false)?"Privacy analytics is enabled for this account.":"Privacy analytics is off for this account.");
+            }))));
             b.addView(Ui.text(this,"Optional session list: if enabled, your account can show this signed-in app session, its self-reported platform/version, and the last successful sync. It does not identify physical hardware. You can remove it from the list without stopping cloud sync.",12,Ui.MUTED,false));
             CheckBox inventory=check(b,"Show this app session in my cloud session list",profile.optBoolean("deviceInventoryConsent",false));
             inventory.setContentDescription("Optional: show this signed-in Android app session in the cloud account session list");
@@ -582,7 +623,7 @@ public final class MainActivity extends Activity {
         TextView status=Ui.text(this,"Ready. This pairing expires after two minutes.",13,Ui.MUTED,false);
         b.addView(status);
         int stamp=epoch; CloudSettingsStore store=new CloudSettingsStore(this);
-        CloudClient client=new CloudClient(()->{if(!active||stamp!=epoch)throw new IOException("Pairing was interrupted.");});
+        CloudClient client=new CloudClient(()->{if(!active||stamp!=epoch)throw new IOException("Pairing was interrupted.");},getPackageVersion());
         AlertDialog d=dialog("Connect to my PC · verify",b);
         final Runnable[] poll={null};
         final CloudAuth.Session[] authSession={null};
@@ -652,7 +693,7 @@ public final class MainActivity extends Activity {
     }
     private void joinCloud(String scanned){
         if(Store.vault(this).exists()){toast("A vault already exists. Unlock and use Sync to connect it.");return;}
-        int stamp=epoch;CloudSettingsStore store=new CloudSettingsStore(this);CloudClient client=new CloudClient(()->{if(!active||stamp!=epoch)throw new IOException("Cloud operation cancelled.");});
+        int stamp=epoch;CloudSettingsStore store=new CloudSettingsStore(this);CloudClient client=new CloudClient(()->{if(!active||stamp!=epoch)throw new IOException("Cloud operation cancelled.");},getPackageVersion());
         LinearLayout b=Ui.column(this);b.addView(Ui.text(this,"Sign in with the same cloud account. Scan the connection QR on your own computer, then unlock its encrypted backup with your master passphrase. The passphrase stays on this phone.",13,Ui.MUTED,false));
         b.addView(Ui.button(this,"Scan cloud connection QR",false,()->startActivityForResult(new Intent(this,ScanQrActivity.class).putExtra("cloud",true),14)));
         EditText code=Ui.field(b,"Cloud connection code (BVCLOUD1:…)",scanned,false,1024);code.setSingleLine(false);code.setMaxLines(4);

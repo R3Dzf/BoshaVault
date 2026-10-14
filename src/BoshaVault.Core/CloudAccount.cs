@@ -25,6 +25,7 @@ public sealed class CloudProfile
     public string LastSyncUtc { get; set; } = "";
     public bool AutoSync { get; set; } = true;
     public bool DeviceInventoryConsent { get; set; }
+    public bool AnalyticsConsent { get; set; }
     public string DeviceInventoryState { get; set; } = "";
     public long KeyEpoch { get; set;}
     public string LastUploadedHash { get; set; } = "";

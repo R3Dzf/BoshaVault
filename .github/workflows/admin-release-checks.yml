@@ -24,6 +24,8 @@ jobs:
         run: node tools/test_announcements.mjs
       - name: Check support ticket redaction, consent and action policies
         run: node tools/test_support_tickets.mjs
+      - name: Check privacy analytics consent, aggregation and export safety
+        run: node tools/test_admin_analytics.mjs
       - name: Check verified admin AAL2 and allowlist decisions
         run: node tools/test-admin-access.cjs
       - name: Check privileged account support rules

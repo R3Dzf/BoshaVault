@@ -65,13 +65,13 @@
       "number": "08",
       "issue": 26,
       "name": "Support tickets",
-      "status": "in_progress"
+      "status": "waived"
     },
     {
       "number": "09",
       "issue": 27,
       "name": "Privacy-conscious analytics",
-      "status": "queued"
+      "status": "in_progress"
     },
     {
       "number": "10",

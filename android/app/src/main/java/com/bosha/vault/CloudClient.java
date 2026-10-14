@@ -15,11 +15,13 @@ final class CloudClient implements AutoCloseable {
     static final String PUBLIC_KEY="sb_publishable__Kb9CeN7Bcx3lxz4VDL1hQ_27hJVAee";
     interface Guard {void check()throws Exception;}
     private final Guard guard;
+    private final String appVersion;
     private volatile HttpsURLConnection connection;
     private volatile boolean cancelled;
     private volatile boolean persistingRefresh;
     final CloudAuth auth;
-    CloudClient(Guard guard){this.guard=guard;auth=new CloudAuth((method,path,body,access)->request(method,path,body,access,method.equals("POST")&&path.equals("auth/v1/factors")?524288:65536));}
+    CloudClient(Guard guard){this(guard,"unknown");}
+    CloudClient(Guard guard,String appVersion){this.guard=guard;this.appVersion=appVersion==null||appVersion.isBlank()?"unknown":appVersion;auth=new CloudAuth((method,path,body,access)->request(method,path,body,access,method.equals("POST")&&path.equals("auth/v1/factors")?524288:65536));}
     private void check()throws Exception{if(persistingRefresh)return;if(cancelled)throw new IOException("Cloud operation cancelled.");guard.check();}
     private byte[] request(String method,String path,JSONObject body,String access,int limit)throws Exception{
         check();HttpsURLConnection conn=(HttpsURLConnection)new URL(URL+path).openConnection();connection=conn;
@@ -39,6 +41,34 @@ final class CloudClient implements AutoCloseable {
         byte[] bytes=null;try(InputStream in=conn.getErrorStream();ByteArrayOutputStream out=new ByteArrayOutputStream()){
             if(in==null)return "";byte[] chunk=new byte[1024];int n;try{while((n=in.read(chunk))!=-1){if(out.size()+n>65536)return "";out.write(chunk,0,n);}bytes=out.toByteArray();JSONObject error=StrictJson.object(new String(bytes,StandardCharsets.UTF_8));return error.optString("error_code",error.optString("code",""));}finally{Arrays.fill(chunk,(byte)0);}
         }catch(Exception ignored){return "";}finally{if(bytes!=null)Arrays.fill(bytes,(byte)0);}
+    }
+
+    boolean analyticsConsent(CloudAuth.Session session)throws Exception{
+        byte[] response=request("POST","rest/v1/rpc/lockvyn_analytics_consent_status",new JSONObject(),session.access,1024);
+        try{return new String(response,StandardCharsets.UTF_8).trim().equals("true");}
+        finally{Arrays.fill(response,(byte)0);}
+    }
+    boolean setAnalyticsConsent(CloudAuth.Session session,boolean enabled)throws Exception{
+        byte[] response=request("POST","rest/v1/rpc/lockvyn_analytics_set_consent",
+            new JSONObject().put("p_enabled",enabled),session.access,1024);
+        try{return new String(response,StandardCharsets.UTF_8).trim().equals("true");}
+        finally{Arrays.fill(response,(byte)0);}
+    }
+    void recordAnalyticsEvent(CloudAuth.Session session,String event,String outcome,String bucket)throws Exception{
+        if(!event.equals("app_active")&&!event.equals("sync_result"))throw new Exception("Invalid analytics event.");
+        if(event.equals("sync_result")&&(!("success".equals(outcome)||"failure".equals(outcome))||
+            !("none".equals(bucket)||"lt_1mib".equals(bucket)||"1_10mib".equals(bucket)||"gt_10mib".equals(bucket))))
+            throw new Exception("Invalid analytics event.");
+        JSONObject payload=new JSONObject().put("p_event",event).put("p_platform","android")
+            .put("p_app_version",appVersion);
+        if(outcome!=null)payload.put("p_outcome",outcome);
+        if(bucket!=null)payload.put("p_resource_bucket",bucket);
+        byte[] response=request("POST","rest/v1/rpc/lockvyn_analytics_record_event",payload,session.access,1024);
+        try{if(!new String(response,StandardCharsets.UTF_8).trim().equals("true"))throw new Exception("Analytics event was not accepted.");}
+        finally{Arrays.fill(response,(byte)0);}
+    }
+    private static String resourceBucket(long bytes){
+        return bytes<=0?"none":bytes<=1048576L?"lt_1mib":bytes<=10485760L?"1_10mib":"gt_10mib";
     }
     byte[] supportTickets(JSONObject payload,String access)throws Exception{return request("POST","functions/v1/lockvyn-admin/tickets",payload,access,65536);}
     void resendConfirmation(String email)throws Exception{auth.resendConfirmation(email);}
@@ -66,9 +96,10 @@ final class CloudClient implements AutoCloseable {
             JSONObject latest=store.load(profile.getString("vaultId"));if(latest==null)throw new Exception("Cloud is disconnected on this device.");
             // Keep a token rotated by another foreground action before writing checkpoints.
             profile.put("refreshToken",latest.getString("refreshToken"));
-            for(String field:new String[]{"lastUploadedHash","lastOuterHash","downloadedStamp","mergedStamp","keyEpoch","autoSync","deviceInventoryConsent","deviceInventoryPlatform","deviceInventoryOsVersion","deviceInventoryAppVersion","deviceInventoryDisplayName"})if(latest.has(field))profile.put(field,latest.get(field));
+            for(String field:new String[]{"lastUploadedHash","lastOuterHash","downloadedStamp","mergedStamp","keyEpoch","autoSync","deviceInventoryConsent","deviceInventoryPlatform","deviceInventoryOsVersion","deviceInventoryAppVersion","deviceInventoryDisplayName","analyticsConsent"})if(latest.has(field))profile.put(field,latest.get(field));
             String slot=profile.getString("vaultSlot"),device=profile.getString("deviceSlot");byte[] local=null,key=null,outer=null,response=null;
             List<byte[]> snapshots=new ArrayList<>();int conflicts=0;boolean changed=false;long transferBytes=0;
+            if(profile.optBoolean("analyticsConsent",false)){try{recordAnalyticsEvent(session,"app_active",null,null);}catch(Exception ignored){}}
             try{
                 response=request("POST","rest/v1/rpc/lockvyn_cloud_sync_status",new JSONObject(),session.access,8192);
                 JSONObject syncStatus=StrictJson.object(new String(response,StandardCharsets.UTF_8));
@@ -134,8 +165,11 @@ final class CloudClient implements AutoCloseable {
                 }
                 Instant now=Instant.now();String previous=profile.optString("lastSyncUtc");
                 try{if(previous.isEmpty()||now.toEpochMilli()-Instant.parse(previous).toEpochMilli()>60000)changed=true;}catch(Exception invalid){changed=true;}
-                if(changed){profile.put("lastSyncUtc",now.toString());store.save(profile);}return conflicts;
+                if(changed){profile.put("lastSyncUtc",now.toString());store.save(profile);}
+                if(profile.optBoolean("analyticsConsent",false)){try{recordAnalyticsEvent(session,"sync_result","success",resourceBucket(transferBytes));}catch(Exception ignored){}}
+                return conflicts;
             }catch(Exception syncFailure){
+                if(!cancelled&&profile.optBoolean("analyticsConsent",false)){try{recordAnalyticsEvent(session,"sync_result","failure",resourceBucket(transferBytes));}catch(Exception ignored){}}
                 if(!cancelled&&profile.optBoolean("deviceInventoryConsent",false)){
                     try{
                         recordSyncOutcome(profile,session,transferBytes,"failure",syncErrorCode(syncFailure));

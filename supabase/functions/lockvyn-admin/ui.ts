@@ -101,6 +101,16 @@ footer{font-size:12px;color:#787284;margin-top:20px}
 .announcement-editor input[type=checkbox]{width:auto;min-height:0;padding:0}
 .announcement-list{list-style:none;padding:0;margin:12px 0;display:grid;gap:9px}
 .announcement-list li{border:1px solid #e8e4f1;border-radius:11px;padding:12px;display:grid;gap:6px}
+.analytics-filters{display:flex;gap:12px;align-items:end;flex-wrap:wrap;margin:16px 0}
+.analytics-filters label{flex:1 1 180px;max-width:320px}
+.analytics-chart{list-style:none;padding:0;display:grid;gap:10px}
+.analytics-chart li{display:grid;grid-template-columns:110px 1fr;gap:12px;align-items:center}
+.analytics-bars{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}
+.analytics-series{display:grid;gap:4px;font-size:11px;color:#716b84}
+.analytics-bar{display:block;height:8px;min-width:2px;max-width:100%;border-radius:8px;background:#6a5bd6}
+.analytics-table{min-width:850px}
+.analytics-export{margin-top:10px}
+@media(max-width:640px){.analytics-chart li{grid-template-columns:1fr}.analytics-bars{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .announcement-list li button{text-align:left}
 .announcement-preview{white-space:pre-wrap;overflow-wrap:anywhere;border:1px solid #e8e4f1;background:#fbfaff;border-radius:10px;padding:14px;min-height:110px}
 .announcement-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin-top:12px}
@@ -250,6 +260,30 @@ footer{font-size:12px;color:#787284;margin-top:20px}
     <article class="metric"><small>2FA enabled</small><strong id="mfa-stat">—</strong><small>Verified MFA enrollment</small></article>
     <article class="metric"><small>Active last 30 days</small><strong id="active-stat">—</strong><small>By last sign-in timestamp</small></article>
   </div>
+</section>
+<section aria-labelledby="analytics-heading">
+  <div class="toolbar">
+    <div><div class="eyebrow">Opt-in · aggregate-only · 90-day retention</div>
+      <h2 id="analytics-heading">Privacy-conscious analytics</h2>
+      <p class="note">Only accounts that currently opted in contribute. The report shows aggregate signup day, active app versions, update uptake, sync success/failure, and coarse transfer-size buckets. Groups under five are hidden. No emails, account IDs, device IDs, vault data, IP addresses, or raw errors are returned.</p></div>
+    <button id="refresh-analytics" type="button">Refresh report</button>
+  </div>
+  <p class="note">Analytics consent is off by default in the Windows and Android Sync privacy settings. Opting out deletes that account’s events and consent row. Signup dates appear only for accounts that currently opted in.</p>
+  <div class="analytics-filters" role="group" aria-label="Analytics date filters">
+    <label>From date<input id="analytics-from" type="date"></label>
+    <label>To date<input id="analytics-to" type="date"></label>
+    <button id="apply-analytics-filters" type="button">Apply dates</button>
+    <button id="analytics-export" class="analytics-export" type="button" disabled>Export aggregate CSV</button>
+  </div>
+  <p id="analytics-state" role="status" aria-live="polite">Choose a date range to load privacy-safe aggregates.</p>
+  <h3>Daily activity chart</h3>
+  <ol id="analytics-chart" class="analytics-chart" aria-label="Daily aggregate metric totals"></ol>
+  <h3>Aggregate report</h3>
+  <div class="scroll"><table class="analytics-table">
+    <caption class="muted">Rows represent groups of at least five currently opted-in accounts.</caption>
+    <thead><tr><th>Date</th><th>Metric</th><th>Platform</th><th>App version</th><th>Outcome</th><th>Transfer size</th><th>Accounts</th><th>Events</th></tr></thead>
+    <tbody id="analytics-table-body"></tbody>
+  </table></div>
 </section>
 <section id="directory-section" aria-labelledby="directory-heading">
   <div class="table-head"><div><h2 id="directory-heading" tabindex="-1">Account directory</h2>
@@ -444,6 +478,91 @@ async function api(action,params){
   if(!res.ok)throw Error(data.error||"Request failed");
   return data;
 }
+const ANALYTICS_METRICS=["signups","active_app_versions","update_uptake","sync_reliability","resource_usage"];
+const ANALYTICS_LABELS={signups:"Signups",active_app_versions:"Active versions",update_uptake:"Update uptake",
+  sync_reliability:"Sync reliability",resource_usage:"Resource use"};
+let analyticsRows=[];
+function analyticsToday(){return new Date().toISOString().slice(0,10);}
+function analyticsDay(value){if(!/^\d{4}-\d{2}-\d{2}$/.test(value||""))return null;
+  const n=Date.parse(value+"T00:00:00Z");return Number.isFinite(n)&&new Date(n).toISOString().slice(0,10)===value?n:null;}
+function analyticsCsv(value){return "\""+String(value??"").replaceAll("\"","\"\"")+"\"";}
+function clearAnalytics(){
+  analyticsRows=[];get("analytics-chart").replaceChildren();get("analytics-table-body").replaceChildren();
+  get("analytics-export").disabled=true;
+}
+function renderAnalytics(data){
+  analyticsRows=data.rows;
+  const body=get("analytics-table-body");body.replaceChildren();
+  for(const row of data.rows){
+    const tr=document.createElement("tr");
+    for(const value of [row.day,ANALYTICS_LABELS[row.metric],row.platform,row.appVersion,
+      row.outcome||"—",row.resourceBucket||"—",row.users,row.events]){
+      const td=document.createElement("td");td.textContent=String(value);tr.append(td);
+    }
+    body.append(tr);
+  }
+  const chart=get("analytics-chart");chart.replaceChildren();
+  const byDay=new Map();
+  for(const row of data.rows){
+    if(!byDay.has(row.day))byDay.set(row.day,Object.fromEntries(ANALYTICS_METRICS.map(metric=>[metric,0])));
+    byDay.get(row.day)[row.metric]+=row.events;
+  }
+  const maxima=Object.fromEntries(ANALYTICS_METRICS.map(metric=>[metric,
+    Math.max(1,...Array.from(byDay.values(),totals=>totals[metric]))]));
+  for(const [day,totals] of [...byDay.entries()].sort((a,b)=>a[0].localeCompare(b[0]))){
+    const li=document.createElement("li"),dateLabel=document.createElement("strong"),bars=document.createElement("div");
+    dateLabel.textContent=day;bars.className="analytics-bars";
+    for(const metric of ANALYTICS_METRICS){
+      const item=document.createElement("span"),label=document.createElement("span"),bar=document.createElement("span");
+      item.className="analytics-series";label.textContent=ANALYTICS_LABELS[metric]+": "+totals[metric];
+      bar.className="analytics-bar";bar.setAttribute("aria-hidden","true");
+      bar.style.width=(totals[metric]===0?0:Math.max(4,Math.round(totals[metric]/maxima[metric]*100)))+"%";
+      item.append(label,bar);bars.append(item);
+    }
+    li.append(dateLabel,bars);chart.append(li);
+  }
+  if(!data.rows.length){
+    const empty=document.createElement("li");empty.textContent="No cohorts met the minimum of five opted-in accounts.";chart.append(empty);
+  }
+  get("analytics-export").disabled=!data.rows.length;
+}
+async function loadPrivacyAnalytics(){
+  if(!accessToken)return;
+  const fromDate=get("analytics-from").value,toDate=get("analytics-to").value;
+  const from=analyticsDay(fromDate),to=analyticsDay(toDate),today=analyticsDay(analyticsToday());
+  if(from===null||to===null||today===null||from>to||to>today||from<today-89*86400000||to-from>89*86400000){
+    get("analytics-state").textContent="Choose dates within the last 90 days.";clearAnalytics();return;
+  }
+  get("analytics-state").textContent="Loading privacy-safe aggregates…";
+  try{
+    const data=await api("privacyAnalytics",{fromDate,toDate});
+    if(data.minimumCohort!==5||!Array.isArray(data.rows))throw Error("Invalid aggregate analytics response");
+    renderAnalytics(data);
+    get("analytics-state").textContent=data.rows.length
+      ?"Loaded "+data.rows.length+" aggregate rows. Groups under five accounts are hidden."
+      :"No reportable groups met the five-account minimum for these dates.";
+  }catch(error){
+    clearAnalytics();get("analytics-state").textContent="Could not load analytics. Retry when connected.";
+    alertText(error.message,true);
+  }
+}
+get("refresh-analytics").addEventListener("click",loadPrivacyAnalytics);
+get("apply-analytics-filters").addEventListener("click",loadPrivacyAnalytics);
+get("analytics-export").addEventListener("click",()=>{
+  if(!analyticsRows.length)return;
+  const columns=["day","metric","platform","appVersion","outcome","resourceBucket","users","events"];
+  const csv=[columns.join(","),...analyticsRows.map(row=>columns.map(key=>analyticsCsv(row[key])).join(","))].join("\r\n");
+  const url=URL.createObjectURL(new Blob(["\ufeff",csv],{type:"text/csv;charset=utf-8"}));
+  const link=document.createElement("a");link.href=url;
+  link.download="lockvyn-analytics-"+get("analytics-from").value+"-"+get("analytics-to").value+".csv";
+  document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),0);
+});
+const analyticsEnd=analyticsToday(),analyticsStart=new Date(Date.now()-29*86400000).toISOString().slice(0,10);
+get("analytics-from").value=analyticsStart;get("analytics-to").value=analyticsEnd;
+get("analytics-from").max=analyticsEnd;get("analytics-to").max=analyticsEnd;
+get("analytics-from").min=new Date(Date.now()-89*86400000).toISOString().slice(0,10);
+get("analytics-to").min=get("analytics-from").min;
+
 function ticketApi(action,params={}){
   const resPromise=fetch(base+"/functions/v1/lockvyn-admin/tickets",{method:"POST",cache:"no-store",
     headers:{"Authorization":"Bearer "+accessToken,"Content-Type":"application/json"},
@@ -583,7 +702,7 @@ get("ticket-send-reply").addEventListener("click",()=>{
 function jwtAal(jwt){try{const bits=jwt.split(".")[1].replace(/-/g,"+").replace(/_/g,"/");return JSON.parse(atob(bits)).aal||"";}catch{return "";}}
 async function openDashboard(){
   visible("login",false);visible("mfa",false);visible("dashboard",true);visible("logout",true);
-  await loadSupportTickets();await loadPage(1);await loadHistory();await loadSecurityEvents();await loadReleaseManager();await loadAnnouncementManager();
+  await loadSupportTickets();await loadPage(1);await loadHistory();await loadSecurityEvents();await loadReleaseManager();await loadAnnouncementManager();await loadPrivacyAnalytics();
 }
 async function setupMfa(){
   const user=await authFetch("user",null,"GET",accessToken);
@@ -1261,7 +1380,7 @@ get("logout").addEventListener("click",()=>{
   if(deviceRevocationBusy||cloudSyncBusy){alertText("A cloud control is still being processed. Wait for its result.",true);return;}
   ++loadSequence;clearTimeout(searchDelay);
   accessToken="";accounts=[];matching=0;closeSupport();
-  get("support-history").replaceChildren();
+  get("support-history").replaceChildren();clearAnalytics();
   visible("dashboard",false);visible("login",true);
   visible("logout",false);alertText("Signed out.");get("email").focus();
 });

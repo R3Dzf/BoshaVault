@@ -111,6 +111,57 @@ internal static class CloudSyncDialog
             var auto = new CheckBox { Content = "Sync automatically on this device", IsChecked = profile.AutoSync, Margin = new Thickness(0, 8, 0, 8) };
             auto.Click += (_, _) => { profile.AutoSync = auto.IsChecked == true; store.Save(profile); Status(profile.AutoSync ? "Automatic sync is on. Offline changes retry when connected." : "Automatic sync is paused on this device."); };
             d.Body.Children.Add(auto);
+            d.Label("Optional analytics stays off until you choose it. If enabled, this account contributes daily app version, detected version changes, sync success/failure, coarse transfer-size buckets, and its signup day to aggregate reports. Reports hide groups below five. No vault data, email, device ID, IP address or raw error is sent. Turning it off deletes this account's analytics events.");
+            var analytics = new CheckBox {
+                Content = "Share privacy-safe app analytics for this cloud account",
+                IsChecked = profile.AnalyticsConsent,
+                Margin = new Thickness(0, 4, 0, 8)
+            };
+            d.Body.Children.Add(analytics);
+            Action("Refresh analytics choice", async () =>
+            {
+                var signedIn = await Refresh();
+                var transport = new SupabaseSnapshotTransport(http, new Uri(CloudProject.Url),
+                    CloudProject.PublishableKey, _ => Task.FromResult(signedIn.AccessToken));
+                bool enabled = await transport.GetAnalyticsConsentAsync(cancellation.Token);
+                EnsureCurrent();
+                profile.AnalyticsConsent = enabled;
+                store.Save(profile);
+                analytics.IsChecked = enabled;
+                Status(enabled ? "Privacy analytics is enabled for this cloud account." : "Privacy analytics is off.");
+            }, inBody: true);
+            Action("Apply analytics choice", async () =>
+            {
+                bool enabled = analytics.IsChecked == true;
+                string message = enabled
+                    ? "Opt in to daily app version, version-change, sync outcome, coarse transfer-size and signup-day aggregates? Admin reports hide groups below five. No vault content, email, device ID, IP address or raw errors are sent."
+                    : "Opt out and delete this cloud account's stored analytics events now? Cloud sync and your offline vault remain available.";
+                if (MessageBox.Show(d, message, "Privacy analytics", MessageBoxButton.OKCancel) != MessageBoxResult.OK)
+                { analytics.IsChecked = profile.AnalyticsConsent; return; }
+                try
+                {
+                    var signedIn = await Refresh();
+                    var transport = new SupabaseSnapshotTransport(http, new Uri(CloudProject.Url),
+                        CloudProject.PublishableKey, _ => Task.FromResult(signedIn.AccessToken));
+                    await transport.SetAnalyticsConsentAsync(enabled, cancellation.Token);
+                    EnsureCurrent();
+                    profile.AnalyticsConsent = enabled;
+                    store.Save(profile);
+                    if (enabled)
+                    {
+                        string version = typeof(CloudProject).Assembly.GetName().Version?.ToString() ?? "unknown";
+                        try { await transport.RecordAnalyticsEventAsync("app_active", "windows", version, null, null, cancellation.Token); }
+                        catch { /* Consent succeeded; optional reporting never blocks sync or vault access. */ }
+                    }
+                    Status(enabled ? "Privacy analytics enabled. You can opt out here at any time."
+                        : "Opted out. Stored analytics events were deleted; cloud sync and the offline vault remain available.");
+                }
+                catch
+                {
+                    analytics.IsChecked = profile.AnalyticsConsent;
+                    throw;
+                }
+            }, inBody: true);
             d.Label("Optional session list: when enabled, your cloud account shows this signed-in app session, self-reported Windows/software versions, and the last successful sync. It does not verify physical hardware. Remove it any time; cloud sync and offline vault data remain available.");
             var inventory = new CheckBox {
                 Content = "Show this Windows app session in my cloud session list",

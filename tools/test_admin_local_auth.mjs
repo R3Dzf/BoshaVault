@@ -202,6 +202,21 @@ assert.equal(gotStranger.isSelf,false,"Nonadmin not labelled self");
 
 // Phase 08: real local GoTrue AAL1 support flow and AAL2 agent workflow.
 const supportUser=await createUser("support-requester");
+const analyticsToday=new Date().toISOString().slice(0,10);
+const analyticsFrom=new Date(Date.now()-29*86400000).toISOString().slice(0,10);
+const analyticsReport=await admin(ownerAAL2.aal2,{action:"privacyAnalytics",fromDate:analyticsFrom,toDate:analyticsToday});
+assert.equal(analyticsReport.status,200,"AAL2 admin can read privacy aggregates: "+JSON.stringify(analyticsReport.data));
+assert(Array.isArray(analyticsReport.data.rows));
+assert.equal(analyticsReport.data.minimumCohort,5);
+assert.equal(JSON.stringify(analyticsReport.data).includes(owner.id),false,"Aggregate must omit account UUIDs");
+assert.equal(JSON.stringify(analyticsReport.data).includes(owner.email),false,"Aggregate must omit emails");
+assert.equal((await admin(owner.aal1,{action:"privacyAnalytics",fromDate:analyticsFrom,toDate:analyticsToday})).status,403,
+  "AAL1 cannot read analytics");
+assert.equal((await admin(strangerAAL2.aal2,{action:"privacyAnalytics",fromDate:analyticsFrom,toDate:analyticsToday})).status,403,
+  "AAL2 nonadmin cannot read analytics");
+assert.equal((await admin(ownerAAL2.aal2,{action:"privacyAnalytics",fromDate:"2020-01-01",toDate:analyticsToday})).status,400,
+  "Analytics dates are bounded to 90 days");
+
 const supportClaims=JSON.parse(Buffer.from(supportUser.aal1.split(".")[1],"base64url").toString("utf8"));
 const activeTicketSession=await dataApi("rpc/lockvyn_auth_session_is_active","POST",service,{
   p_user_id:supportUser.id,p_session_id:supportClaims.session_id,
@@ -212,6 +227,27 @@ const serviceTicketList=await dataApi("rpc/lockvyn_support_ticket_user_manage","
   p_action:"list",p_actor:supportUser.id,p_actor_session:supportClaims.session_id,p_ticket_id:null,p_payload:{},
 },service);
 assert.equal(serviceTicketList.status,200,"Service role can call the user ticket RPC: "+JSON.stringify(serviceTicketList.data));
+const telemetryOff=await dataApi("rpc/lockvyn_analytics_consent_status","POST",supportUser.aal1,{});
+assert.equal(telemetryOff.status,200);
+assert.equal(telemetryOff.data,false,"Consent defaults off");
+const deniedTelemetry=await dataApi("rpc/lockvyn_analytics_record_event","POST",supportUser.aal1,{
+  p_event:"app_active",p_platform:"windows",p_app_version:"3.1.0",p_outcome:null,p_resource_bucket:null,
+});
+assert.notEqual(deniedTelemetry.status,200,"Events are rejected before explicit consent");
+const telemetryOn=await dataApi("rpc/lockvyn_analytics_set_consent","POST",supportUser.aal1,{p_enabled:true});
+assert.equal(telemetryOn.status,200);
+assert.equal(telemetryOn.data,true,"User can explicitly opt in");
+const telemetryEvent=await dataApi("rpc/lockvyn_analytics_record_event","POST",supportUser.aal1,{
+  p_event:"app_active",p_platform:"windows",p_app_version:"3.1.0",p_outcome:null,p_resource_bucket:null,
+});
+assert.equal(telemetryEvent.status,200,"Consented user can report an allowlisted app version");
+const telemetryOffAgain=await dataApi("rpc/lockvyn_analytics_set_consent","POST",supportUser.aal1,{p_enabled:false});
+assert.equal(telemetryOffAgain.status,200);
+const telemetryDeleted=await dataApi("rpc/lockvyn_analytics_consent_status","POST",supportUser.aal1,{});
+assert.equal(telemetryDeleted.data,false,"Opt-out deletes the active consent row and events");
+console.log("PASS Phase 09 local consent defaults, denial, opt-in, event, and opt-out");
+
+
 const ticketPreflight=await fetch(ticketsEndpoint,{method:"OPTIONS",headers:{
   Origin:root,"Access-Control-Request-Method":"POST",
   "Access-Control-Request-Headers":"authorization,content-type",
