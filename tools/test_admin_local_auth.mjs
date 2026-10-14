@@ -162,7 +162,7 @@ const initialRoleStatus=await admin(ownerAAL2.aal2,{action:"roleStatus"});
 assert.equal(initialRoleStatus.status,200,"Allowlisted administrator can inspect initial role state");
 assert.equal(initialRoleStatus.data.initialized,false,"First owner role must not be assigned automatically");
 assert.equal(initialRoleStatus.data.role,null);
-const initialized=await admin(await verifyExistingTotp(owner,owner.aal1),{
+const initialized=await admin(await verifyExistingTotp(ownerAAL2,owner.aal1),{
   action:"roleBootstrap",targetId:owner.id,roleName:"owner",confirmId:owner.id,
 });
 assert.equal(initialized.status,200,"Fresh TOTP and typed own UUID initialize the first owner: "+JSON.stringify(initialized.data));
@@ -551,32 +551,32 @@ assert.equal(operatorStatus.data.initialized,true);
 assert.equal(operatorStatus.data.role,null,"New allowlisted operator must have no implicit scope");
 assert.equal((await admin(operatorAAL2.aal2,{action:"list",page:1})).status,403,
   "Unassigned administrator is denied by default");
-let ownerStepUp=await verifyExistingTotp(owner,owner.aal1);
+let ownerStepUp=await verifyExistingTotp(ownerAAL2,owner.aal1);
 const wrongRoleConfirmation=await admin(ownerStepUp,{
   action:"roleAssign",targetId:operator.id,roleName:"security",confirmId:owner.id,
 });
 assert.equal(wrongRoleConfirmation.status,403,"Role changes require typed target confirmation");
-ownerStepUp=await verifyExistingTotp(owner,owner.aal1);
+ownerStepUp=await verifyExistingTotp(ownerAAL2,owner.aal1);
 const securityAssignment=await admin(ownerStepUp,{
   action:"roleAssign",targetId:operator.id,roleName:"security",confirmId:operator.id,
 });
 assert.equal(securityAssignment.status,200,"Owner can assign a confirmed allowlisted operator");
-let operatorStepUp=await verifyExistingTotp(operator,operator.aal1);
+let operatorStepUp=await verifyExistingTotp(operatorAAL2,operator.aal1);
 assert.equal((await admin(operatorStepUp,{action:"securityEvents",limit:50})).status,200,
   "Security role can read security activity");
 assert.equal((await admin(operatorStepUp,{action:"supportHistory"})).status,403,
   "Security role cannot read support cases");
-ownerStepUp=await verifyExistingTotp(owner,owner.aal1);
+ownerStepUp=await verifyExistingTotp(ownerAAL2,owner.aal1);
 const supportAssignment=await admin(ownerStepUp,{
   action:"roleAssign",targetId:operator.id,roleName:"support",confirmId:operator.id,
 });
 assert.equal(supportAssignment.status,200,"Owner can change an operator's scoped role");
-operatorStepUp=await verifyExistingTotp(operator,operator.aal1);
+operatorStepUp=await verifyExistingTotp(operatorAAL2,operator.aal1);
 assert.equal((await ticketRequest(operatorStepUp,{action:"ticketAdminList"})).status,200,
   "Support role can use the administrator ticket queue");
 assert.equal((await admin(operatorStepUp,{action:"deviceList",id:owner.id})).status,403,
   "Support role cannot access device inventory");
-ownerStepUp=await verifyExistingTotp(owner,owner.aal1);
+ownerStepUp=await verifyExistingTotp(ownerAAL2,owner.aal1);
 const operatorRevoke=await admin(ownerStepUp,{
   action:"roleRevoke",targetId:operator.id,confirmId:operator.id,
 });
@@ -584,7 +584,7 @@ assert.equal(operatorRevoke.status,200,"Owner can revoke a scoped role");
 assert.equal((await admin(operatorStepUp,{action:"roleStatus"})).data.role,null);
 assert.equal((await admin(operatorStepUp,{action:"list",page:1})).status,403,
   "Revoked operator access is denied immediately");
-ownerStepUp=await verifyExistingTotp(owner,owner.aal1);
+ownerStepUp=await verifyExistingTotp(ownerAAL2,owner.aal1);
 const lastOwner=await admin(ownerStepUp,{action:"roleRevoke",targetId:owner.id,confirmId:owner.id});
 assert.equal(lastOwner.status,409,"The last owner cannot revoke their own role");
 const roster=await admin(ownerStepUp,{action:"roleList"});
