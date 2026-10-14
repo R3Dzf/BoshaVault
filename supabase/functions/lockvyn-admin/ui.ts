@@ -485,7 +485,7 @@ let analyticsRows=[];
 function analyticsToday(){return new Date().toISOString().slice(0,10);}
 function analyticsDay(value){if(!/^\d{4}-\d{2}-\d{2}$/.test(value||""))return null;
   const n=Date.parse(value+"T00:00:00Z");return Number.isFinite(n)&&new Date(n).toISOString().slice(0,10)===value?n:null;}
-function analyticsCsv(value){return "\""+String(value??"").replaceAll("\"","\"\"")+"\"";}
+function analyticsCsv(value){return '"'+String(value??'').replaceAll('"','""')+'"';}
 function clearAnalytics(){
   analyticsRows=[];get("analytics-chart").replaceChildren();get("analytics-table-body").replaceChildren();
   get("analytics-export").disabled=true;
