@@ -206,9 +206,12 @@ const ticketPreflight=await fetch(ticketsEndpoint,{method:"OPTIONS",headers:{
   "Access-Control-Request-Headers":"authorization,content-type",
 }});
 assert([200,204].includes(ticketPreflight.status),"Dashboard ticket API preflight is allowed");
-assert.equal(ticketPreflight.headers.get("access-control-allow-origin"),root);
+assert(["*",root].includes(ticketPreflight.headers.get("access-control-allow-origin")),
+  "Local Supabase may normalize preflight origin; browser API still requires allowlisted POST origin.");
 assert.match(ticketPreflight.headers.get("access-control-allow-methods")||"",/POST/);
 assert.match(ticketPreflight.headers.get("access-control-allow-headers")||"",/authorization.*content-type/i);
+const foreignOriginTicket=await ticketRequest(stranger.aal1,{action:"ticketList"},"https://attacker.invalid");
+assert.equal(foreignOriginTicket.status,403,"Actual ticket API requests reject untrusted browser origins");
 const createdSupportTicket=await ticketRequest(stranger.aal1,{action:"ticketCreate",ticket:{
   subject:"Synthetic local sync issue",body:"Local test report with no account or vault data.",
   diagnosticConsent:true,diagnostics:{platform:"windows",appVersion:"3.1.0",osVersion:"Windows 11",errorCode:"SYNTHETIC_503"},
