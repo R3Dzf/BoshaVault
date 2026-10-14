@@ -204,7 +204,9 @@ begin
   v:=public.lockvyn_support_ticket_admin_manage('get',
     'a8000000-0000-4000-8000-000000000081','a9000000-0000-4000-8000-000000000081','aal2',false,
     v_ticket,'{}'::jsonb);
-  if jsonb_array_length(v->'messages')<>2 or v->'messages'->1->>'senderRole'<>'agent'
+  if jsonb_array_length(v->'messages')<>2 or not exists(
+    select 1 from jsonb_array_elements(v->'messages') as m
+    where m->>'senderRole'='agent' and m->>'body'='We are reviewing this request.')
   then raise exception 'Agent response was not added to the thread'; end if;
   if (v->'ticket') ? 'requesterId' or (v->'ticket') ? 'requester_id'
   then raise exception 'Admin response should not expose account identifiers'; end if;
