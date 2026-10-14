@@ -1190,8 +1190,8 @@ async function loadAnnouncementManager(){
 }
 function previewAnnouncement(){
   const p=announcementPayload();
-  get("announcement-preview").textContent="English\n"+(p.titleEn||"Untitled")+"\n"+(p.bodyEn||"Message preview")+
-    "\n\nالعربية\n"+(p.titleAr||"بدون عنوان")+"\n"+(p.bodyAr||"معاينة الرسالة");
+  get("announcement-preview").textContent="English\\n"+(p.titleEn||"Untitled")+"\\n"+(p.bodyEn||"Message preview")+
+    "\\n\\nالعربية\\n"+(p.titleAr||"بدون عنوان")+"\\n"+(p.bodyAr||"معاينة الرسالة");
 }
 get("refresh-announcements").addEventListener("click",()=>{if(accessToken)loadAnnouncementManager()});
 get("announcement-new").addEventListener("click",clearAnnouncementForm);
