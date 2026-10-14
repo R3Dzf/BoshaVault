@@ -91,10 +91,13 @@ begin
  perform set_config('request.jwt.claim.role','authenticated',true);
  perform set_config('request.jwt.claims',jsonb_build_object('role','authenticated','sub',u::text,'session_id',s::text,'aal','aal1')::text,true);
  if public.lockvyn_analytics_set_consent(false) is distinct from false
-  or public.lockvyn_analytics_consent_status() is distinct from false
-  or exists(select 1 from lockvyn_private.analytics_consents where user_id=u)
-  or exists(select 1 from lockvyn_private.analytics_events where user_id=u)
- then raise exception 'Opt-out must delete consent and events'; end if;
+ then raise exception 'Opt-out RPC did not return false'; end if;
+ if public.lockvyn_analytics_consent_status() is distinct from false
+ then raise exception 'Consent status remained enabled after opt-out'; end if;
+ if exists(select 1 from lockvyn_private.analytics_consents where user_id=u)
+ then raise exception 'Consent row remained after opt-out'; end if;
+ if exists(select 1 from lockvyn_private.analytics_events where user_id=u)
+ then raise exception 'Analytics events remained after opt-out'; end if;
  perform set_config('request.jwt.claim.role','service_role',true);
  perform set_config('request.jwt.claims','{"role":"service_role"}',true);
  report:=public.lockvyn_admin_privacy_analytics('b7000000-0000-4000-8000-000000000001',
