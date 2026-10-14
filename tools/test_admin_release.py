@@ -112,3 +112,18 @@ assert "below-minimum clients get the required update" in release_test
 assert "synthetic" in release_fixture.lower() and "rollback" in release_fixture
 assert "Release CI checks must pass before a candidate can be selected" in admin
 assert "manifest.signerSha256!==latestManifest.signerSha256" in admin
+
+roles=(root/"supabase/functions/lockvyn-admin/roles.mjs").read_text()
+role_migration=(root/"supabase/migrations/20261014040000_phase10_admin_roles.sql").read_text()
+assert 'adminRoleAllows' in admin
+assert 'lockvyn_admin_manage_roles' in admin
+assert 'data-roles="owner support"' in ui
+assert "lockvyn_admin_role_audit_immutable" in role_migration
+assert "reject_admin_role_audit_mutation" in role_migration
+assert "force row level security" in role_migration.lower()
+assert "initialized" in role_migration and "p_fresh_totp" in role_migration
+assert "support:new Set" in roles and "security:new Set" in roles and "release:new Set" in roles
+
+performance=(root/"tools/test_admin_performance.mjs").read_text()
+assert "htmlBudget" in performance and "scriptBudget" in performance
+assert "role-specific loading" in performance

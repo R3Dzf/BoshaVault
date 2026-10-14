@@ -14,7 +14,7 @@ Open: `https://lockvyn-admin-ui.r3dzf-studio.workers.dev/` (Cloudflare HTML host
 - Edge Function allows unauthenticated GET of the login page, but **all admin data/actions** require an independently verified Supabase JWT + AAL2 + membership check. No user-provided headers or user metadata can grant admin authority.
 
 ## First-time setup
-1. Apply `supabase/migrations/20261013123000_admin_console.sql` to the Lockvyn Supabase project.
+1. Review the complete existing `lockvyn_admins` allowlist and confirm the intended first owner before applying migrations. Apply all migrations through `supabase/migrations/20261014040000_phase10_admin_roles.sql` in timestamp order.
 2. Have the owner sign up or log in with a **verified** Lockvyn cloud account and enable verified TOTP 2FA using the Lockvyn app.
 3. Confirm the account ID/email through the Supabase Auth Users console. **Only after confirming the correct identity**, run the allowlist statement on the dashboard project:
    ```sql
@@ -23,13 +23,15 @@ Open: `https://lockvyn-admin-ui.r3dzf-studio.workers.dev/` (Cloudflare HTML host
    where email = 'OWNER_VERIFIED_EMAIL' and email_confirmed_at is not null
    on conflict (user_id) do nothing;
    ```
-4. Deploy `supabase/functions/lockvyn-admin` with `verify_jwt=false`. The login page is public, but each POST request verifies the signed user token, AAL2, and the allowlist independently. Configure the function through the Supabase project backend only.
-5. In Supabase Auth → URL Configuration → Redirect URLs, add exactly:
+4. Deploy `supabase/functions/lockvyn-admin` with `verify_jwt=false`. The login page is public, but each POST request verifies the signed user token, AAL2, allowlist membership and assigned role independently. Configure the function through the Supabase project backend only.
+5. The first allowlisted administrator must sign in, complete fresh TOTP verification in the dashboard, review the displayed account UUID, and type it to claim the initial owner role. This one-time claim succeeds only while the role table is empty; it does not automatically promote legacy admins. Assign the minimum role to each remaining confirmed allowlisted administrator.
+6. Test each role's allowed and denied actions using synthetic accounts before rollout.
+7. In Supabase Auth → URL Configuration → Redirect URLs, add exactly:
    `https://lockvyn-admin-ui.r3dzf-studio.workers.dev/recover`
    Verify the recovery email template uses the canonical `{{ .ConfirmationURL }}` reset link. Only your Supabase email provider should send recovery emails.
-6. Test on a **non-production account**: signing in without permission must fail, signing in without AAL2 must fail, recovery should send to the **account owner**, and a second request within one hour must be refused.
+8. Test on a **non-production account**: signing in without permission must fail, signing in without AAL2 must fail, recovery should send to the **account owner**, and a second request within one hour must be refused.
 
-The allowlist is empty by default. Do **not** use a public email comparison, a hardcoded admin password, or a client-side admin flag.
+The allowlist is empty by default. Existing allowlisted administrators receive no role automatically after the Phase 10 migration. Do **not** use a public email comparison, a hardcoded admin password, or a client-side admin flag.
 
 ## Important limitation
 The vault master passphrase is not the cloud account password. Admins cannot reset or reveal it. The only honest recovery options are an unlocked trusted device or a user-held encrypted backup and its decryption credentials. Supabase service operators can see account metadata and ciphertext, not the plaintext vault.
@@ -54,3 +56,7 @@ Supabase Edge Functions serve HTML as text on their default project domain. The 
 
 ## Privacy-conscious analytics
 Phase 09 adds account-level analytics with explicit opt-in, off by default on Windows and Android. While opted in, the service records daily app version, inferred update transitions, sync success/failure, coarse transfer-size buckets, and signup day. Reports never return account identifiers and suppress groups under five. They exclude vault content, email, device identifiers, IP addresses, and raw errors. Event rows expire after 90 days; administrator report reads are audited for 180 days and rate limited. Opting out deletes that account's consent and analytics events. The dashboard restricts report access to the verified AAL2 admin allowlist and provides date filters and aggregate-only CSV export. Client UI explains the collection and offers a server-backed refresh and opt-out control. No hosted migration or production deployment has been performed; see [Phase 09 record](ADMIN-PHASE-09.md).
+
+
+## Scoped roles and audit
+Phase 10 adds owner, support, security and release roles. The API denies unassigned allowlisted administrators. Role assignment and revocation are owner-only, require fresh TOTP and a typed target UUID, and are recorded in an append-only role audit table. See [Phase 10 operations and rollback notes](ADMIN-PHASE-10.md).

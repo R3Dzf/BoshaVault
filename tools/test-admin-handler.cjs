@@ -9,6 +9,7 @@ const vm = require("node:vm");
 (async () => {
   const file = path.join(__dirname,"../supabase/functions/lockvyn-admin/index.ts");
   const authFile = await import("../supabase/functions/lockvyn-admin/access.mjs");
+  const rolePolicy = await import("../supabase/functions/lockvyn-admin/roles.mjs");
   const supportPolicy=await import("../supabase/functions/lockvyn-admin/support.mjs");
   const releasePolicy=await import("../supabase/functions/lockvyn-admin/release.mjs");
   const announcementPolicy=await import("../supabase/functions/lockvyn-admin/announcements.mjs");
@@ -31,6 +32,7 @@ const vm = require("node:vm");
   const endpoint = "https://example.supabase.co/functions/v1/lockvyn-admin";
   const origin = "https://lockvyn-admin-ui.r3dzf-studio.workers.dev";
   const resetDestination = origin + "/recover";
+  let ownerRole="owner";
   const owner = {id:ownerId,email:"owner@example.invalid",email_confirmed_at:"2026-01-01T00:00:00Z"};
   const nonadmin = {id:otherId,email:"user@example.invalid",email_confirmed_at:"2026-01-01T00:00:00Z"};
   const users = new Map([
@@ -111,12 +113,14 @@ const vm = require("node:vm");
       }
     },
     from:table=>{
-      assert.equal(table,"lockvyn_admins");
+      assert(["lockvyn_admins","lockvyn_admin_roles"].includes(table));
       return {
         select:()=>({
           eq:(_,id)=>({
             maybeSingle:async()=>({
-              data:id===ownerId?{user_id:ownerId}:null,
+              data:table==="lockvyn_admins"
+                ?(id===ownerId?{user_id:ownerId}:null)
+                :(id===ownerId?{role:ownerRole}:null),
               error:null,
             })
           })
@@ -272,6 +276,7 @@ const vm = require("node:vm");
     securityHtml:()=>"<html><body>user-owned logout?scope=global</body></html>",
     verifiedUserGate:authFile.verifiedUserGate,
     adminMembershipGate:authFile.adminMembershipGate,
+    adminRoleAllows:rolePolicy.adminRoleAllows,
     validSupportRequest:supportPolicy.validSupportRequest,
     validCaseConfirmation:supportPolicy.validCaseConfirmation,
     freshVerifiedTotp:supportPolicy.freshVerifiedTotp,
@@ -353,6 +358,13 @@ const vm = require("node:vm");
   assert.equal(good.data.matching,3);
   assert.equal(good.data.stats.mfaEnabled,1);
   assert.equal(calls.list,1);
+  ownerRole=null;
+  const unassigned=await call({jwt:ownerAal2,action:"list"});
+  assert.equal(unassigned.status,403,"real handler denies an allowlisted admin with no role");
+  ownerRole="support";
+  const wrongScope=await call({jwt:ownerAal2,action:"releaseManager"});
+  assert.equal(wrongScope.status,403,"real handler denies a release action to support");
+  ownerRole="owner";
   const feed=await call({jwt:ownerAal2,action:"securityEvents"});
   assert.equal(feed.status,200,"AAL2 administrator can read the security feed");
   assert.equal(feed.data.events.length,0);

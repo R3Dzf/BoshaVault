@@ -116,10 +116,11 @@ footer{font-size:12px;color:#787284;margin-top:20px}
 .announcement-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin-top:12px}
 @media(max-width:760px){.announcement-grid{grid-template-columns:1fr}}
 @media(max-width:520px){.announcement-editor{grid-template-columns:1fr}.announcement-editor .wide{grid-column:auto}}
+ .role-hidden{display:none!important}.role-actions{display:flex;gap:10px;flex-wrap:wrap}.role-actions button{min-width:140px}
 </style>
 </head>
 <body>
-<a class="skip-link" href="#directory-section">Skip to account directory</a>
+<a id="skip-link" class="skip-link" href="#directory-section">Skip to account directory</a>
 <main>
 <header><div class="brand"><span class="logo">◇</span>Lockvyn <span class="muted">/ Admin</span></div>
 <button id="logout" hidden>Sign out</button></header>
@@ -137,7 +138,35 @@ footer{font-size:12px;color:#787284;margin-top:20px}
 <button class="primary" type="submit">Verify and open dashboard</button></form>
 </section>
 <div id="dashboard" hidden>
-<section class="support-ticket-manager" aria-labelledby="ticket-heading">
+<section id="role-status" aria-labelledby="role-status-heading">
+  <h2 id="role-status-heading">Administrator access</h2>
+  <p id="role-status-text" role="status" aria-live="polite">Checking your assigned role…</p>
+  <p id="role-user-id" class="note"></p>
+  <button id="refresh-role-status" type="button">Refresh role status</button>
+</section>
+<section id="role-bootstrap" hidden aria-labelledby="role-bootstrap-heading">
+  <h2 id="role-bootstrap-heading">Claim the initial owner role</h2>
+  <p>No administrator role exists yet. The first allowlisted administrator may become the initial owner after a fresh authenticator check. Verify the account UUID below and type it to confirm. This is a one-time initialization.</p>
+  <p><strong>Your account UUID:</strong> <code id="role-bootstrap-user"></code></p>
+  <label for="role-bootstrap-confirm">Type your account UUID<input id="role-bootstrap-confirm" autocomplete="off" maxlength="36"></label>
+  <label for="role-bootstrap-code">Fresh authenticator code<input id="role-bootstrap-code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6"></label>
+  <button id="role-bootstrap-button" class="primary" type="button">Initialize owner role</button>
+</section>
+<section id="role-manager" hidden aria-labelledby="role-manager-heading">
+  <h2 id="role-manager-heading">Administrator roles</h2>
+  <p>Only confirmed, allowlisted administrators can receive a scoped role. Every change needs a fresh authenticator code and the target account UUID typed twice. Role history is append-only.</p>
+  <form id="role-form">
+    <label for="role-target-id">Target administrator UUID<input id="role-target-id" autocomplete="off" maxlength="36" required></label>
+    <label for="role-name">Role<select id="role-name"><option value="support">Support</option><option value="security">Security</option><option value="release">Release</option><option value="owner">Owner</option></select></label>
+    <label for="role-confirm-id">Type the same UUID to confirm<input id="role-confirm-id" autocomplete="off" maxlength="36" required></label>
+    <label for="role-code">Fresh authenticator code<input id="role-code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required></label>
+    <div class="role-actions"><button class="primary" type="submit">Assign role</button><button id="role-revoke" type="button">Revoke role</button></div>
+  </form>
+  <p id="role-manager-state" role="status" aria-live="polite">Role roster has not been loaded.</p>
+  <ul id="role-list" class="announcement-list" aria-label="Current administrator role assignments"></ul>
+  <h3>Role change history</h3><ol id="role-audit" class="announcement-list" aria-label="Administrator role change history"></ol>
+</section>
+<section class="support-ticket-manager" data-roles="owner support" aria-labelledby="ticket-heading">
   <div class="toolbar">
     <div><div class="eyebrow">Private requests · 180-day retention</div>
       <h2 id="ticket-heading">Support tickets</h2>
@@ -176,7 +205,7 @@ footer{font-size:12px;color:#787284;margin-top:20px}
     </div>
   </div>
 </section>
-<section aria-labelledby="announcement-heading">
+<section data-roles="owner release" aria-labelledby="announcement-heading">
   <div class="toolbar">
     <div><div class="eyebrow">Maintenance · security · updates</div>
       <h2 id="announcement-heading">Announcements & notices</h2>
@@ -219,7 +248,7 @@ footer{font-size:12px;color:#787284;margin-top:20px}
     </div>
   </div>
 </section>
-<section class="release-manager" aria-labelledby="release-manager-heading">
+<section class="release-manager" data-roles="owner release" aria-labelledby="release-manager-heading">
   <div class="toolbar">
     <div><div class="eyebrow">Official packages · Windows & Android</div>
       <h2 id="release-manager-heading">Release Manager</h2>
@@ -249,7 +278,7 @@ footer{font-size:12px;color:#787284;margin-top:20px}
     </form>
   </div>
 </section>
-<section class="overview">
+<section class="overview" data-roles="owner support">
   <div class="eyebrow">Overview · Account administration</div>
   <div class="toolbar"><div><h1>Users & access</h1>
     <p class="note">Live cloud account metadata. No passwords, vault records or recovery keys are available to administrators.</p></div>
@@ -261,7 +290,7 @@ footer{font-size:12px;color:#787284;margin-top:20px}
     <article class="metric"><small>Active last 30 days</small><strong id="active-stat">—</strong><small>By last sign-in timestamp</small></article>
   </div>
 </section>
-<section aria-labelledby="analytics-heading">
+<section data-roles="owner security" aria-labelledby="analytics-heading">
   <div class="toolbar">
     <div><div class="eyebrow">Opt-in · aggregate-only · 90-day retention</div>
       <h2 id="analytics-heading">Privacy-conscious analytics</h2>
@@ -285,7 +314,7 @@ footer{font-size:12px;color:#787284;margin-top:20px}
     <tbody id="analytics-table-body"></tbody>
   </table></div>
 </section>
-<section id="directory-section" aria-labelledby="directory-heading">
+<section id="directory-section" data-roles="owner support" aria-labelledby="directory-heading">
   <div class="table-head"><div><h2 id="directory-heading" tabindex="-1">Account directory</h2>
     <p class="note">Search and filters cover all registered accounts, not only the current page.</p></div>
     <div class="muted" id="filtered-count" aria-live="polite">Loading account count…</div>
@@ -316,7 +345,7 @@ footer{font-size:12px;color:#787284;margin-top:20px}
     <button id="next" type="button">Next</button>
   </div>
 </section>
-<section id="account-support" hidden aria-labelledby="support-heading">
+<section id="account-support" data-roles="owner support" hidden aria-labelledby="support-heading">
   <h2 id="support-heading" tabindex="-1">Cloud account support</h2>
   <p id="support-target" class="note"></p>
   <p id="support-cloud-state" class="support-note" role="status" aria-live="polite">Cloud login status has not been checked.</p>
@@ -324,12 +353,12 @@ footer{font-size:12px;color:#787284;margin-top:20px}
   <p class="support-note">All support actions affect the cloud account only, never the encrypted vault on an offline device.
     A suspended user's existing access token may remain valid until its expiry.
     2FA recovery and account deletion create review cases only; they never silently change the account. A user can <a href="https://lockvyn-admin-ui.r3dzf-studio.workers.dev/security">revoke their own cloud sessions</a> with their credentials; administrators cannot impersonate them.</p>
-  <section class="device-inventory" aria-labelledby="cloud-device-heading">
+  <section class="device-inventory" data-roles="owner security" aria-labelledby="cloud-device-heading">
     <div class="toolbar"><div><h3 id="cloud-device-heading" tabindex="-1">Registered cloud sessions</h3>
       <p class="note">Only sessions the user explicitly opted in appear here. Names and software versions are self-reported; they do not prove a physical device's identity.</p></div>
       <button id="refresh-cloud-devices" type="button">Refresh sessions</button></div>
     <p class="support-note">Revoking blocks this signed-in app session from cloud snapshots and pairing. It does not erase offline vault data or invalidate the Auth refresh token. A new sign-in creates a different session.</p>
-    <section class="sync-overview" aria-labelledby="cloud-sync-heading">
+    <section class="sync-overview" data-roles="owner security" aria-labelledby="cloud-sync-heading">
       <h4 id="cloud-sync-heading">Encrypted cloud sync</h4>
       <p id="cloud-sync-usage" role="status" aria-live="polite">Sync usage has not been loaded.</p>
       <p id="cloud-sync-state" class="support-note" role="status" aria-live="polite" tabindex="-1">Cloud sync state has not been loaded.</p>
@@ -424,14 +453,14 @@ footer{font-size:12px;color:#787284;margin-top:20px}
     </form>
   </div>
 </section>
-<section id="support-history-section" aria-labelledby="support-history-heading">
+<section id="support-history-section" data-roles="owner support" aria-labelledby="support-history-heading">
   <div class="toolbar"><h2 id="support-history-heading">Support activity</h2>
     <button id="refresh-history" type="button">Refresh history</button></div>
   <p class="note">Metadata-only audit history. No vault content, recovery codes or session tokens.</p>
   <div id="support-history-state" role="status" aria-live="polite"></div>
   <ul class="case-history" id="support-history"></ul>
 </section>
-<section id="security-center" aria-labelledby="security-center-heading">
+<section id="security-center" data-roles="owner security" aria-labelledby="security-center-heading">
   <div class="toolbar"><h2 id="security-center-heading">Security Center</h2>
     <button id="refresh-security-events" type="button">Refresh security activity</button></div>
   <p class="note">Last 90 days of privacy-limited first-party events: opt-in cloud session enrollment/revocation, support actions, recovery requests, and verified-user admin access denials. Password login failures, emails, IP addresses, tokens, and vault data are not collected here.</p>
@@ -455,7 +484,7 @@ The user chooses a new cloud password using their own verified email.
 "use strict";
 const PUBLIC_KEY=${JSON.stringify(key)}, RECOVERY=${recovering};
 const base="https://ghmbcfqiomggoxgwghjs.supabase.co";
-let accessToken="", pendingFactor=null, challengeId="", page=1, accounts=[];
+let accessToken="", pendingFactor=null, challengeId="", page=1, accounts=[], currentRole=null, roleStatusData=null;
 const get=id=>document.getElementById(id);
 function alertText(message,bad=false){const el=get("alert");el.textContent=message;el.className=bad?"error":"success";}
 function visible(id,yes){get(id).hidden=!yes;}
@@ -700,9 +729,68 @@ get("ticket-send-reply").addEventListener("click",()=>{
 });
 
 function jwtAal(jwt){try{const bits=jwt.split(".")[1].replace(/-/g,"+").replace(/_/g,"/");return JSON.parse(atob(bits)).aal||"";}catch{return "";}}
+function applyRoleVisibility(){
+  for(const section of document.querySelectorAll("[data-roles]")){
+    const allowed=(section.dataset.roles||"").split(/\s+/).includes(currentRole||"");
+    section.classList.toggle("role-hidden",!allowed);
+  }
+  visible("role-bootstrap",!currentRole&&roleStatusData?.initialized===false);
+  visible("role-manager",currentRole==="owner");
+  get("skip-link").href=currentRole==="owner"||currentRole==="support"?"#directory-section":"#role-status";
+}
+function renderRoleAssignments(rows){
+  const list=get("role-list");list.replaceChildren();
+  for(const row of rows||[]){
+    const item=document.createElement("li");
+    item.textContent=row.role+" · "+row.userId+" · assigned "+date(row.assignedAt);
+    list.append(item);
+  }
+  if(!rows?.length){const item=document.createElement("li");item.textContent="No administrator roles assigned.";list.append(item);}
+}
+function renderRoleAudit(rows){
+  const list=get("role-audit");list.replaceChildren();
+  for(const row of rows||[]){
+    const item=document.createElement("li");
+    item.textContent=row.action+" · "+(row.roleBefore||"none")+" → "+(row.roleAfter||"none")+
+      " · target "+row.targetId+" · actor "+row.actorId+" · "+date(row.createdAt);
+    list.append(item);
+  }
+  if(!rows?.length){const item=document.createElement("li");item.textContent="No role changes recorded.";list.append(item);}
+}
+async function loadRoleStatus(){
+  const info=get("role-status-text");
+  info.textContent="Checking your assigned role…";
+  try{
+    roleStatusData=await api("roleStatus",{});
+    currentRole=typeof roleStatusData.role==="string"?roleStatusData.role:null;
+    get("role-user-id").textContent="Account UUID: "+roleStatusData.userId;
+    get("role-bootstrap-user").textContent=roleStatusData.userId;
+    info.textContent=currentRole
+      ?"Your administrator role is "+currentRole+". Permissions are enforced on every server request."
+      :roleStatusData.initialized
+        ?"No role is assigned to this account. Ask an owner to grant the minimum role needed."
+        :"No roles exist yet. An approved administrator can initialize the first owner role.";
+    applyRoleVisibility();
+    if(currentRole==="owner"){
+      const [roles,audit]=await Promise.all([api("roleList",{}),api("roleAudit",{})]);
+      renderRoleAssignments(roles);renderRoleAudit(audit);
+      get("role-manager-state").textContent=roles.length+" assigned roles · latest "+audit.length+" audit events";
+    }
+  }catch(error){
+    roleStatusData=null;currentRole=null;applyRoleVisibility();
+    info.textContent="Could not verify administrator role. Dashboard actions remain unavailable.";
+    alertText(error.message,true);
+  }
+}
 async function openDashboard(){
   visible("login",false);visible("mfa",false);visible("dashboard",true);visible("logout",true);
-  await loadSupportTickets();await loadPage(1);await loadHistory();await loadSecurityEvents();await loadReleaseManager();await loadAnnouncementManager();await loadPrivacyAnalytics();
+  await loadRoleStatus();
+  if(!currentRole)return;
+  const tasks=[];
+  if(["owner","support"].includes(currentRole))tasks.push(loadSupportTickets(),loadPage(1),loadHistory());
+  if(["owner","security"].includes(currentRole))tasks.push(loadSecurityEvents(),loadPrivacyAnalytics());
+  if(["owner","release"].includes(currentRole))tasks.push(loadReleaseManager(),loadAnnouncementManager());
+  await Promise.all(tasks);
 }
 async function setupMfa(){
   const user=await authFetch("user",null,"GET",accessToken);
@@ -1367,6 +1455,53 @@ async function loadHistory(){
   }catch(e){info.textContent="Could not load support cases.";alertText(e.message,true);}
 }
 get("refresh-history").addEventListener("click",()=>{if(accessToken)loadHistory()});
+async function freshRoleVerification(code){
+  if(!/^[0-9]{6}$/.test(code||""))throw Error("Enter a six-digit authenticator code.");
+  const user=await authFetch("user",null,"GET",accessToken);
+  const factor=(Array.isArray(user.factors)?user.factors:[])
+    .find(f=>f.factor_type==="totp"&&f.status==="verified");
+  if(!factor)throw Error("A verified authenticator is required for role changes.");
+  const challenge=await authFetch("factors/"+encodeURIComponent(factor.id)+"/challenge",{},"POST",accessToken);
+  const verified=await authFetch("factors/"+encodeURIComponent(factor.id)+"/verify",
+    {challenge_id:challenge.id,code},"POST",accessToken);
+  if(jwtAal(verified.access_token)!=="aal2")throw Error("Authenticator verification did not establish AAL2.");
+  accessToken=verified.access_token;
+}
+async function submitRoleMutation(action,payload,codeId){
+  try{
+    await freshRoleVerification(get(codeId).value.trim());
+    get(codeId).value="";
+    await api(action,payload);
+    get("role-confirm-id").value="";get("role-bootstrap-confirm").value="";
+    alertText(action==="roleRevoke"?"Administrator role revoked.":"Administrator role updated.");
+    await loadRoleStatus();
+  }catch(error){alertText(error.message,true);}
+}
+get("refresh-role-status").addEventListener("click",()=>{if(accessToken)loadRoleStatus()});
+get("role-bootstrap-button").addEventListener("click",()=>{
+  if(!roleStatusData?.userId||get("role-bootstrap-confirm").value.trim()!==roleStatusData.userId){
+    alertText("Type your account UUID exactly to initialize the first owner.",true);return;
+  }
+  submitRoleMutation("roleBootstrap",{
+    targetId:roleStatusData.userId,roleName:"owner",confirmId:roleStatusData.userId,
+  },"role-bootstrap-code");
+});
+get("role-form").addEventListener("submit",e=>{
+  e.preventDefault();
+  const targetId=get("role-target-id").value.trim();
+  if(!targetId||get("role-confirm-id").value.trim()!==targetId){
+    alertText("Type the target account UUID exactly to confirm.",true);return;
+  }
+  submitRoleMutation("roleAssign",{targetId,roleName:get("role-name").value,confirmId:targetId},"role-code");
+});
+get("role-revoke").addEventListener("click",()=>{
+  const targetId=get("role-target-id").value.trim();
+  if(!targetId||get("role-confirm-id").value.trim()!==targetId){
+    alertText("Type the target account UUID exactly to confirm.",true);return;
+  }
+  submitRoleMutation("roleRevoke",{targetId,confirmId:targetId},"role-code");
+});
+
 get("search").addEventListener("input",scheduleSearch);
 get("email-filter").addEventListener("change",()=>{if(accessToken)loadPage(1)});
 get("mfa-filter").addEventListener("change",()=>{if(accessToken)loadPage(1)});

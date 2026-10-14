@@ -34,6 +34,14 @@ Function. It must stay up to date as each phase is released.
   an explicit support smoke test before closing the phase issue.
 - A failed or missing check means **hold deployment**, never "mark complete."
 
+## Scoped administrator roles
+
+Phase 10 preserves the lockvyn_admins table as the outer membership gate and adds deny-by-default roles. Missing role rows grant no access. The Edge Function enforces support, security, release and owner scopes on every request, including ticket-agent operations. Initial owner setup is a one-time first claim by a confirmed allowlisted account with AAL2, fresh TOTP and typed own UUID; review the full allowlist before a hosted migration. Owners use fresh TOTP and a typed target UUID for each role change. Never create a client-side bypass or manually edit role rows to repair access.
+
+Before hosted migration, use the approved encrypted backup process and record a restore point. Perform restore drills only in an isolated target. Validate role assignments, audit history, RLS, function grants and the immutable trigger. No hosted backup or restore drill has been performed in Phase 10.
+
+Role continuity has no hidden emergency super-admin. If no owner is available, pause privileged changes and follow the provider's verified project-owner recovery process, then review the allowlist and record the authorization before restoring at most two trusted owners. For a secret exposure, disable the affected route, rotate the server-side credential through the provider, invalidate active sessions, review audit/security records, and rerun denial tests.
+
 ## Operator emergency actions
 
 1. Stop applying privileged changes. Capture only request IDs / timestamps
@@ -61,6 +69,10 @@ Function. It must stay up to date as each phase is released.
   data is neither remotely decrypted nor guaranteed erased.
 
 ## Phase evidence
+
+For Phase 10, include role-matrix and local SQL/Auth results, the reviewed allowlist snapshot before first owner bootstrap, backup restore point and isolated restore evidence, and the credential/session rotation record. Never attach MFA codes, tokens, emails, passwords or vault data.
+
+
 
 For each GitHub issue record: reviewed commit SHA, test and security CI run
 links, migration ID, staging observations, production deployment version,
