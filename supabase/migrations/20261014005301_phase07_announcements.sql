@@ -223,13 +223,11 @@ begin
        string_to_array(v_min,'.')::integer[] > string_to_array(v_max,'.')::integer[] then
       raise exception 'Minimum version exceeds maximum version' using errcode='22023';
     end if;
-    if v_target='android' and v_min is not null and v_max is not null and
-       case
-         when v_min ~ '^(0|[1-9][0-9]{0,9})$' and v_max ~ '^(0|[1-9][0-9]{0,9})$'
-         then v_min::numeric > v_max::numeric
-         else false
-       end then
-      raise exception 'Minimum version exceeds maximum version' using errcode='22023';
+    if v_target='android' and v_min is not null and v_max is not null then
+      if v_min ~ '^(0|[1-9][0-9]{0,9})$' and v_max ~ '^(0|[1-9][0-9]{0,9})$' and
+         v_min::numeric > v_max::numeric then
+        raise exception 'Minimum version exceeds maximum version' using errcode='22023';
+      end if;
     end if;
     if p_action='create' then
       if p_announcement_id is not null then
