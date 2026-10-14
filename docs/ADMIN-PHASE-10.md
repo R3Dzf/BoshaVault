@@ -33,7 +33,7 @@ There is no hidden MFA bypass or emergency super-admin. If all owners are unavai
 
 ## Remaining gates
 
-This phase stays open until exact-head CI passes, an independent authorization/threat-model review is recorded, an isolated backup/restore drill and operator rotation procedure are evidenced, browser runtime performance is measured against an agreed budget, and the owner records the hosted migration/production rollout decision with rollback evidence. Phases previously waived for sequencing remain incomplete. Do not close #28 or mark Phase 10 complete while any of these checks is open.
+Technical implementation and CI evidence are tracked in #28. This phase remains open while independent authorization/threat-model review, an isolated backup/restore drill, operator rotation evidence, browser runtime performance measurement against an agreed budget, and the owner's hosted migration/production rollout decision with rollback evidence are outstanding. Phases previously waived for sequencing remain incomplete. Do not close #28 or mark Phase 10 complete while any of these checks is open.
 
 ## Rollback
 

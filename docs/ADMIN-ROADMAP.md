@@ -25,7 +25,7 @@
 | 07 | Announcements & notices | [#25](https://github.com/R3Dzf/BoshaVault/issues/25) | Owner-directed sequencing waiver; PR #52 merged, native reconnect gate open |
 | 08 | Support tickets | [#26](https://github.com/R3Dzf/BoshaVault/issues/26) | Owner-directed sequencing waiver; acceptance incomplete; PR #53 and all four exact-head CI workflows passed; release/reconnect gates remain open |
 | 09 | Privacy-conscious analytics | [#27](https://github.com/R3Dzf/BoshaVault/issues/27) | Owner-directed sequencing waiver; exact-head technical CI passed; rollout gates open |
-| 10 | Roles, operations & sign-off | [#28](https://github.com/R3Dzf/BoshaVault/issues/28) | In progress by owner direction; implementation and exact-head CI pending |
+| 10 | Roles, operations & sign-off | [#28](https://github.com/R3Dzf/BoshaVault/issues/28) | In progress by owner direction; role implementation and technical evidence tracked in #28; independent review, restore, runtime performance and rollout gates remain open |
 
 ### Required delivery sequence per phase
 
