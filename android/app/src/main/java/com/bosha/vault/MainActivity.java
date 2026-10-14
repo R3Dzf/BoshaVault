@@ -16,6 +16,7 @@ import android.view.*;
 import android.view.autofill.AutofillManager;
 import android.widget.*;
 import java.io.*;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.function.Consumer;
