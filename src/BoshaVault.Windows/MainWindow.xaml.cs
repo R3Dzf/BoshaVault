@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
+using System.Net.NetworkInformation;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Windows;
@@ -41,6 +42,9 @@ public partial class MainWindow : Window
     private WindowState previousWindowState = WindowState.Normal;
     private UpdateDialog? updates;
     private DateTime nextUpdateCheckUtc = DateTime.UtcNow.AddSeconds(18);
+    private DateTime nextAnnouncementCheckUtc = DateTime.UtcNow.AddSeconds(25);
+    private bool announcementCheckBusy, announcementPromptVisible;
+    private IReadOnlyList<AnnouncementNotice> pendingAnnouncementNotices = [];
     private bool updateCheckBusy, updatePromptVisible;
     private string? pendingUpdateVersion, alertedUpdateVersion;
     private string? undoEntryId; private DateTime undoUntil;
@@ -68,6 +72,7 @@ public partial class MainWindow : Window
         foreach (var input in new UIElement[] { SearchBox, EntryList }) input.MouseWheel += (_, _) => lastActivity = DateTime.UtcNow;
         EntryList.PreviewMouseWheel += SlowVaultWheel;
         SystemEvents.SessionSwitch += OnSessionSwitch; SystemEvents.PowerModeChanged += OnPowerModeChanged;
+        NetworkChange.NetworkAvailabilityChanged += OnNetworkAvailabilityChanged;
         Closing += OnClosing;
         Closed += (_, _) => { ReleaseDesktopResources(); Application.Current.Shutdown(); };
         StateChanged += (_, _) =>
@@ -75,7 +80,7 @@ public partial class MainWindow : Window
             if (WindowState != WindowState.Minimized) previousWindowState = WindowState;
             TryShowUpdateNotice();
         };
-        Activated += (_, _) => TryShowUpdateNotice();
+        Activated += (_, _) => { TryShowUpdateNotice(); TryShowAnnouncementNotice(); };
         timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         timer.Tick += (_, _) =>
         {
@@ -88,6 +93,12 @@ public partial class MainWindow : Window
             {
                 nextUpdateCheckUtc = DateTime.UtcNow.AddHours(1);
                 _ = CheckUpdateAnnouncement();
+            }
+            if (preferences.AnnouncementAlertsEnabled && !announcementCheckBusy &&
+                !exiting && DateTime.UtcNow >= nextAnnouncementCheckUtc)
+            {
+                nextAnnouncementCheckUtc = DateTime.UtcNow.AddMinutes(15);
+                _ = CheckAnnouncements(true);
             }
             if (!cloudDialogOpen && DateTime.UtcNow >= nextCloudCheck)
             {
@@ -530,6 +541,28 @@ public partial class MainWindow : Window
         if (session == null) return;
         var d = new FormDialog(this, "Your vault settings");
         d.Action("Check for updates", () => { d.Close(); UpdatesClick(sender, e); }, inBody: true);
+        d.Action("Read maintenance, security and update notices", async () =>
+        {
+            d.Close();
+            await ReadAnnouncements();
+        }, inBody: true);
+        var noticeAlerts = new CheckBox {
+            Content = "Show in-app notice alerts · off until enabled",
+            IsChecked = preferences.AnnouncementAlertsEnabled,
+            Margin = new Thickness(0, 8, 0, 10) };
+        d.Body.Children.Add(noticeAlerts);
+        noticeAlerts.Click += (_, _) => Guard(() =>
+        {
+            preferences.AnnouncementAlertsEnabled = noticeAlerts.IsChecked == true;
+            if (!preferences.AnnouncementAlertsEnabled) pendingAnnouncementNotices = [];
+            preferences.Save(preferencesPath);
+            if (preferences.AnnouncementAlertsEnabled)
+            {
+                nextAnnouncementCheckUtc = DateTime.UtcNow.AddSeconds(2);
+                _ = CheckAnnouncements(true);
+            }
+        });
+
         var updateAlerts = new CheckBox {
             Content = "Notify me when new versions are available",
             IsChecked = preferences.UpdateNotificationsEnabled,
@@ -1009,6 +1042,105 @@ public partial class MainWindow : Window
             dialog.ShowDialog();
         });
     }
+    private void OnNetworkAvailabilityChanged(object? sender, NetworkAvailabilityEventArgs e)
+    {
+        if (!e.IsAvailable || !preferences.AnnouncementAlertsEnabled || exiting) return;
+        Dispatcher.BeginInvoke(() =>
+        {
+            nextAnnouncementCheckUtc = DateTime.UtcNow.AddMinutes(15);
+            _ = CheckAnnouncements(true);
+        });
+    }
+
+    private async Task<IReadOnlyList<AnnouncementNotice>> FetchAnnouncements()
+    {
+        string version = typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+        string locale = System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "ar" ? "ar" : "en";
+        return await AnnouncementFeedClient.FetchAsync(version, locale).WaitAsync(TimeSpan.FromSeconds(12));
+    }
+
+    private async Task CheckAnnouncements(bool allowPrompt)
+    {
+        if (announcementCheckBusy || exiting) return;
+        announcementCheckBusy = true;
+        try
+        {
+            var notices = await FetchAnnouncements();
+            if (!allowPrompt || !preferences.AnnouncementAlertsEnabled) return;
+            var seen = new HashSet<string>(preferences.SeenAnnouncementNotifications, StringComparer.Ordinal);
+            pendingAnnouncementNotices = notices
+                .Where(notice => notice.Notify && !seen.Contains(notice.Id))
+                .ToList();
+            TryShowAnnouncementNotice();
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException or
+                                    OperationCanceledException or TimeoutException or
+                                    System.Text.Json.JsonException or ArgumentException)
+        {
+            // The public feed never blocks vault unlock or offline use. Network availability retries it.
+        }
+        finally { announcementCheckBusy = false; }
+    }
+
+    private async Task ReadAnnouncements()
+    {
+        try
+        {
+            var notices = await FetchAnnouncements();
+            ShowAnnouncementList(notices);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException or
+                                    OperationCanceledException or TimeoutException or
+                                    System.Text.Json.JsonException or ArgumentException)
+        {
+            MessageBox.Show(this, "Announcements could not be loaded. Connect to the internet and try again.",
+                "Lockvyn notices", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+    }
+
+    private void ShowAnnouncementList(IReadOnlyList<AnnouncementNotice> notices)
+    {
+        var dialog = new FormDialog(this, "Announcements & notices", 520);
+        if (notices.Count == 0) dialog.Label("There are no active notices for this platform version.");
+        foreach (var notice in notices.Take(20))
+        {
+            dialog.Label(notice.Title + " · " + notice.Severity);
+            dialog.Label(notice.Body);
+        }
+        dialog.Action("Close", dialog.Close, inBody: true);
+        dialog.ShowDialog();
+    }
+
+    private void TryShowAnnouncementNotice()
+    {
+        if (announcementPromptVisible || !preferences.AnnouncementAlertsEnabled ||
+            pendingAnnouncementNotices.Count == 0 || exiting || !IsVisible ||
+            WindowState == WindowState.Minimized ||
+            OwnedWindows.Cast<Window>().Any(window => window.IsVisible)) return;
+        var notices = pendingAnnouncementNotices.Take(3).ToList();
+        pendingAnnouncementNotices = [];
+        var seen = new HashSet<string>(preferences.SeenAnnouncementNotifications, StringComparer.Ordinal);
+        foreach (var notice in notices) seen.Add(notice.Id);
+        preferences.SeenAnnouncementNotifications = seen.TakeLast(200).ToList();
+        try { preferences.Save(preferencesPath); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        announcementPromptVisible = true;
+        var dialog = new FormDialog(this, "Lockvyn notice", 500);
+        foreach (var notice in notices)
+        {
+            dialog.Label(notice.Title + " · " + notice.Severity);
+            dialog.Label(notice.Body);
+        }
+        dialog.Action("Read all active notices", () =>
+        {
+            dialog.Close();
+            _ = ReadAnnouncements();
+        }, inBody: true);
+        dialog.Action("Close", dialog.Close, inBody: true);
+        dialog.Closed += (_, _) => announcementPromptVisible = false;
+        dialog.ShowDialog();
+    }
+
     internal void PrepareToExit() { if (exiting) return; exiting = true; LockVault(); }
     internal void ReleaseDesktopResources()
     {
@@ -1016,6 +1148,7 @@ public partial class MainWindow : Window
         generation++; timer.Stop(); transfer?.Dispose(); PrivateClipboard.Clear(); session?.Dispose(); session = null;
         tray?.Dispose(); tray = null;
         SystemEvents.SessionSwitch -= OnSessionSwitch; SystemEvents.PowerModeChanged -= OnPowerModeChanged;
+        NetworkChange.NetworkAvailabilityChanged -= OnNetworkAvailabilityChanged;
         if (hwnd != 0) UnregisterHotKey(hwnd, 1); source?.RemoveHook(WndProc);
     }
     [DllImport("user32.dll", SetLastError = true)] private static extern bool RegisterHotKey(nint hwnd, int id, uint modifiers, uint key);

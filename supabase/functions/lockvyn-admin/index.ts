@@ -1,5 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2.58.0";
 import { html } from "./ui.ts";
+import { announcementInputError, announcementQueryError } from "./announcements.mjs";
 import { validCandidateTag, validateReleasePolicy, compareReleaseVersions } from "./release.mjs";
 import { securityHtml } from "./security.ts";
 import { verifiedUserGate, adminMembershipGate } from "./access.mjs";
@@ -49,6 +50,17 @@ async function recordSecuritySignal(actorId: string, signal: string): Promise<vo
 }
 
 
+
+function publicAnnouncementResponse(data,status=200) {
+  return new Response(JSON.stringify(data), {status, headers: {
+    "Content-Type":"application/json; charset=utf-8",
+    "Cache-Control":status===200?"public, max-age=60, stale-while-revalidate=30":"no-store",
+    "Access-Control-Allow-Origin":"*",
+    "X-Content-Type-Options":"nosniff",
+    "Referrer-Policy":"no-referrer",
+    "X-Frame-Options":"DENY",
+  }});
+}
 
 function publicPolicyResponse(data,status=200) {
   return new Response(JSON.stringify(data), {status, headers: {
@@ -157,6 +169,28 @@ async function currentReleasePolicies(){
 
 Deno.serve(async (request) => {
   const url = new URL(request.url);
+  if(request.method==="OPTIONS"&&url.pathname.endsWith("/lockvyn-admin/announcements")){
+    return new Response(null,{status:204,headers:{
+      "Access-Control-Allow-Origin":"*",
+      "Access-Control-Allow-Methods":"GET, OPTIONS",
+      "Access-Control-Allow-Headers":"apikey, content-type",
+      "Access-Control-Max-Age":"600",
+      "Cache-Control":"public, max-age=600",
+    }});
+  }
+  if(request.method==="GET"&&url.pathname.endsWith("/lockvyn-admin/announcements")){
+    const platform=url.searchParams.get("platform");
+    const version=url.searchParams.get("version");
+    const locale=url.searchParams.get("locale")??"en";
+    const invalid=announcementQueryError(platform,version,locale);
+    if(invalid)return publicAnnouncementResponse({error:invalid},400);
+    if(!apiUrl||!serviceKey)return publicAnnouncementResponse({error:"Announcements unavailable"},503);
+    const {data,error}=await service.rpc("lockvyn_announcements_feed",{
+      p_platform:platform,p_version:version,p_locale:locale,
+    });
+    if(error||!Array.isArray(data))return publicAnnouncementResponse({error:"Announcements unavailable"},503);
+    return publicAnnouncementResponse(data);
+  }
   if(request.method==="OPTIONS"&&url.pathname.endsWith("/lockvyn-admin/release-policy")){
     return new Response(null,{status:204,headers:{
       "Access-Control-Allow-Origin":"*",
@@ -290,13 +324,67 @@ Deno.serve(async (request) => {
   let body: Record<string, unknown>;
   try {
     const text = await request.text();
-    if (text.length > 2048) return result({ error: "Request too large" }, 413);
+    if (text.length > 8192) return result({ error: "Request too large" }, 413);
     const parsed = JSON.parse(text);
     if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") throw new Error();
     body = parsed;
   } catch { return result({ error: "Invalid request" }, 400); }
 
 
+  if(body.action==="announcements"){
+    const {data,error}=await service.rpc("lockvyn_admin_announcement_manage",{
+      p_actor:verified.user.id,p_actor_session:sessionId,p_actor_aal:claims.aal,
+      p_fresh_totp:false,p_action:"list",p_announcement_id:null,p_payload:{},
+    });
+    if(error||!data||!Array.isArray(data.announcements))
+      return result({error:"Unable to load announcements"},502);
+    return result(data);
+  }
+  if(body.action==="announcementSave"){
+    const input=body.announcement;
+    const invalid=announcementInputError(input);
+    if(invalid)return result({error:invalid},400);
+    const id=body.announcementId??null;
+    if(id!==null&&(typeof id!=="string"||!/^([a-f0-9]{8}-)([a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(id)))
+      return result({error:"Invalid announcement id"},400);
+    if(!freshVerifiedTotp(claims,Math.floor(Date.now()/1000)))
+      return result({error:"Verify a fresh authenticator code before changing announcements"},403);
+    const {data,error}=await service.rpc("lockvyn_admin_announcement_manage",{
+      p_actor:verified.user.id,p_actor_session:sessionId,p_actor_aal:claims.aal,
+      p_fresh_totp:true,p_action:id?"update":"create",p_announcement_id:id,p_payload:input,
+    });
+    if(error){
+      if(error.code==="54000")return result({error:"Announcement rate limit reached. Wait before trying again."},429);
+      if(error.code==="42501")return result({error:"A fresh active administrator session is required"},403);
+      if(error.code==="22023"||error.code==="22P02"||error.code==="22007")return result({error:"The announcement content or targeting is invalid"},400);
+      if(error.code==="55000")return result({error:"Only a draft can be edited"},409);
+      if(error.code==="P0002")return result({error:"Announcement not found"},404);
+      return result({error:"Unable to save announcement"},502);
+    }
+    return result(data);
+  }
+  if(body.action==="announcementPublish"||body.action==="announcementArchive"){
+    const id=body.id;
+    if(typeof id!=="string"||!/^([a-f0-9]{8}-)([a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(id))
+      return result({error:"Invalid announcement id"},400);
+    if(body.confirmId!==id)return result({error:"Type the selected announcement id to confirm"},400);
+    if(!freshVerifiedTotp(claims,Math.floor(Date.now()/1000)))
+      return result({error:"Verify a fresh authenticator code before publishing or archiving"},403);
+    const {data,error}=await service.rpc("lockvyn_admin_announcement_manage",{
+      p_actor:verified.user.id,p_actor_session:sessionId,p_actor_aal:claims.aal,
+      p_fresh_totp:true,p_action:body.action==="announcementPublish"?"publish":"archive",
+      p_announcement_id:id,p_payload:{},
+    });
+    if(error){
+      if(error.code==="54000")return result({error:"Announcement rate limit reached. Wait before trying again."},429);
+      if(error.code==="42501")return result({error:"A fresh active administrator session is required"},403);
+      if(error.code==="22023"||error.code==="22P02"||error.code==="22007")return result({error:"Complete both languages and set a future expiry before publishing"},400);
+      if(error.code==="55000")return result({error:"This announcement can no longer be changed"},409);
+      if(error.code==="P0002")return result({error:"Announcement not found"},404);
+      return result({error:"Unable to update announcement"},502);
+    }
+    return result(data);
+  }
   if (body.action === "releaseManager") {
     try {
       const [policies,releases]=await Promise.all([currentReleasePolicies(),loadReleaseCatalog()]);

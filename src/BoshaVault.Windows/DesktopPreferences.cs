@@ -14,6 +14,9 @@ public sealed class DesktopPreferences
     // Off only when the user explicitly chooses "Don't notify me again".
     // Manual update checks remain available in Settings.
     public bool UpdateNotificationsEnabled { get; set; } = true;
+    // New service notices are silent until the user opts in locally.
+    public bool AnnouncementAlertsEnabled { get; set; }
+    public List<string> SeenAnnouncementNotifications { get; set; } = [];
     public PasswordOptions Generator { get; set; } = new();
     // Public hostnames only (no credentials). Stored locally, outside the encrypted vault.
     public List<DomainAliasGroup> DomainGroups { get; set; } = [];
@@ -30,6 +33,11 @@ public sealed class DesktopPreferences
             if (preferences is not { Version: 1 } || !ValidTimeout(preferences.AutoLockMinutes)) return new();
             try { PasswordGenerator.Validate(preferences.Generator); }
             catch (Exception ex) when (ex is VaultException or NullReferenceException) { preferences.Generator = new(); }
+            if (preferences.SeenAnnouncementNotifications == null)
+                preferences.SeenAnnouncementNotifications = [];
+            preferences.SeenAnnouncementNotifications = preferences.SeenAnnouncementNotifications
+                .Where(id => Guid.TryParseExact(id, "D", out _)).Distinct(StringComparer.Ordinal)
+                .Take(200).ToList();
             try { OriginPolicy.ValidateGroups(preferences.DomainGroups); }
             catch (VaultException) { preferences.DomainGroups = []; }
             return preferences;
@@ -42,6 +50,9 @@ public sealed class DesktopPreferences
         if (Version != 1 || !ValidTimeout(AutoLockMinutes)) throw new ArgumentException("Invalid desktop preferences.");
         PasswordGenerator.Validate(Generator);
         OriginPolicy.ValidateGroups(DomainGroups);
+        if (SeenAnnouncementNotifications == null || SeenAnnouncementNotifications.Count > 200 ||
+            SeenAnnouncementNotifications.Any(id => !Guid.TryParseExact(id, "D", out _)))
+            throw new ArgumentException("Invalid local announcement history.");
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
         string temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try

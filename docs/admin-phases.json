@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated_at": "2026-10-13",
+  "updated_at": "2026-10-14",
   "rules": [
     "sequential",
     "owner_directed_waiver",
@@ -53,13 +53,13 @@
       "number": "06",
       "issue": 24,
       "name": "Release Manager",
-      "status": "in_progress"
+      "status": "waived"
     },
     {
       "number": "07",
       "issue": 25,
       "name": "Announcements & notices",
-      "status": "queued"
+      "status": "in_progress"
     },
     {
       "number": "08",

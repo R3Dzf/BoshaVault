@@ -1,7 +1,7 @@
 # Phase 06 — Release Manager
 
 **Issue:** [#24](https://github.com/R3Dzf/BoshaVault/issues/24)  
-**State:** Implementation in progress. No release, hosted migration, or production deployment was performed.
+**State:** Owner-directed sequencing waiver; issue #24 remains open and the public combined-release gate is not complete. No release, hosted migration, or production deployment was performed.
 
 ## Scope and safety
 
@@ -22,4 +22,4 @@ Windows and Android clients fetch policy before offering an update. Rollout samp
 
 ## Open acceptance gates
 
-The issue remains open until exact-head CI passes and the final review confirms release metadata and local database behavior. This implementation does not prove a future hosted migration, future signed Windows publisher package, actual public release, or production rollout. Phase 02–04 waivers and deferred gates remain unchanged.
+Exact-head CI passed on the merged Phase 06 implementation (PR #51, merge commit d94f1944), including local Supabase, admin, Windows, Android, and browser checks. The issue remains open because the public combined-release gate has not been verified. The owner directed work to continue into Phase 07; this sequencing waiver is not completion. No hosted migration, signed Windows publisher package, public release, or production rollout is claimed. Phase 02–04 waivers and deferred gates remain unchanged.

@@ -34,6 +34,14 @@ required={
   'preserved cloud and offline data': 'Offline vault data and encrypted cloud snapshots are preserved.',
   'safe sync error labels': 'SYNC_ERROR_LABELS',
   'sync row text-only rendering': 'activity.textContent="Last attempt "',
+  'announcement heading association': 'aria-labelledby="announcement-heading"',
+  'announcement loading status': 'id="announcement-state" role="status" aria-live="polite"',
+  'announcement preview announcement status': 'id="announcement-preview" class="announcement-preview" role="status" aria-live="polite"',
+  'announcement confirmation control': 'id="announcement-confirm-id"',
+  'announcement safe text preview': 'get("announcement-preview").textContent=',
+  'announcement safe list rendering': 'button.textContent=(item.titleEn||item.titleAr',
+  'announcement opt-in disclosure': 'Client alerts stay opt-in and local.',
+  'notice confirmation control disabled by default': 'id="announcement-publish" type="button" disabled',
 }
 for label, marker in required.items():
     assert marker in s, f"Missing {label}: {marker}"
