@@ -179,7 +179,7 @@ begin
  if n>=30 then raise exception 'Analytics report rate limit reached' using errcode='54000'; end if;
  insert into lockvyn_private.analytics_admin_reads(actor_id,actor_session_id) values(p_actor,p_actor_session);
  with raw as (
-   select e.event_day day,
+   select e.event_day as activity_date,
      case e.event_type when 'app_active' then 'active_app_versions'
        when 'update_applied' then 'update_uptake' else 'sync_reliability' end metric,
      e.user_id,e.platform,e.app_version,e.outcome,null::text bucket
@@ -196,15 +196,15 @@ begin
    where (u.created_at at time zone 'UTC')::date between p_from and p_to
      and u.created_at>=clock_timestamp()-interval '90 days'
  ), grouped as (
-   select day,metric,platform,app_version,outcome,bucket,
+   select activity_date,metric,platform,app_version,outcome,bucket,
      count(distinct user_id)::integer users,count(*)::integer events
-   from raw group by day,metric,platform,app_version,outcome,bucket
+   from raw group by activity_date,metric,platform,app_version,outcome,bucket
    having count(distinct user_id)>=5
  )
  select coalesce(jsonb_agg(jsonb_build_object(
-   'day',day,'metric',metric,'platform',platform,'appVersion',app_version,
+   'day',activity_date,'metric',metric,'platform',platform,'appVersion',app_version,
    'outcome',outcome,'resourceBucket',bucket,'users',users,'events',events
- ) order by day,metric,platform,app_version,outcome,bucket),'[]'::jsonb)
+ ) order by activity_date,metric,platform,app_version,outcome,bucket),'[]'::jsonb)
  into rows from grouped;
  return jsonb_build_object('fromDate',p_from,'toDate',p_to,'minimumCohort',5,'rows',rows);
 end; $$;
