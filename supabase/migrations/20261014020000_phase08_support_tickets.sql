@@ -97,7 +97,7 @@ language plpgsql security definer set search_path = ''
 as $$
 declare v_deleted integer;
 begin
-  if coalesce(current_setting('request.jwt.claim.role',true),'') <> 'service_role' then
+  if coalesce(auth.jwt()->>'role',current_setting('request.jwt.claim.role',true),'') <> 'service_role' then
     raise exception 'Service role required' using errcode='42501';
   end if;
   delete from lockvyn_private.support_tickets where expires_at<=now();
@@ -127,7 +127,7 @@ declare
   v_previous jsonb;
   v_new jsonb;
 begin
-  if coalesce(current_setting('request.jwt.claim.role',true),'') <> 'service_role' or
+  if coalesce(auth.jwt()->>'role',current_setting('request.jwt.claim.role',true),'') <> 'service_role' or
      p_actor is null or p_actor_session is null or
      public.lockvyn_auth_session_is_active(p_actor,p_actor_session) is distinct from true then
     raise exception 'A verified active user session is required' using errcode='42501';
@@ -283,7 +283,7 @@ declare
   v_previous jsonb;
   v_new jsonb;
 begin
-  if coalesce(current_setting('request.jwt.claim.role',true),'') <> 'service_role' or
+  if coalesce(auth.jwt()->>'role',current_setting('request.jwt.claim.role',true),'') <> 'service_role' or
      p_actor is null or p_actor_session is null or p_actor_aal is distinct from 'aal2' or
      not exists(select 1 from public.lockvyn_admins where user_id=p_actor) or
      public.lockvyn_auth_session_is_active(p_actor,p_actor_session) is distinct from true then
