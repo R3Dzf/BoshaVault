@@ -48,7 +48,7 @@ required={
   'announcement opt-in disclosure': 'Client alerts stay opt-in and local.',
   'notice confirmation control disabled by default': 'id="announcement-publish" type="button" disabled',
   'ticket section heading association': 'aria-labelledby="ticket-heading"',
-  'ticket workflow loads on admin sign-in': 'await loadSupportTickets();await loadPage(1)',
+  'role-gated ticket workflow': 'if(["owner","support"].includes(currentRole))tasks.push(loadSupportTickets(),loadPage(1),loadHistory())',
   'ticket retention and vault boundary disclosure': 'No vault contents are available here.',
   'ticket write confirmation controls are server-gated': 'Type the selected ticket ID to enable changes',
 
