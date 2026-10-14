@@ -45,7 +45,7 @@ internal static class SupportTicketDialog
         var reply = d.Field("Reply to the selected request", "", 4000, multi: true);
         var status = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 6) };
         d.Body.Children.Add(status);
-        TicketChoice? Selected => tickets.SelectedItem as TicketChoice;
+        TicketChoice? Selected() => tickets.SelectedItem as TicketChoice;
 
         void EnsureCurrent()
         {
@@ -70,7 +70,7 @@ internal static class SupportTicketDialog
 
         async Task LoadThread()
         {
-            var selected = Selected;
+            var selected = Selected();
             if (selected is null) { thread.Text = ""; return; }
             using var response = await Send(new { action = "ticketGet", ticketId = selected.Id });
             var lines = new StringBuilder();
@@ -109,7 +109,7 @@ internal static class SupportTicketDialog
         }
 
         tickets.SelectionChanged += async (_, _) => await Run(LoadThread);
-        d.Action("Refresh requests", async () => await Run(() => LoadTickets(Selected?.Id)), inBody: true);
+        d.Action("Refresh requests", async () => await Run(() => LoadTickets(Selected()?.Id)), inBody: true);
         d.Action("Create request", async () => await Run(async () =>
         {
             var diagnostic = consent.IsChecked == true
@@ -126,23 +126,23 @@ internal static class SupportTicketDialog
         }), primary: true, inBody: true);
         d.Action("Send reply", async () => await Run(async () =>
         {
-            var selected = Selected; if (selected is null) { status.Text = "Select a request first."; return; }
+            var selected = Selected(); if (selected is null) { status.Text = "Select a request first."; return; }
             using var response = await Send(new { action = "ticketReply", ticketId = selected.Id, body = reply.Text });
             reply.Clear(); await LoadTickets(selected.Id);
         }), inBody: true);
         d.Action("Close selected request", async () => await Run(async () =>
         {
-            var selected = Selected; if (selected is null) { status.Text = "Select a request first."; return; }
+            var selected = Selected(); if (selected is null) { status.Text = "Select a request first."; return; }
             using var response = await Send(new { action = "ticketClose", ticketId = selected.Id });
             await LoadTickets(selected.Id);
         }), inBody: true);
         d.Action("Reopen selected request", async () => await Run(async () =>
         {
-            var selected = Selected; if (selected is null) { status.Text = "Select a request first."; return; }
+            var selected = Selected(); if (selected is null) { status.Text = "Select a request first."; return; }
             using var response = await Send(new { action = "ticketReopen", ticketId = selected.Id });
             await LoadTickets(selected.Id);
         }), inBody: true);
-        d.Action("Refresh now", async () => await Run(() => LoadTickets(Selected?.Id)));
+        d.Action("Refresh now", async () => await Run(() => LoadTickets(Selected()?.Id)));
         d.Loaded += async (_, _) => await Run(() => LoadTickets());
         d.ShowDialog();
     }

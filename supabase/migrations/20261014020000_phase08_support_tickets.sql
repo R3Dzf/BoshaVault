@@ -171,7 +171,7 @@ begin
     v_diagnostics:=p_payload->'diagnostics';
     if v_diagnostics is not null and jsonb_typeof(v_diagnostics)<>'null' then
       if not v_consent or jsonb_typeof(v_diagnostics)<>'object' or
-         length(v_diagnostics::text)>8192 or jsonb_object_length(v_diagnostics)>4 or
+         length(v_diagnostics::text)>8192 or (select count(*) from jsonb_object_keys(v_diagnostics))>4 or
          exists(select 1 from jsonb_object_keys(v_diagnostics) as k where k not in ('platform','appVersion','osVersion','errorCode')) or
          exists(select 1 from jsonb_each(v_diagnostics) as e(key,value)
            where jsonb_typeof(e.value)<>'string' or length(e.value #>> '{}')>120 or
@@ -194,7 +194,7 @@ begin
         values(v_ticket.id,v_diagnostics,now());
       insert into lockvyn_private.support_ticket_audit(ticket_id,actor_id,actor_session_id,actor_role,action,new_state)
         values(v_ticket.id,p_actor,p_actor_session,'user','diagnostics_upload',
-          jsonb_build_object('consented',true,'fieldCount',jsonb_object_length(v_diagnostics)));
+          jsonb_build_object('consented',true,'fieldCount',(select count(*) from jsonb_object_keys(v_diagnostics))));
     end if;
     insert into lockvyn_private.support_ticket_audit(ticket_id,actor_id,actor_session_id,actor_role,action,new_state)
       values(v_ticket.id,p_actor,p_actor_session,'user','create',jsonb_build_object('status','open','priority','normal'));
