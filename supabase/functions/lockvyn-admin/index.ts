@@ -41,8 +41,8 @@ function nonce(): string {
   return btoa(String.fromCharCode(...b));
 }
 
-async function roleManagementRequest(body, actorId, sessionId, claims): Promise<Response> {
-  const actions:Record<string,string> = {
+async function roleManagementRequest(body, actorId, sessionId, claims) {
+  const actions = {
     roleStatus:"status", roleBootstrap:"bootstrap", roleList:"list", roleAudit:"audit",
     roleAssign:"assign", roleRevoke:"revoke",
   };
