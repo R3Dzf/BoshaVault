@@ -71,13 +71,13 @@
       "number": "09",
       "issue": 27,
       "name": "Privacy-conscious analytics",
-      "status": "in_progress"
+      "status": "waived"
     },
     {
       "number": "10",
       "issue": 28,
       "name": "Roles, operations & sign-off",
-      "status": "queued"
+      "status": "in_progress"
     }
   ]
 }

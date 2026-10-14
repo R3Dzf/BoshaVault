@@ -28,6 +28,10 @@ jobs:
         run: node tools/test_admin_analytics.mjs
       - name: Check verified admin AAL2 and allowlist decisions
         run: node tools/test-admin-access.cjs
+      - name: Check deny-by-default scoped administrator roles
+        run: node tools/test_admin_roles.mjs
+      - name: Check admin UI payload budget and role-specific loading
+        run: node tools/test_admin_performance.mjs
       - name: Check privileged account support rules
         run: node tools/test-admin-support.cjs
       - name: Test real admin handler using free synthetic runtime

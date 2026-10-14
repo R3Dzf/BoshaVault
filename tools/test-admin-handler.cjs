@@ -111,12 +111,14 @@ const vm = require("node:vm");
       }
     },
     from:table=>{
-      assert.equal(table,"lockvyn_admins");
+      assert(["lockvyn_admins","lockvyn_admin_roles"].includes(table));
       return {
         select:()=>({
           eq:(_,id)=>({
             maybeSingle:async()=>({
-              data:id===ownerId?{user_id:ownerId}:null,
+              data:table==="lockvyn_admins"
+                ?(id===ownerId?{user_id:ownerId}:null)
+                :(id===ownerId?{role:"owner"}:null),
               error:null,
             })
           })

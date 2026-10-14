@@ -158,6 +158,15 @@ assert([201,204].includes(grant.status),"Local allowlist grant failed: "+JSON.st
 const protectedGrant=await invoke("/rest/v1/lockvyn_admins","POST",service,service,
   {user_id:pending.data.id});
 assert([201,204].includes(protectedGrant.status),"Synthetic protected admin grant failed");
+const initialRoleStatus=await admin(ownerAAL2.aal2,{action:"roleStatus"});
+assert.equal(initialRoleStatus.status,200,"Allowlisted administrator can inspect initial role state");
+assert.equal(initialRoleStatus.data.initialized,false,"First owner role must not be assigned automatically");
+assert.equal(initialRoleStatus.data.role,null);
+const initialized=await admin(await verifyExistingTotp(owner,owner.aal1),{
+  action:"roleBootstrap",targetId:owner.id,roleName:"owner",confirmId:owner.id,
+});
+assert.equal(initialized.status,200,"Fresh TOTP and typed own UUID initialize the first owner: "+JSON.stringify(initialized.data));
+assert.equal(initialized.data.role,"owner");
 await denied(owner.aal1,"Owner without completing MFA");
 await denied(strangerAAL2.aal2,"Verified 2FA user without admin role");
 await denied(stranger.aal1,"Nonadmin AAL1");
@@ -530,8 +539,65 @@ assert.equal(supportLog.status,200);
 assert(supportLog.data.cases.some(c=>c.id===createdCase.data.caseId &&
   c.state==="completed" && c.kind==="suspend_24h"),"Support action must be logged");
 console.log("PASS real local support: AAL1/nonadmin/self denied, typed email, finite ban and no replay");
+
+// Phase 10: synthetic scoped roles, fresh step-up, immutable audit and last-owner guard.
+const operator=await createUser("synthetic-security-operator");
+const operatorAAL2=await totpChallenge(operator);
+const operatorGrant=await invoke("/rest/v1/lockvyn_admins","POST",service,service,{user_id:operator.id});
+assert([201,204].includes(operatorGrant.status),"Synthetic scoped operator allowlist grant failed");
+const operatorStatus=await admin(operatorAAL2.aal2,{action:"roleStatus"});
+assert.equal(operatorStatus.status,200);
+assert.equal(operatorStatus.data.initialized,true);
+assert.equal(operatorStatus.data.role,null,"New allowlisted operator must have no implicit scope");
+assert.equal((await admin(operatorAAL2.aal2,{action:"list",page:1})).status,403,
+  "Unassigned administrator is denied by default");
+let ownerStepUp=await verifyExistingTotp(owner,owner.aal1);
+const wrongRoleConfirmation=await admin(ownerStepUp,{
+  action:"roleAssign",targetId:operator.id,roleName:"security",confirmId:owner.id,
+});
+assert.equal(wrongRoleConfirmation.status,403,"Role changes require typed target confirmation");
+ownerStepUp=await verifyExistingTotp(owner,owner.aal1);
+const securityAssignment=await admin(ownerStepUp,{
+  action:"roleAssign",targetId:operator.id,roleName:"security",confirmId:operator.id,
+});
+assert.equal(securityAssignment.status,200,"Owner can assign a confirmed allowlisted operator");
+let operatorStepUp=await verifyExistingTotp(operator,operator.aal1);
+assert.equal((await admin(operatorStepUp,{action:"securityEvents",limit:50})).status,200,
+  "Security role can read security activity");
+assert.equal((await admin(operatorStepUp,{action:"supportHistory"})).status,403,
+  "Security role cannot read support cases");
+ownerStepUp=await verifyExistingTotp(owner,owner.aal1);
+const supportAssignment=await admin(ownerStepUp,{
+  action:"roleAssign",targetId:operator.id,roleName:"support",confirmId:operator.id,
+});
+assert.equal(supportAssignment.status,200,"Owner can change an operator's scoped role");
+operatorStepUp=await verifyExistingTotp(operator,operator.aal1);
+assert.equal((await ticketRequest(operatorStepUp,{action:"ticketAdminList"})).status,200,
+  "Support role can use the administrator ticket queue");
+assert.equal((await admin(operatorStepUp,{action:"deviceList",id:owner.id})).status,403,
+  "Support role cannot access device inventory");
+ownerStepUp=await verifyExistingTotp(owner,owner.aal1);
+const operatorRevoke=await admin(ownerStepUp,{
+  action:"roleRevoke",targetId:operator.id,confirmId:operator.id,
+});
+assert.equal(operatorRevoke.status,200,"Owner can revoke a scoped role");
+assert.equal((await admin(operatorStepUp,{action:"roleStatus"})).data.role,null);
+assert.equal((await admin(operatorStepUp,{action:"list",page:1})).status,403,
+  "Revoked operator access is denied immediately");
+ownerStepUp=await verifyExistingTotp(owner,owner.aal1);
+const lastOwner=await admin(ownerStepUp,{action:"roleRevoke",targetId:owner.id,confirmId:owner.id});
+assert.equal(lastOwner.status,409,"The last owner cannot revoke their own role");
+const roster=await admin(ownerStepUp,{action:"roleList"});
+assert.equal(roster.status,200);
+assert.equal(roster.data.length,1);
+assert.equal(roster.data[0].userId,owner.id);
+const roleAudit=await admin(ownerStepUp,{action:"roleAudit"});
+assert.equal(roleAudit.status,200);
+assert(roleAudit.data.length>=4,"Bootstrap, role assignments and revocation are audited");
+assert(!JSON.stringify(roleAudit.data).includes(owner.email));
+console.log("PASS real local Phase 10: first-owner bootstrap, deny-by-default scope, fresh role step-up, role changes, ticket scope, immutable audit and last-owner protection");
 assert.equal(recoveryEmails,0,"No password reset mails");
-assert.equal(accountWrites,4,"Only disposable local identities were created");
+assert.equal(accountWrites,5,"Only disposable local identities were created");
 console.log("PASS real local GoTrue AAL1/AAL2 JWT verification, admin allowlist and read access");
 console.log("PASS recovery rejected for nonadmin and AAL1; no recovery messages sent");
 

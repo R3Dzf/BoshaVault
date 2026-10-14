@@ -6,6 +6,7 @@ import { parseAnalyticsQuery, sanitizeAnalyticsReport } from "./analytics.mjs";
 import { validCandidateTag, validateReleasePolicy, compareReleaseVersions } from "./release.mjs";
 import { securityHtml } from "./security.ts";
 import { verifiedUserGate, adminMembershipGate } from "./access.mjs";
+import { adminRoleAllows } from "./roles.mjs";
 import { validSupportRequest, validCaseConfirmation, freshVerifiedTotp, safeTarget, isAutomaticAction, cloudLoginStatus } from "./support.mjs";
 
 // The service-role key is only read inside this Edge Function. It is never
@@ -38,6 +39,32 @@ function result(data: unknown, status = 200): Response {
 function nonce(): string {
   const b = crypto.getRandomValues(new Uint8Array(24));
   return btoa(String.fromCharCode(...b));
+}
+
+async function roleManagementRequest(body, actorId, sessionId, claims): Promise<Response> {
+  const actions:Record<string,string> = {
+    roleStatus:"status", roleBootstrap:"bootstrap", roleList:"list", roleAudit:"audit",
+    roleAssign:"assign", roleRevoke:"revoke",
+  };
+  const requested=typeof body.action==="string"?body.action:"";
+  const action = actions[requested];
+  if (!action) return result({error:"Invalid administrator role action"},400);
+  const mutation = ["bootstrap","assign","revoke"].includes(action);
+  const {data,error}=await service.rpc("lockvyn_admin_manage_roles",{
+    p_actor:actorId,p_actor_session:sessionId,p_actor_aal:claims.aal,
+    p_fresh_totp:mutation&&freshVerifiedTotp(claims,Math.floor(Date.now()/1000)),
+    p_action:action,
+    p_target:typeof body.targetId==="string"?body.targetId:null,
+    p_role:typeof body.roleName==="string"?body.roleName:null,
+    p_confirm_id:typeof body.confirmId==="string"?body.confirmId:null,
+  });
+  if(error){
+    if(error.code==="42501")return result({error:"Owner access, a fresh authenticator code, or typed account ID is required"},403);
+    if(error.code==="55000")return result({error:"The role change would remove the last owner or roles are already initialized"},409);
+    if(error.code==="22023"||error.code==="22P02")return result({error:"The target must be a confirmed allowlisted administrator and the role must be valid"},400);
+    return result({error:"Unable to read or update administrator roles"},502);
+  }
+  return result(data);
 }
 
 async function recordSecuritySignal(actorId: string, signal: string): Promise<void> {
@@ -355,6 +382,11 @@ Deno.serve(async (request) => {
         await recordSecuritySignal(verified.user.id,"admin_allowlist_denied");
         return result({error:"Not an authorized Lockvyn administrator"},403);
       }
+      const {data:ticketRole,error:ticketRoleError}=await service
+        .from("lockvyn_admin_roles").select("role").eq("user_id",verified.user.id).maybeSingle();
+      if(ticketRoleError)return result({error:"Administrator roles are not configured"},503);
+      if(!adminRoleAllows(ticketRole?.role,String(body.action)))
+        return result({error:"Your administrator role does not allow this action"},403);
       parsedTicket=parseAdminTicketRequest(body);
       if(!parsedTicket.ok)return result({error:parsedTicket.error},400);
       if(parsedTicket.write&&body.confirmId!==parsedTicket.ticketId)
@@ -401,6 +433,20 @@ Deno.serve(async (request) => {
     await recordSecuritySignal(verified.user.id, "admin_allowlist_denied");
     return result({ error: "Not an authorized Lockvyn administrator" }, 403);
   }
+  const {data:roleRow,error:roleError}=await service
+    .from("lockvyn_admin_roles").select("role").eq("user_id",verified.user.id).maybeSingle();
+  if(roleError)return result({error:"Administrator roles are not configured"},503);
+  const currentRole=roleRow?.role??null;
+  if(body.action==="roleStatus")
+    return await roleManagementRequest(body,verified.user.id,sessionId,claims);
+  if(body.action==="roleBootstrap"){
+    if(currentRole)return result({error:"Your administrator role is already assigned"},409);
+    return await roleManagementRequest(body,verified.user.id,sessionId,claims);
+  }
+  if(!adminRoleAllows(currentRole,String(body.action)))
+    return result({error:"Your administrator role does not allow this action"},403);
+  if(["roleList","roleAudit","roleAssign","roleRevoke"].includes(body.action))
+    return await roleManagementRequest(body,verified.user.id,sessionId,claims);
 
   if(body.action==="privacyAnalytics"){
     const query=parseAnalyticsQuery(body);

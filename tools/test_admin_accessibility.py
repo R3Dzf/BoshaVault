@@ -4,6 +4,11 @@ from pathlib import Path
 s=(Path(__file__).resolve().parents[1]/"supabase/functions/lockvyn-admin/ui.ts").read_text()
 required={
   'keyboard skip navigation': 'href="#directory-section"',
+  'administrator role status': 'id="role-status-text" role="status" aria-live="polite"',
+  'typed owner bootstrap': 'id="role-bootstrap-confirm" autocomplete="off" maxlength="36"',
+  'fresh role step-up code': 'id="role-code" inputmode="numeric" autocomplete="one-time-code"',
+  'role roster status': 'id="role-manager-state" role="status" aria-live="polite"',
+  'server role enforcement': 'applyRoleVisibility()',
   'directory heading association': 'aria-labelledby="directory-heading"',
   'scrollable table accessible name': 'aria-label="Accounts table (scroll horizontally on narrow screens)"',
   'keyboard-focusable table': 'tabindex="0" aria-busy="false"',
