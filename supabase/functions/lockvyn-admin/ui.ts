@@ -551,7 +551,7 @@ get("apply-analytics-filters").addEventListener("click",loadPrivacyAnalytics);
 get("analytics-export").addEventListener("click",()=>{
   if(!analyticsRows.length)return;
   const columns=["day","metric","platform","appVersion","outcome","resourceBucket","users","events"];
-  const csv=[columns.join(","),...analyticsRows.map(row=>columns.map(key=>analyticsCsv(row[key])).join(","))].join("\r\n");
+  const csv=[columns.join(","),...analyticsRows.map(row=>columns.map(key=>analyticsCsv(row[key])).join(","))].join(String.fromCharCode(13,10));
   const url=URL.createObjectURL(new Blob(["\ufeff",csv],{type:"text/csv;charset=utf-8"}));
   const link=document.createElement("a");link.href=url;
   link.download="lockvyn-analytics-"+get("analytics-from").value+"-"+get("analytics-to").value+".csv";
