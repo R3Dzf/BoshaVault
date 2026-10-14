@@ -40,6 +40,7 @@ final class CloudClient implements AutoCloseable {
             if(in==null)return "";byte[] chunk=new byte[1024];int n;try{while((n=in.read(chunk))!=-1){if(out.size()+n>65536)return "";out.write(chunk,0,n);}bytes=out.toByteArray();JSONObject error=StrictJson.object(new String(bytes,StandardCharsets.UTF_8));return error.optString("error_code",error.optString("code",""));}finally{Arrays.fill(chunk,(byte)0);}
         }catch(Exception ignored){return "";}finally{if(bytes!=null)Arrays.fill(bytes,(byte)0);}
     }
+    byte[] supportTickets(JSONObject payload,String access)throws Exception{return request("POST","functions/v1/lockvyn-admin/tickets",payload,access,65536);}
     void resendConfirmation(String email)throws Exception{auth.resendConfirmation(email);}
     CloudAuth.Session signIn(String email,String password)throws Exception{return auth.signIn(email,password);}
     void signUp(String email,String password)throws Exception{auth.signUp(email,password);}

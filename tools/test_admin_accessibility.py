@@ -42,6 +42,21 @@ required={
   'announcement safe list rendering': 'button.textContent=(item.titleEn||item.titleAr',
   'announcement opt-in disclosure': 'Client alerts stay opt-in and local.',
   'notice confirmation control disabled by default': 'id="announcement-publish" type="button" disabled',
+  'ticket section heading association': 'aria-labelledby="ticket-heading"',
+  'ticket workflow loads on admin sign-in': 'await loadSupportTickets();await loadPage(1)',
+  'ticket retention and vault boundary disclosure': 'No vault contents are available here.',
+  'ticket write confirmation controls are server-gated': 'Type the selected ticket ID to enable changes',
+
+  'ticket queue live status': 'id="ticket-queue-state" role="status" aria-live="polite"',
+  'ticket conversation named region': 'role="region" aria-label="Support ticket conversation" tabindex="0"',
+  'ticket diagnostics allowlist rendering': 'for(const key of ["platform","appVersion","osVersion","errorCode"])',
+  'ticket user content rendered as text': 'body.textContent=String(message.body||"")',
+  'ticket typed confirmation': 'id="ticket-confirm-id" autocomplete="off" maxlength="36"',
+  'ticket changes disabled by default': 'id="ticket-assign-me" type="button" disabled',
+  'ticket admin endpoint': '/functions/v1/lockvyn-admin/tickets',
+  'ticket endpoint uses AAL2 API action names': 'ticketAdminAssign',
+  'ticket message safely rendered as text': 'body.textContent=String(message.body||"")',
+
 }
 for label, marker in required.items():
     assert marker in s, f"Missing {label}: {marker}"

@@ -22,6 +22,8 @@ jobs:
         run: node tools/test_admin_release_manager.mjs
       - name: Check announcement localization, targeting and content safety
         run: node tools/test_announcements.mjs
+      - name: Check support ticket redaction, consent and action policies
+        run: node tools/test_support_tickets.mjs
       - name: Check verified admin AAL2 and allowlist decisions
         run: node tools/test-admin-access.cjs
       - name: Check privileged account support rules

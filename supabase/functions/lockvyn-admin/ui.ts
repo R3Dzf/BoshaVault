@@ -82,6 +82,14 @@ footer{font-size:12px;color:#787284;margin-top:20px}
 .device-list button{margin-top:8px}
 
 @media(max-width:620px){.support-grid{grid-template-columns:1fr}}
+
+.ticket-thread{white-space:pre-wrap;overflow-wrap:anywhere;border:1px solid #e8e4f1;background:#fbfaff;border-radius:10px;padding:14px;min-height:100px;max-height:360px;overflow:auto}
+.ticket-diagnostics{display:grid;grid-template-columns:minmax(90px,.5fr) minmax(0,1.5fr);gap:6px 12px;padding:12px;border:1px solid #e8e4f1;border-radius:10px}
+.ticket-diagnostics dt{font-weight:700}.ticket-diagnostics dd{margin:0;overflow-wrap:anywhere}
+.ticket-agent-actions{display:grid;gap:12px;margin-top:14px}.ticket-agent-actions textarea{font:inherit;border:1px solid #d9d6e4;border-radius:10px;padding:10px 12px;resize:vertical;min-height:90px}
+.ticket-buttons,.ticket-status-grid{display:flex;gap:10px;flex-wrap:wrap;align-items:end}
+.ticket-status-grid label{flex:1 1 130px}.ticket-status-grid select{font:inherit;border:1px solid #d9d6e4;border-radius:10px;padding:10px 12px;background:white;color:#211b38;width:100%;min-height:44px}
+
 .release-table{min-width:850px}
 .release-policy-block{border-top:1px solid #efecf5;margin-top:18px;padding-top:18px}
 .release-notes{white-space:pre-wrap;max-width:340px}
@@ -119,6 +127,45 @@ footer{font-size:12px;color:#787284;margin-top:20px}
 <button class="primary" type="submit">Verify and open dashboard</button></form>
 </section>
 <div id="dashboard" hidden>
+<section class="support-ticket-manager" aria-labelledby="ticket-heading">
+  <div class="toolbar">
+    <div><div class="eyebrow">Private requests · 180-day retention</div>
+      <h2 id="ticket-heading">Support tickets</h2>
+      <p class="note">Ticket text and optional sanitized diagnostics are visible to the requester and approved agents. Every change requires a fresh authenticator check and typed ticket ID. No vault contents are available here.</p></div>
+    <button id="refresh-tickets" type="button">Refresh ticket queue</button>
+  </div>
+  <p id="ticket-queue-state" role="status" aria-live="polite">Ticket queue has not been loaded.</p>
+  <div class="announcement-grid">
+    <div>
+      <h3>Queue</h3>
+      <ol id="ticket-list" class="announcement-list" aria-label="Support ticket queue"></ol>
+    </div>
+    <div>
+      <h3 id="ticket-selected-heading">Selected request</h3>
+      <p id="ticket-selected-state" role="status" aria-live="polite">Choose a request to review its replies.</p>
+      <p id="ticket-selected-id" class="note">Ticket IDs appear after selection.</p>
+      <div id="ticket-thread" class="ticket-thread" role="region" aria-label="Support ticket conversation" tabindex="0">No request selected.</div>
+      <h4>Consented diagnostics</h4>
+      <dl id="ticket-diagnostics" class="ticket-diagnostics"><dt>State</dt><dd>No diagnostics loaded.</dd></dl>
+      <div class="ticket-agent-actions" role="group" aria-label="Selected ticket actions">
+        <label>Type the selected ticket ID to enable changes
+          <input id="ticket-confirm-id" autocomplete="off" maxlength="36" aria-describedby="ticket-selected-id"></label>
+        <div class="ticket-buttons">
+          <button id="ticket-assign-me" type="button" disabled>Assign to me</button>
+          <button id="ticket-unassign" type="button" disabled>Unassign</button>
+          <button id="ticket-escalate" type="button" disabled>Escalate</button>
+        </div>
+        <div class="ticket-status-grid">
+          <label>Status<select id="ticket-status"><option value="open">Open</option><option value="in_progress">In progress</option><option value="escalated">Escalated</option><option value="closed">Closed</option></select></label>
+          <label>Priority<select id="ticket-priority"><option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option></select></label>
+        </div>
+        <button id="ticket-save-status" type="button" disabled>Save status and priority</button>
+        <label>Agent reply<textarea id="ticket-reply" rows="4" maxlength="4000" placeholder="Write a reply (up to 4,000 characters)"></textarea></label>
+        <button id="ticket-send-reply" type="button" disabled>Send reply</button>
+      </div>
+    </div>
+  </div>
+</section>
 <section aria-labelledby="announcement-heading">
   <div class="toolbar">
     <div><div class="eyebrow">Maintenance · security · updates</div>
@@ -397,10 +444,146 @@ async function api(action,params){
   if(!res.ok)throw Error(data.error||"Request failed");
   return data;
 }
+function ticketApi(action,params={}){
+  const resPromise=fetch(base+"/functions/v1/lockvyn-admin/tickets",{method:"POST",cache:"no-store",
+    headers:{"Authorization":"Bearer "+accessToken,"Content-Type":"application/json"},
+    body:JSON.stringify({action,...params})});
+  return resPromise.then(async res=>{
+    const data=await res.json().catch(()=>({}));
+    if(!res.ok)throw Error(data.error||"Ticket request failed");
+    return data;
+  });
+}
+function ticketActorId(){
+  try{
+    const bits=accessToken.split(".")[1].replace(/-/g,"+").replace(/_/g,"/");
+    return JSON.parse(atob(bits)).sub||"";
+  }catch{return "";}
+}
+let supportTicketRows=[],selectedSupportTicket=null;
+function updateTicketWriteControls(){
+  const id=selectedSupportTicket?.id||"";
+  const enabled=Boolean(id&&get("ticket-confirm-id").value.trim()===id);
+  for(const control of ["ticket-assign-me","ticket-unassign","ticket-escalate","ticket-save-status","ticket-send-reply"])
+    get(control).disabled=!enabled;
+}
+function renderTicketQueue(items){
+  supportTicketRows=items;
+  const list=get("ticket-list");list.replaceChildren();
+  for(const item of items){
+    if(!item||typeof item.id!=="string"||typeof item.subject!=="string")continue;
+    const row=document.createElement("li");
+    const button=document.createElement("button");button.type="button";
+    button.textContent=item.subject+" · "+item.status+" · "+item.priority;
+    button.setAttribute("aria-label","Open "+item.subject+" · "+item.status+" · "+item.priority);
+    button.addEventListener("click",()=>loadSupportTicket(item.id));
+    const detail=document.createElement("small");
+    detail.textContent=dateTime(item.updatedAt)+" · "+item.messageCount+" messages · "+
+      (item.assignedTo?(item.assignedTo===ticketActorId()?"assigned to you":"assigned"):"unassigned");
+    row.append(button,detail);list.append(row);
+  }
+  if(!list.children.length){
+    const empty=document.createElement("li");empty.textContent="No support requests are waiting in the queue.";list.append(empty);
+  }
+}
+async function loadSupportTickets(preferredId=selectedSupportTicket?.id||""){
+  if(!accessToken)return;
+  const state=get("ticket-queue-state");state.textContent="Loading ticket queue…";
+  try{
+    const data=await ticketApi("ticketAdminList",{});
+    if(!Array.isArray(data.tickets))throw Error("Invalid ticket queue response");
+    renderTicketQueue(data.tickets);
+    state.textContent="Loaded "+data.tickets.length+" private support requests. User and administrator email addresses are not included.";
+    const selected=data.tickets.find(item=>item.id===preferredId)||data.tickets[0];
+    if(selected)await loadSupportTicket(selected.id);
+    else clearSelectedSupportTicket();
+  }catch(error){
+    get("ticket-list").replaceChildren();
+    state.textContent="Could not load support tickets. Retry when connected.";
+    alertText(error.message,true);
+  }
+}
+function clearSelectedSupportTicket(){
+  selectedSupportTicket=null;
+  get("ticket-selected-state").textContent="Choose a request to review its replies.";
+  get("ticket-selected-id").textContent="Ticket IDs appear after selection.";
+  get("ticket-thread").textContent="No request selected.";
+  get("ticket-diagnostics").replaceChildren();
+  const dt=document.createElement("dt"),dd=document.createElement("dd");
+  dt.textContent="State";dd.textContent="No diagnostics loaded.";
+  get("ticket-diagnostics").append(dt,dd);
+  get("ticket-confirm-id").value="";
+  get("ticket-reply").value="";
+  updateTicketWriteControls();
+}
+async function loadSupportTicket(id){
+  if(!accessToken)return;
+  try{
+    const data=await ticketApi("ticketAdminGet",{ticketId:id});
+    const ticket=data.ticket;
+    if(!ticket||ticket.id!==id||!Array.isArray(data.messages))throw Error("Invalid support ticket response");
+    selectedSupportTicket=ticket;
+    get("ticket-selected-state").textContent=ticket.subject+" · "+ticket.status+" · "+ticket.priority;
+    get("ticket-selected-id").textContent="Selected ticket ID: "+ticket.id+" · Type this exact ID to enable agent changes.";
+    get("ticket-confirm-id").value="";
+    get("ticket-status").value=ticket.status;
+    get("ticket-priority").value=ticket.priority;
+    get("ticket-reply").value="";
+    const thread=get("ticket-thread");thread.replaceChildren();
+    for(const message of data.messages){
+      const entry=document.createElement("p");
+      const sender=document.createElement("strong");
+      sender.textContent=message.senderRole==="agent"?"Support agent · ":"Requester · ";
+      const body=document.createElement("span");body.textContent=String(message.body||"");
+      const when=document.createElement("small");when.textContent=" · "+dateTime(message.createdAt);
+      entry.append(sender,body,when);thread.append(entry);
+    }
+    if(!data.messages.length)thread.textContent="No messages yet.";
+    const diagnostics=data.diagnostics?.payload||null,host=get("ticket-diagnostics");
+    host.replaceChildren();
+    if(diagnostics&&typeof diagnostics==="object"&&!Array.isArray(diagnostics)){
+      for(const key of ["platform","appVersion","osVersion","errorCode"]){
+        if(typeof diagnostics[key]!=="string")continue;
+        const term=document.createElement("dt"),value=document.createElement("dd");
+        term.textContent=key;value.textContent=diagnostics[key];host.append(term,value);
+      }
+    }
+    if(!host.children.length){
+      const term=document.createElement("dt"),value=document.createElement("dd");
+      term.textContent="State";value.textContent="No consented diagnostics attached.";
+      host.append(term,value);
+    }
+    updateTicketWriteControls();
+  }catch(error){get("ticket-selected-state").textContent="Could not load this support request.";alertText(error.message,true);}
+}
+async function changeSupportTicket(action,extra={}){
+  if(!selectedSupportTicket)return;
+  const id=selectedSupportTicket.id;
+  if(get("ticket-confirm-id").value.trim()!==id){alertText("Type the selected ticket ID to confirm.",true);return;}
+  try{
+    await ticketApi(action,{ticketId:id,confirmId:id,...extra});
+    alertText("Support ticket updated.");
+    await loadSupportTickets(id);
+  }catch(error){alertText(error.message,true);}
+}
+get("refresh-tickets").addEventListener("click",()=>{if(accessToken)loadSupportTickets()});
+get("ticket-confirm-id").addEventListener("input",updateTicketWriteControls);
+get("ticket-assign-me").addEventListener("click",()=>changeSupportTicket("ticketAdminAssign",{assigneeId:ticketActorId()}));
+get("ticket-unassign").addEventListener("click",()=>changeSupportTicket("ticketAdminAssign",{assigneeId:null}));
+get("ticket-escalate").addEventListener("click",()=>changeSupportTicket("ticketAdminEscalate",{}));
+get("ticket-save-status").addEventListener("click",()=>changeSupportTicket("ticketAdminStatus",{
+  status:get("ticket-status").value,priority:get("ticket-priority").value
+}));
+get("ticket-send-reply").addEventListener("click",()=>{
+  const body=get("ticket-reply").value.trim();
+  if(!body){alertText("Enter a reply before sending.",true);return;}
+  changeSupportTicket("ticketAdminReply",{body});
+});
+
 function jwtAal(jwt){try{const bits=jwt.split(".")[1].replace(/-/g,"+").replace(/_/g,"/");return JSON.parse(atob(bits)).aal||"";}catch{return "";}}
 async function openDashboard(){
   visible("login",false);visible("mfa",false);visible("dashboard",true);visible("logout",true);
-  await loadPage(1);await loadHistory();await loadSecurityEvents();await loadReleaseManager();await loadAnnouncementManager();
+  await loadSupportTickets();await loadPage(1);await loadHistory();await loadSecurityEvents();await loadReleaseManager();await loadAnnouncementManager();
 }
 async function setupMfa(){
   const user=await authFetch("user",null,"GET",accessToken);

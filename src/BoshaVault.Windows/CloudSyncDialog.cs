@@ -154,6 +154,11 @@ internal static class CloudSyncDialog
                     throw;
                 }
             }, inBody: true);
+            Action("Support tickets", async () =>
+            {
+                await Refresh();
+                SupportTicketDialog.Show(d, http, Refresh, () => !closed && current() && vault.IsOpen, cancellation.Token);
+            }, inBody: true);
             Action("Sync now", async () =>
             {
                 var signedIn = await Refresh();

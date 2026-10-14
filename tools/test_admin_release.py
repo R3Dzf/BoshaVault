@@ -56,7 +56,10 @@ assert "'isSelf',(pr.id=p_actor)" in directory
 assert 'user.isSelf?"Reset my cloud password":"Send recovery email"' in ui
 assert "service.rpc(\"lockvyn_claim_recovery\"" in admin
 assert 'service.rpc("lockvyn_claim_recovery"' in admin
-assert '[url.origin, dashboardOrigin].includes(request.headers.get("origin")' in admin
+assert 'const requestOrigin=request.headers.get("origin");' in admin
+assert 'if(ticketsRoute){' in admin
+assert 'requestOrigin!==null&&![url.origin,dashboardOrigin].includes(requestOrigin)' in admin
+assert 'else if(![url.origin,dashboardOrigin].includes(requestOrigin??""))' in admin
 assert 'Cache-Control": "no-store' in admin
 assert 'X-Frame-Options": "DENY"' in admin
 assert 'verify_jwt=false' in (root/"docs/ADMIN-DASHBOARD.md").read_text()

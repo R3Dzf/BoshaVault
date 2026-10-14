@@ -12,6 +12,7 @@ const vm = require("node:vm");
   const supportPolicy=await import("../supabase/functions/lockvyn-admin/support.mjs");
   const releasePolicy=await import("../supabase/functions/lockvyn-admin/release.mjs");
   const announcementPolicy=await import("../supabase/functions/lockvyn-admin/announcements.mjs");
+  const ticketPolicy=await import("../supabase/functions/lockvyn-admin/tickets.mjs");
   let source = readFileSync(file,"utf8");
   // The single TS-only type annotation does not affect runtime semantics.
   source = source.replace(/^import .*;\s*$/gm,"")
@@ -40,8 +41,11 @@ const vm = require("node:vm");
   const byToken = new Map();
   const caseId = "d0000000-0000-4000-8000-000000000004";
   let caseState="pending";
-  const calls = {list:0,adminLookup:0,mail:0,recoveryClaim:0,factors:0,updated:0,prepared:0,claimed:0,finished:0,sessionCheck:0,securitySignals:[],securityFeed:0,syncOverview:0,syncControl:0,policyReads:0,policySets:0,announcementReads:0,announcementWrites:0,publicAnnouncementReads:0};
+  const calls = {list:0,adminLookup:0,mail:0,recoveryClaim:0,factors:0,updated:0,prepared:0,claimed:0,finished:0,sessionCheck:0,securitySignals:[],securityFeed:0,syncOverview:0,syncControl:0,policyReads:0,policySets:0,announcementReads:0,announcementWrites:0,publicAnnouncementReads:0,supportUserCalls:0,supportAdminCalls:0,supportAdminWrites:0};
   const syntheticAnnouncements=[];
+  const syntheticTickets=[];
+  const syntheticTicketMessages=new Map();
+  let lastTicketPayload=null;
   const syntheticPolicies={windows:{platform:"windows",candidateTag:null,minimumVersion:"0.0.0",rolloutPercent:100,updatedAt:"2026-01-01T00:00:00Z"},android:{platform:"android",candidateTag:null,minimumVersion:"0",rolloutPercent:100,updatedAt:"2026-01-01T00:00:00Z"}};
   const syntheticReleases=[
     {tag_name:"windows-v1.22.0",name:"Lockvyn Windows 1.22.0",draft:false,prerelease:false,published_at:"2026-10-01T00:00:00Z",body:"Windows notes <script>not executable</script>",assets:[{id:100,name:"Lockvyn-win-Setup.exe",size:1000,digest:"sha256:"+"a".repeat(64)},{id:101,name:"releases.win.json",size:100,digest:"sha256:"+"b".repeat(64)}]},
@@ -125,6 +129,34 @@ const vm = require("node:vm");
         assert.equal(args.p_user_id,args.p_session_id);
         if(sessionLookupError)return {data:null,error:{message:"synthetic lookup failure"}};
         return {data:!revokedSessionIds.has(args.p_session_id),error:null};
+      }
+      if(name==="lockvyn_support_ticket_user_manage"){
+        calls.supportUserCalls++;assert.equal(args.p_actor_session,args.p_actor);
+        if(args.p_action==="create"){
+          lastTicketPayload=args.p_payload;
+          const ticket={id:"f1000000-0000-4000-8000-000000000001",subject:args.p_payload.subject,status:"open",priority:"normal",requester_id:args.p_actor};
+          syntheticTickets.push(ticket);syntheticTicketMessages.set(ticket.id,[{senderRole:"user",body:args.p_payload.body}]);
+          return {data:{ticket:{id:ticket.id,subject:ticket.subject,status:ticket.status,priority:ticket.priority}},error:null};
+        }
+        if(args.p_action==="list")return {data:{tickets:syntheticTickets.filter(t=>t.requester_id===args.p_actor).map(({requester_id,...t})=>t)},error:null};
+        const ticket=syntheticTickets.find(t=>t.id===args.p_ticket_id&&t.requester_id===args.p_actor);
+        if(!ticket)return {data:null,error:{code:"P0002"}};
+        if(args.p_action==="get")return {data:{ticket:{id:ticket.id,subject:ticket.subject,status:ticket.status,priority:ticket.priority},messages:syntheticTicketMessages.get(ticket.id),diagnostics:null},error:null};
+        if(args.p_action==="reply"){syntheticTicketMessages.get(ticket.id).push({senderRole:"user",body:args.p_payload.body});ticket.status="open";}
+        if(args.p_action==="close")ticket.status="closed";if(args.p_action==="reopen")ticket.status="open";
+        return {data:{ticket:{id:ticket.id,subject:ticket.subject,status:ticket.status,priority:ticket.priority}},error:null};
+      }
+      if(name==="lockvyn_support_ticket_admin_manage"){
+        calls.supportAdminCalls++;assert.equal(args.p_actor,ownerId);assert.equal(args.p_actor_session,ownerId);assert.equal(args.p_actor_aal,"aal2");
+        if(args.p_action==="list")return {data:{tickets:syntheticTickets.map(({requester_id,...t})=>t)},error:null};
+        const ticket=syntheticTickets.find(t=>t.id===args.p_ticket_id);if(!ticket)return {data:null,error:{code:"P0002"}};
+        assert.equal(args.p_fresh_totp,true);calls.supportAdminWrites++;
+        if(args.p_action==="assign")ticket.assigned_to=args.p_payload.assigneeId;
+        if(args.p_action==="status"){ticket.status=args.p_payload.status;ticket.priority=args.p_payload.priority;}
+        if(args.p_action==="escalate"){ticket.status="escalated";ticket.priority="high";}
+        if(args.p_action==="reply")syntheticTicketMessages.get(ticket.id).push({senderRole:"agent",body:args.p_payload.body});
+        if(args.p_action==="get")return {data:{ticket:{id:ticket.id,subject:ticket.subject,status:ticket.status,priority:ticket.priority,assignedTo:ticket.assigned_to},messages:syntheticTicketMessages.get(ticket.id),diagnostics:null},error:null};
+        return {data:{ticket:{id:ticket.id,subject:ticket.subject,status:ticket.status,priority:ticket.priority,assignedTo:ticket.assigned_to}},error:null};
       }
       if(name==="lockvyn_announcements_feed"){
         calls.publicAnnouncementReads++;
@@ -251,6 +283,9 @@ const vm = require("node:vm");
     compareReleaseVersions:releasePolicy.compareReleaseVersions,
     announcementInputError:announcementPolicy.announcementInputError,
     announcementQueryError:announcementPolicy.announcementQueryError,
+    parseUserTicketRequest:ticketPolicy.parseUserTicketRequest,
+    parseAdminTicketRequest:ticketPolicy.parseAdminTicketRequest,
+    isAdminTicketAction:ticketPolicy.isAdminTicketAction,
     Deno:{
       env:{get:name=>({
         SUPABASE_URL:"https://example.supabase.co",
@@ -271,6 +306,13 @@ const vm = require("node:vm");
       body:method==="POST"?JSON.stringify({action,id,page,search,emailState,mfaState,limit,kind,reason,caseId:requestCaseId,confirmEmail,platform,outcome,sinceDays,deviceQuery,suspend,reasonCode,candidateTag,minimumVersion,rolloutPercent,confirmTag,announcement,announcementId,confirmId}):undefined});
     const res=await handler(request);
     return {status:res.status,data:await res.json()};
+  }
+  async function ticketCall({jwt,body,originHeader}={}) {
+    const headers={"Content-Type":"application/json"};
+    if(jwt)headers.Authorization="Bearer "+jwt;
+    if(originHeader!==undefined)headers.Origin=originHeader;
+    const request=new Request(endpoint+"/tickets",{method:"POST",headers,body:JSON.stringify(body??{})});
+    const res=await handler(request);return {status:res.status,data:await res.json()};
   }
   async function deny(args,code,name) {
     const before={...calls};
@@ -486,6 +528,60 @@ const vm = require("node:vm");
   assert.equal(calls.announcementWrites,3);
   console.log("PASS Phase 07: synthetic bilingual notice feed, version filtering, AAL2 writes and typed publish/archive");
 
-  console.log("PASS actual Edge Function AAL1/nonadmin denial, owner AAL2 list and synthetic recovery");
+   const ticketPreflight=await handler(new Request(endpoint+"/tickets",{method:"OPTIONS",headers:{Origin:origin}}));
+   assert.equal(ticketPreflight.status,204,"Admin browser ticket endpoint allows its same-origin preflight");
+   assert.equal(ticketPreflight.headers.get("access-control-allow-origin"),origin);
+   const badTicketOrigin=await ticketCall({jwt:ownerAal1,originHeader:"https://attacker.invalid",body:{action:"ticketList"}});
+   assert.equal(badTicketOrigin.status,403,"Ticket endpoint rejects cross-origin browser calls");
+   const unauthTicket=await ticketCall({body:{action:"ticketList"}});
+   assert.equal(unauthTicket.status,401,"Ticket endpoint rejects anonymous requests");
+   const badConsent=await ticketCall({jwt:ownerAal1,body:{action:"ticketCreate",ticket:{
+     subject:"Sync issue",body:"Please help.",diagnosticConsent:false,
+     diagnostics:{platform:"windows",appVersion:"3.1.0"}}}});
+   assert.equal(badConsent.status,400,"Diagnostics require explicit consent");
+   assert.equal(calls.supportUserCalls,0,"Invalid ticket request never reaches privileged RPC");
+   const arbitraryFile=await ticketCall({jwt:ownerAal1,body:{action:"ticketCreate",ticket:{
+     subject:"File attempt",body:"No arbitrary file uploads.",diagnosticConsent:false,diagnostics:null,
+     attachments:[{filename:"vault.json",content:"synthetic"}]}}});
+   assert.equal(arbitraryFile.status,400,"Arbitrary attachments are explicitly rejected");
+   const createdTicket=await ticketCall({jwt:ownerAal1,body:{action:"ticketCreate",ticket:{
+     subject:"Sync issue",body:"Bearer abcdefghijklmnopqrstuvwxyz password=hunter2",
+     diagnosticConsent:true,diagnostics:{platform:"windows",appVersion:"3.1.0",osVersion:"Windows 11",errorCode:"HTTP_503"}}}});
+   assert.equal(createdTicket.status,200,"Verified AAL1 users can create tickets");
+   const syntheticTicketId=createdTicket.data.ticket.id;
+   assert.equal(lastTicketPayload.body.includes("hunter2"),false,"Credentials are redacted before storage");
+   assert.equal(lastTicketPayload.body.includes("abcdefghijklmnopqrstuvwxyz"),false,"Bearer tokens are redacted before storage");
+   assert.equal(createdTicket.data.ticket.requester_id,undefined,"Public response omits account identity");
+   const deniedTicketRead=await ticketCall({jwt:nonAdminAal2,body:{action:"ticketGet",ticketId:syntheticTicketId}});
+   assert.equal(deniedTicketRead.status,404,"A different user cannot read the ticket");
+   const ownTicket=await ticketCall({jwt:ownerAal1,body:{action:"ticketGet",ticketId:syntheticTicketId}});
+   assert.equal(ownTicket.status,200);
+   assert.equal(ownTicket.data.messages.length,1);
+   const aal1Agent=await ticketCall({jwt:ownerAal1,body:{action:"ticketAdminList"}});
+   assert.equal(aal1Agent.status,403,"AAL1 cannot access agent queue");
+   const nonAdminAgent=await ticketCall({jwt:nonAdminAal2,body:{action:"ticketAdminList"}});
+   assert.equal(nonAdminAgent.status,403,"AAL2 non-admin cannot access agent queue");
+   const agentList=await ticketCall({jwt:ownerAal2,body:{action:"ticketAdminList"}});
+   assert.equal(agentList.status,200,"Allowlisted AAL2 agent can load queue");
+   assert.equal(agentList.data.tickets[0].requester_id,undefined);
+   const wrongTicketConfirmation=await ticketCall({jwt:ownerAal2,body:{action:"ticketAdminAssign",ticketId:syntheticTicketId,assigneeId:ownerId,confirmId:"wrong"}});
+   assert.equal(wrongTicketConfirmation.status,409,"Agent mutations require typed ticket confirmation");
+   assert.equal(calls.supportAdminWrites,0);
+   const assignedTicket=await ticketCall({jwt:ownerAal2,body:{action:"ticketAdminAssign",ticketId:syntheticTicketId,assigneeId:ownerId,confirmId:syntheticTicketId}});
+   assert.equal(assignedTicket.status,200);
+   const escalatedTicket=await ticketCall({jwt:ownerAal2,body:{action:"ticketAdminEscalate",ticketId:syntheticTicketId,confirmId:syntheticTicketId}});
+   assert.equal(escalatedTicket.status,200);
+   assert.equal(escalatedTicket.data.ticket.status,"escalated");
+   const changedTicket=await ticketCall({jwt:ownerAal2,body:{action:"ticketAdminStatus",ticketId:syntheticTicketId,status:"in_progress",priority:"high",confirmId:syntheticTicketId}});
+   assert.equal(changedTicket.status,200);
+   assert.equal(changedTicket.data.ticket.priority,"high");
+   const agentReply=await ticketCall({jwt:ownerAal2,body:{action:"ticketAdminReply",ticketId:syntheticTicketId,body:"We are reviewing this.",confirmId:syntheticTicketId}});
+   assert.equal(agentReply.status,200);
+   assert.equal(calls.supportAdminWrites,4);
+   const updatedThread=await ticketCall({jwt:ownerAal1,body:{action:"ticketReply",ticketId:syntheticTicketId,body:"Thank you."}});
+   assert.equal(updatedThread.status,200);
+   assert.equal(syntheticTicketMessages.get(syntheticTicketId).length,3);
+   console.log("PASS Phase 08: AAL1-owned tickets, redacted consented diagnostics, private threads, AAL2 assignment/escalation/status/replies and typed confirmation");
+console.log("PASS actual Edge Function AAL1/nonadmin denial, owner AAL2 list and synthetic recovery");
   console.log("PASS all checks are isolated in memory; zero network/database/email activity");
 })().catch(e=>{console.error(e);process.exitCode=1;});
