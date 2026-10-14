@@ -67,6 +67,7 @@ jobs:
           docker exec -i "$container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 < supabase/tests/admin_device_access.sql
           docker exec -i "$container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 < supabase/tests/admin_security_center.sql
           docker exec -i "$container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 < supabase/tests/admin_sync_quotas.sql
+          docker exec -i "$container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 < supabase/tests/admin_release_policy.sql
       - name: Start real local Edge Function
         shell: bash
         run: |

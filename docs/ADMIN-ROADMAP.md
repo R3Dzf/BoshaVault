@@ -20,8 +20,8 @@
 | 02 | Account support actions | [#20](https://github.com/R3Dzf/BoshaVault/issues/20) | Owner-waived; acceptance incomplete |
 | 03 | Device inventory & access | [#21](https://github.com/R3Dzf/BoshaVault/issues/21) | Owner-waived; external gates deferred (not passed) |
 | 04 | Security Center | [#22](https://github.com/R3Dzf/BoshaVault/issues/22) | Owner-waived for sequencing; policy/review/hosted gates deferred |
-| 05 | Encrypted sync & quotas | [#23](https://github.com/R3Dzf/BoshaVault/issues/23) | In progress by owner direction |
-| 06 | Release Manager | [#24](https://github.com/R3Dzf/BoshaVault/issues/24) | Queued |
+| 05 | Encrypted sync & quotas | [#23](https://github.com/R3Dzf/BoshaVault/issues/23) | Completed · [PR #50](https://github.com/R3Dzf/BoshaVault/pull/50) · `c1e763b` |
+| 06 | Release Manager | [#24](https://github.com/R3Dzf/BoshaVault/issues/24) | In progress by owner direction |
 | 07 | Announcements & notices | [#25](https://github.com/R3Dzf/BoshaVault/issues/25) | Queued |
 | 08 | Support tickets | [#26](https://github.com/R3Dzf/BoshaVault/issues/26) | Queued |
 | 09 | Privacy-conscious analytics | [#27](https://github.com/R3Dzf/BoshaVault/issues/27) | Queued |
@@ -40,7 +40,7 @@
 
 **Gate:** no paid resource may be created, even temporarily. A phase with unchecked requirements is not complete. Delayed work and blocked features stay visible in their issue; an owner waiver is recorded as deferred, never as passed.
 
-**Current owner-directed transition:** Phase 02 (#20) was closed at the owner's direction with acceptance gates deferred; that administrative closure is not a pass. The owner directed continued delivery toward all ten phases. Phase 03 (#21) and Phase 04 (#22) are owner-waived solely for sequencing; neither is completed or passed. PR #48 merged at `7953271668637f136cb0e6f7d3ccd3ce5a2bf3d0` after all seven final-head checks passed, including synthetic SQL fixtures and real local GoTrue/TOTP tests. Phase 04's customer-wide MFA/provider rate-limit rollout, independent human security/screen-reader review, hosted rehearsal and production migration verification remain deferred. Phase 05 (#23) is now in progress by owner direction. No hosted migration, customer account, paid resource or production deployment was touched. See [Phase 03 record](https://github.com/R3Dzf/BoshaVault/issues/21), [Phase 04 record](https://github.com/R3Dzf/BoshaVault/issues/22) and [Phase 04 rollback notes](ADMIN-PHASE-04.md).
+**Current owner-directed transition:** Phase 02 (#20) was closed at the owner's direction with acceptance gates deferred; that administrative closure is not a pass. The owner directed continued delivery toward all ten phases. Phase 03 (#21) and Phase 04 (#22) are owner-waived solely for sequencing; neither is completed or passed. PR #48 merged at `7953271668637f136cb0e6f7d3ccd3ce5a2bf3d0` after all seven final-head checks passed, including synthetic SQL fixtures and real local GoTrue/TOTP tests. Phase 04's customer-wide MFA/provider rate-limit rollout, independent human security/screen-reader review, hosted rehearsal and production migration verification remain deferred. Phase 05 (#23) completed on PR #50 (`c1e763b`) after exact-head checks passed. Phase 06 (#24) is now in progress by owner direction. No hosted migration, customer account, paid resource or production deployment was touched. See [Phase 03 record](https://github.com/R3Dzf/BoshaVault/issues/21), [Phase 04 record](https://github.com/R3Dzf/BoshaVault/issues/22) and [Phase 04 rollback notes](ADMIN-PHASE-04.md).
 ## Existing capabilities to preserve
 
 - Supabase Auth admin list (pagination) and user email/verification/verified MFA.
@@ -72,4 +72,4 @@ do not count as final sign-off. Complete one final security/threat-model
 review, update docs, rollback procedures and support playbook, and verify all
 published Windows and Android versions remain updatable.
 
-**Status:** Phases 00–01 completed. Phases 02–04 are owner-waived with acceptance gates deferred; Phase 05 is in progress by owner direction; Phases 06–10 are queued.
+**Status:** Phases 00–01 and 05 completed. Phases 02–04 are owner-waived with acceptance gates deferred; Phase 06 is in progress by owner direction; Phases 07–10 are queued.

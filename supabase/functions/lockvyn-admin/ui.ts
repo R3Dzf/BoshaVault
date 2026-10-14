@@ -82,6 +82,9 @@ footer{font-size:12px;color:#787284;margin-top:20px}
 .device-list button{margin-top:8px}
 
 @media(max-width:620px){.support-grid{grid-template-columns:1fr}}
+.release-table{min-width:850px}
+.release-policy-block{border-top:1px solid #efecf5;margin-top:18px;padding-top:18px}
+.release-notes{white-space:pre-wrap;max-width:340px}
 </style>
 </head>
 <body>
@@ -103,6 +106,36 @@ footer{font-size:12px;color:#787284;margin-top:20px}
 <button class="primary" type="submit">Verify and open dashboard</button></form>
 </section>
 <div id="dashboard" hidden>
+<section class="release-manager" aria-labelledby="release-manager-heading">
+  <div class="toolbar">
+    <div><div class="eyebrow">Official packages · Windows & Android</div>
+      <h2 id="release-manager-heading">Release Manager</h2>
+      <p class="note">Published stable releases, CI state, changelog, asset SHA256 and signing metadata. No vault or device data is used.</p></div>
+    <button id="refresh-releases" type="button">Refresh release status</button>
+  </div>
+  <p id="release-manager-state" role="status" aria-live="polite">Release status has not been loaded.</p>
+  <div class="scroll"><table class="release-table">
+    <thead><tr><th>Platform / tag</th><th>Published</th><th>CI</th><th>Signature status</th><th>Assets and SHA256</th><th>Changelog</th></tr></thead>
+    <tbody id="release-rows"></tbody>
+  </table></div>
+  <div class="release-policy-block">
+    <h3>Client update policy</h3>
+    <p id="release-policy-state" role="status" aria-live="polite">Policy has not been loaded.</p>
+    <p class="note">The latest stable feed is the default. Rollback sets rollout to 0 and stops optional installs; clients below the minimum still receive the required newer release. Updates never downgrade or change encrypted vaults. A fresh TOTP login is required to save.</p>
+    <form id="release-policy-form" style="max-width:620px">
+      <label>Platform<select id="release-platform"><option value="windows">Windows</option><option value="android">Android</option></select></label>
+      <label>Stable release candidate<select id="release-candidate"><option value="">Latest stable feed</option></select></label>
+      <label id="release-minimum-label">Minimum Windows version<input id="release-minimum" inputmode="decimal" required value="0.0.0"></label>
+      <label>Phased rollout percent<input id="release-rollout" type="number" min="0" max="100" step="1" required value="100"></label>
+      <label>Reason<select id="release-reason" required>
+        <option value="planned_rollout">Planned rollout</option><option value="rollback">Rollback / stop rollout</option>
+        <option value="minimum_version">Minimum version change</option><option value="incident_response">Incident response</option>
+      </select></label>
+      <label>Type the selected tag (or LATEST)<input id="release-confirm-tag" autocomplete="off" required maxlength="80"></label>
+      <button id="save-release-policy" class="primary" type="submit" disabled>Save release policy</button>
+    </form>
+  </div>
+</section>
 <section class="overview">
   <div class="eyebrow">Overview · Account administration</div>
   <div class="toolbar"><div><h1>Users & access</h1>
@@ -311,7 +344,7 @@ async function api(action,params){
 function jwtAal(jwt){try{const bits=jwt.split(".")[1].replace(/-/g,"+").replace(/_/g,"/");return JSON.parse(atob(bits)).aal||"";}catch{return "";}}
 async function openDashboard(){
   visible("login",false);visible("mfa",false);visible("dashboard",true);visible("logout",true);
-  await loadPage(1);await loadHistory();await loadSecurityEvents();
+  await loadPage(1);await loadHistory();await loadSecurityEvents();await loadReleaseManager();
 }
 async function setupMfa(){
   const user=await authFetch("user",null,"GET",accessToken);
@@ -830,6 +863,121 @@ function renderSecurityEvents(data){
     ?"Showing "+data.events.length+" recent metadata-only security events."
     :"No retained security events yet.";
 }
+
+function renderReleaseCatalog(data){
+  window.releaseCatalog=data.releases;window.releasePolicies=data.policies;
+  const rows=get("release-rows");rows.replaceChildren();
+  for(const release of data.releases){
+    const row=document.createElement("tr");
+    const identity=document.createElement("td");
+    const link=document.createElement("a");link.href=release.url;link.target="_blank";link.rel="noreferrer noopener";
+    link.textContent=release.platform+" · "+release.tag;identity.append(link);
+    const dateCell=document.createElement("td");dateCell.textContent=dateTime(release.publishedAt);
+    const ci=document.createElement("td");
+    ci.textContent=release.checks.state==="success"
+      ? release.checks.passed+"/"+release.checks.total+" passed"
+      : release.checks.state==="failed"?"Failed checks":release.checks.state==="pending"?"Checks pending":"CI status unavailable";
+    const signature=document.createElement("td");
+    signature.textContent=release.platform==="windows"?release.windowsSignature:
+      (release.androidSignature||"Android signing metadata unavailable");
+    if(release.androidManifest&&release.androidManifest.signerSha256){
+      const fingerprint=document.createElement("small");
+      fingerprint.textContent="Signer SHA256 · "+release.androidManifest.signerSha256;
+      signature.append(fingerprint);
+    }
+    const assets=document.createElement("td");
+    for(const asset of release.assets){
+      const item=document.createElement("small");
+      item.textContent=asset.name+(asset.sha256?" · SHA256 "+asset.sha256:" · SHA256 unavailable");
+      assets.append(item);
+    }
+    const changelog=document.createElement("td");
+    const details=document.createElement("details");
+    const summary=document.createElement("summary");summary.textContent="View notes";
+    const notes=document.createElement("pre");notes.className="release-notes";
+    notes.textContent=release.changelog||"No changelog supplied.";
+    details.append(summary,notes);changelog.append(details);
+    row.append(identity,dateCell,ci,signature,assets,changelog);rows.append(row);
+  }
+  const policies=data.policies||{};
+  get("release-policy-state").textContent=["windows","android"].map(platform=>{
+    const p=policies[platform]||{};
+    return (platform==="windows"?"Windows":"Android")+": "+
+      (p.candidateTag||"latest stable")+" · minimum "+(p.minimumVersion||"—")+
+      " · rollout "+(Number.isSafeInteger(p.rolloutPercent)?p.rolloutPercent:"—")+"%";
+  }).join(" | ");
+  populateReleaseCandidates(data.releases);
+  applyReleasePolicyFields(data.policies);
+  get("save-release-policy").disabled=false;
+}
+function applyReleasePolicyFields(policies){
+  const platform=get("release-platform").value,p=policies?.[platform]||{};
+  get("release-minimum-label").firstChild.textContent=platform==="android"?"Minimum Android versionCode":"Minimum Windows version";
+  get("release-minimum").value=typeof p.minimumVersion==="string"?p.minimumVersion:(platform==="android"?"0":"0.0.0");
+  get("release-rollout").value=Number.isSafeInteger(p.rolloutPercent)?String(p.rolloutPercent):"100";
+  const candidate=p.candidateTag||"";
+  const select=get("release-candidate");
+  if([...select.options].some(x=>x.value===candidate))select.value=candidate;
+  get("release-confirm-tag").value="";
+  get("release-confirm-tag").placeholder=candidate||"LATEST";
+}
+function populateReleaseCandidates(releases){
+  const platform=get("release-platform").value;
+  const select=get("release-candidate"),selected=select.value;
+  select.replaceChildren();
+  const latest=document.createElement("option");latest.value="";latest.textContent="Latest stable feed";select.append(latest);
+  const platformReleases=releases.filter(x=>x.platform===platform);
+  const visible=platform==="windows"?platformReleases.slice(0,1):platformReleases;
+  for(const release of visible){
+    const option=document.createElement("option");option.value=release.tag;
+    option.textContent=release.tag+" · "+dateTime(release.publishedAt);select.append(option);
+  }
+  if([...select.options].some(x=>x.value===selected))select.value=selected;
+  else if(window.releasePolicies?.[platform]?.candidateTag)
+    select.value=window.releasePolicies[platform].candidateTag;
+  const tag=select.value;get("release-confirm-tag").value="";
+  get("release-confirm-tag").placeholder=tag||"LATEST";
+}
+async function loadReleaseManager(){
+  const state=get("release-manager-state");state.textContent="Loading published release metadata and CI…";
+  try{
+    const data=await api("releaseManager",{});
+    if(!Array.isArray(data.releases)||!data.policies)throw Error("Invalid release manager response");
+    renderReleaseCatalog(data);
+    state.textContent="Loaded "+data.releases.length+" published stable releases. Release notes and asset digests are public metadata.";
+  }catch(error){
+    state.textContent="Could not load release metadata. Retry when connected.";
+    get("release-rows").replaceChildren();get("save-release-policy").disabled=true;
+    alertText(error.message,true);
+  }
+}
+get("refresh-releases").addEventListener("click",()=>{if(accessToken)loadReleaseManager()});
+get("release-platform").addEventListener("change",()=>{
+  populateReleaseCandidates(window.releaseCatalog||[]);
+  applyReleasePolicyFields(window.releasePolicies||{});
+});
+get("release-candidate").addEventListener("change",()=>{
+  const tag=get("release-candidate").value;
+  get("release-confirm-tag").value="";get("release-confirm-tag").placeholder=tag||"LATEST";
+});
+get("release-policy-form").addEventListener("submit",async e=>{
+  e.preventDefault();alertText("");
+  if(!accessToken)return;
+  try{
+    const tag=get("release-candidate").value||null;
+    const result=await api("releasePolicySet",{
+      platform:get("release-platform").value,candidateTag:tag,
+      minimumVersion:get("release-minimum").value.trim(),
+      rolloutPercent:Number(get("release-rollout").value),
+      reasonCode:get("release-reason").value,
+      confirmTag:get("release-confirm-tag").value.trim(),
+    });
+    get("release-confirm-tag").value="";
+    alertText(result.note||"Release policy saved.");
+    await loadReleaseManager();
+  }catch(error){alertText(error.message,true);}
+});
+
 async function loadSecurityEvents(){
   if(!accessToken)return;
   const state=get("security-events-state");

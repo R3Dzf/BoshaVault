@@ -10,6 +10,7 @@ const vm = require("node:vm");
   const file = path.join(__dirname,"../supabase/functions/lockvyn-admin/index.ts");
   const authFile = await import("../supabase/functions/lockvyn-admin/access.mjs");
   const supportPolicy=await import("../supabase/functions/lockvyn-admin/support.mjs");
+  const releasePolicy=await import("../supabase/functions/lockvyn-admin/release.mjs");
   let source = readFileSync(file,"utf8");
   // The single TS-only type annotation does not affect runtime semantics.
   source = source.replace(/^import .*;\s*$/gm,"")
@@ -38,7 +39,22 @@ const vm = require("node:vm");
   const byToken = new Map();
   const caseId = "d0000000-0000-4000-8000-000000000004";
   let caseState="pending";
-  const calls = {list:0,adminLookup:0,mail:0,recoveryClaim:0,factors:0,updated:0,prepared:0,claimed:0,finished:0,sessionCheck:0,securitySignals:[],securityFeed:0,syncOverview:0,syncControl:0};
+  const calls = {list:0,adminLookup:0,mail:0,recoveryClaim:0,factors:0,updated:0,prepared:0,claimed:0,finished:0,sessionCheck:0,securitySignals:[],securityFeed:0,syncOverview:0,syncControl:0,policyReads:0,policySets:0};
+  const syntheticPolicies={windows:{platform:"windows",candidateTag:null,minimumVersion:"0.0.0",rolloutPercent:100,updatedAt:"2026-01-01T00:00:00Z"},android:{platform:"android",candidateTag:null,minimumVersion:"0",rolloutPercent:100,updatedAt:"2026-01-01T00:00:00Z"}};
+  const syntheticReleases=[
+    {tag_name:"windows-v1.22.0",name:"Lockvyn Windows 1.22.0",draft:false,prerelease:false,published_at:"2026-10-01T00:00:00Z",body:"Windows notes <script>not executable</script>",assets:[{id:100,name:"Lockvyn-win-Setup.exe",size:1000,digest:"sha256:"+"a".repeat(64)},{id:101,name:"releases.win.json",size:100,digest:"sha256:"+"b".repeat(64)}]},
+    {tag_name:"android-v1.14.1",name:"Lockvyn Android 1.14.1",draft:false,prerelease:false,published_at:"2026-10-02T00:00:00Z",body:"Android notes",assets:[{id:200,name:"android-update.json",size:300,digest:"sha256:"+"c".repeat(64)},{id:201,name:"Lockvyn-Android.apk",size:2000,digest:"sha256:"+"d".repeat(64)},{id:202,name:"SHA256SUMS-Android.txt",size:80,digest:"sha256:"+"e".repeat(64)}]}
+  ];
+  async function fakeFetch(url){
+    const parsed=new URL(url);if(parsed.hostname!=="api.github.com")throw new Error("Unexpected synthetic release host");
+    let payload;
+    if(parsed.pathname.endsWith("/releases"))payload=syntheticReleases;
+    else if(parsed.pathname.includes("/check-runs"))payload={check_runs:[{name:"Build Lockvyn",conclusion:"success",completed_at:"2026-10-02T00:00:00Z"}]};
+    else if(parsed.pathname.endsWith("/releases/assets/200"))payload={schema:1,packageName:"com.lockvyn.app",tag:"android-v1.14.1",versionName:"1.14.1",versionCode:21,minSdk:28,signerSha256:"f".repeat(64),sha256:"d".repeat(64),url:"https://github.com/R3Dzf/BoshaVault/releases/download/android-v1.14.1/Lockvyn-Android.apk"};
+    else throw new Error("Unexpected synthetic GitHub API path "+parsed.pathname);
+    const response=new Response(JSON.stringify(payload),{status:200,headers:{"Content-Type":"application/json"}});
+    Object.defineProperty(response,"url",{value:parsed.href});return response;
+  }
   const revokedSessionIds=new Set();
   let sessionLookupError=false;
   function token(user,aal="aal2",role="authenticated",sessionId=user.id) {
@@ -106,6 +122,16 @@ const vm = require("node:vm");
         assert.equal(args.p_user_id,args.p_session_id);
         if(sessionLookupError)return {data:null,error:{message:"synthetic lookup failure"}};
         return {data:!revokedSessionIds.has(args.p_session_id),error:null};
+      }
+      if(name==="lockvyn_release_policy_public"){
+        calls.policyReads++;
+        return {data:syntheticPolicies[args.p_platform]||null,error:null};
+      }
+      if(name==="lockvyn_admin_set_release_policy"){
+        calls.policySets++;assert.equal(args.p_actor,ownerId);assert.equal(args.p_actor_session,ownerId);
+        assert.equal(args.p_actor_aal,"aal2");assert.equal(args.p_fresh_totp,true);
+        syntheticPolicies[args.p_platform]={platform:args.p_platform,candidateTag:args.p_candidate_tag,minimumVersion:args.p_minimum_version,rolloutPercent:args.p_rollout_percent,updatedAt:"2026-10-13T00:00:00Z"};
+        return {data:syntheticPolicies[args.p_platform],error:null};
       }
       if(name==="lockvyn_admin_record_security_signal"){
         assert(["admin_step_up_denied","admin_allowlist_denied","admin_inactive_session"].includes(args.p_signal));
@@ -193,6 +219,9 @@ const vm = require("node:vm");
     safeTarget:supportPolicy.safeTarget,
     isAutomaticAction:supportPolicy.isAutomaticAction,
     cloudLoginStatus:supportPolicy.cloudLoginStatus,
+    validCandidateTag:releasePolicy.validCandidateTag,
+    validateReleasePolicy:releasePolicy.validateReleasePolicy,
+    compareReleaseVersions:releasePolicy.compareReleaseVersions,
     Deno:{
       env:{get:name=>({
         SUPABASE_URL:"https://example.supabase.co",
@@ -201,16 +230,16 @@ const vm = require("node:vm");
       })[name]},
       serve:fn=>{handler=fn}
     },
-    Request,Response,URL,JSON,TextEncoder,
+    Request,Response,URL,JSON,TextEncoder,AbortSignal,fetch:fakeFetch,
     crypto:globalThis.crypto, btoa:globalThis.btoa, atob:globalThis.atob
   };
   vm.runInNewContext(source,context,{filename:file,timeout:2000});
   assert.equal(typeof handler,"function");
-  async function call({jwt,action="list",id=targetId,page=1,search="",emailState="all",mfaState="all",limit=50,originHeader=origin,contentType="application/json",method="POST",kind,reason,caseId:requestCaseId,confirmEmail,platform,outcome,sinceDays,deviceQuery,suspend,reasonCode}={}){
+  async function call({jwt,action="list",id=targetId,page=1,search="",emailState="all",mfaState="all",limit=50,originHeader=origin,contentType="application/json",method="POST",kind,reason,caseId:requestCaseId,confirmEmail,platform,outcome,sinceDays,deviceQuery,suspend,reasonCode,candidateTag,minimumVersion,rolloutPercent,confirmTag}={}){
     const headers={Origin:originHeader,"Content-Type":contentType};
     if(jwt)headers.Authorization="Bearer "+jwt;
     const request=new Request(endpoint,{method,headers,
-      body:method==="POST"?JSON.stringify({action,id,page,search,emailState,mfaState,limit,kind,reason,caseId:requestCaseId,confirmEmail,platform,outcome,sinceDays,deviceQuery,suspend,reasonCode}):undefined});
+      body:method==="POST"?JSON.stringify({action,id,page,search,emailState,mfaState,limit,kind,reason,caseId:requestCaseId,confirmEmail,platform,outcome,sinceDays,deviceQuery,suspend,reasonCode,candidateTag,minimumVersion,rolloutPercent,confirmTag}):undefined});
     const res=await handler(request);
     return {status:res.status,data:await res.json()};
   }
@@ -348,6 +377,32 @@ const vm = require("node:vm");
   assert.equal(replay.status,409,"Confirm must be single use");
   assert.equal(calls.updated,1);
   console.log("PASS Phase 02: owner/nonadmin denied, no changes before confirmation, one-time Auth action audited");
+  const publicPolicy=await handler(new Request(endpoint+"/release-policy?platform=android",{method:"GET"}));
+  const publicData=await publicPolicy.json();
+  assert.equal(publicPolicy.status,200,"sanitized platform policy is public for native update checks");
+  assert.equal(publicPolicy.headers.get("access-control-allow-origin"),"*");
+  assert.equal(publicData.platform,"android");
+  assert.equal(publicData.rolloutPercent,100);
+  assert.equal(publicData.actorId,undefined,"public policy contains no actor identity");
+  const invalidPublic=await handler(new Request(endpoint+"/release-policy?platform=macos",{method:"GET"}));
+  assert.equal(invalidPublic.status,400,"public policy rejects unknown platforms");
+  const catalog=await call({jwt:ownerAal2,action:"releaseManager"});
+  assert.equal(catalog.status,200,"AAL2 admin can load release metadata");
+  assert.equal(catalog.data.releases.length,2);
+  assert.equal(catalog.data.releases[0].checks.state,"success");
+  assert.match(catalog.data.releases[1].androidSignature,/fingerprint published/);
+  assert.equal(catalog.data.releases[1].androidManifest.signerSha256,"f".repeat(64));
+  assert.match(catalog.data.releases[0].windowsSignature,/Unsigned/);
+  assert.equal(catalog.data.releases[0].changelog,"Windows notes <script>not executable</script>");
+  assert.equal(calls.policyReads,3,"public endpoint and both admin policies are read");
+  const badReleaseConfirmation=await call({jwt:ownerAal2,action:"releasePolicySet",platform:"windows",candidateTag:null,minimumVersion:"0.0.0",rolloutPercent:0,reasonCode:"rollback",confirmTag:"wrong"});
+  assert.equal(badReleaseConfirmation.status,400);
+  assert.equal(calls.policySets,0,"typed release confirmation is required");
+  const releaseRollback=await call({jwt:ownerAal2,action:"releasePolicySet",platform:"windows",candidateTag:null,minimumVersion:"0.0.0",rolloutPercent:0,reasonCode:"rollback",confirmTag:"LATEST"});
+  assert.equal(releaseRollback.status,200);
+  assert.equal(releaseRollback.data.policy.rolloutPercent,0);
+  assert.equal(releaseRollback.data.rollbackSafe,true);
+  assert.equal(calls.policySets,1);
   console.log("PASS actual Edge Function AAL1/nonadmin denial, owner AAL2 list and synthetic recovery");
   console.log("PASS all checks are isolated in memory; zero network/database/email activity");
 })().catch(e=>{console.error(e);process.exitCode=1;});

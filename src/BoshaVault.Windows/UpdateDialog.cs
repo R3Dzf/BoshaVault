@@ -1,4 +1,8 @@
 using System.Diagnostics;
+using System.Net.Http;
+using System.Text.Json;
+using System.Text.RegularExpressions;
+using BoshaVault.Core;
 using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
@@ -11,6 +15,7 @@ namespace BoshaVault.Windows;
 /// <summary>Installed-version-aware update screen with release-asset size estimates.</summary>
 internal sealed class UpdateDialog : Window
 {
+    private static readonly HttpClient PolicyHttp = new() { Timeout = TimeSpan.FromSeconds(10) };
     private readonly UpdateManager manager = new(new GithubSource("https://github.com/R3Dzf/BoshaVault", null, false));
     private readonly CancellationTokenSource cancellation = new();
     private readonly TextBlock status, versions, sizes, progressLabel, fallbackNote;
@@ -136,18 +141,65 @@ internal sealed class UpdateDialog : Window
         status.Text = text;
     }
 
+    private async Task<(string? CandidateTag, Version MinimumVersion, int RolloutPercent)> LoadReleasePolicyAsync()
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get,
+            CloudProject.Url + "functions/v1/lockvyn-admin/release-policy?platform=windows");
+        request.Headers.Add("apikey", CloudProject.PublishableKey);
+        request.Headers.Accept.ParseAdd("application/json");
+        using var response = await PolicyHttp.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellation.Token);
+        if (!response.IsSuccessStatusCode || response.Content.Headers.ContentLength is > 8192)
+            throw new InvalidOperationException("Cannot verify the Windows update policy.");
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellation.Token);
+        using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellation.Token);
+        var root = document.RootElement;
+        if (!root.TryGetProperty("platform", out var platform) || platform.GetString() != "windows" ||
+            !root.TryGetProperty("minimumVersion", out var minimum) || minimum.ValueKind != JsonValueKind.String ||
+            !Version.TryParse(minimum.GetString(), out var floor) ||
+            !root.TryGetProperty("rolloutPercent", out var rollout) || !rollout.TryGetInt32(out int percent) ||
+            percent is < 0 or > 100 || !root.TryGetProperty("candidateTag", out var candidate))
+            throw new InvalidOperationException("Invalid Windows update policy.");
+        string? tag = candidate.ValueKind == JsonValueKind.Null ? null :
+            candidate.ValueKind == JsonValueKind.String ? candidate.GetString() : null;
+        if ((candidate.ValueKind != JsonValueKind.Null && tag is null) ||
+            (tag is not null && !Regex.IsMatch(tag, @"^windows-v[0-9]+\.[0-9]+\.[0-9]+$")))
+            throw new InvalidOperationException("Invalid Windows update candidate.");
+        return (tag, floor!, percent);
+    }
+
     private async Task CheckAsync()
     {
         Begin("Checking official Windows release feed…");
         update = null; whatsNew.IsEnabled = false; plannedBytes = fullBytes = 0;
         sizes.Text = ""; fallbackNote.Text = "";
         progress.Visibility = progressLabel.Visibility = Visibility.Collapsed;
+        var policy = await LoadReleasePolicyAsync();
+        string installedText = manager.CurrentVersion?.ToString() ?? AppVersion;
+        if (!Version.TryParse(installedText, out var installedVersion) || installedVersion is null)
+            throw new InvalidOperationException("Installed version could not be verified.");
+        bool mandatory = installedVersion.CompareTo(policy.MinimumVersion) < 0;
+        // Rollout sampling stays on this device. No stable device identifier or telemetry is sent.
+        if (!mandatory && (policy.RolloutPercent == 0 || Random.Shared.Next(100) >= policy.RolloutPercent))
+        {
+            versions.Text = $"Installed: v{installedVersion} · staged rollout";
+            status.Text = "This installation is not in the current optional update group. Retry later; your encrypted vault is unchanged.";
+            return;
+        }
         update = await manager.CheckForUpdatesAsync().WaitAsync(TimeSpan.FromSeconds(30), cancellation.Token);
         if (closed) return;
         if (update == null)
         {
+            if (mandatory) throw new InvalidOperationException("A required newer Windows release is not available yet. Retry later.");
             versions.Text = $"Installed: v{manager.CurrentVersion} · Up to date";
             status.Text = "You're running the latest stable Lockvyn release.";
+            return;
+        }
+        string availableTag = "windows-v" + update.TargetFullRelease.Version.ToString();
+        if (policy.CandidateTag is not null && !StringComparer.Ordinal.Equals(policy.CandidateTag, availableTag))
+        {
+            update = null;
+            versions.Text = $"Installed: v{manager.CurrentVersion} · candidate held";
+            status.Text = "The published Windows candidate is held by the release policy. The installed app and vault are unchanged.";
             return;
         }
         fullBytes = update.TargetFullRelease.Size;
