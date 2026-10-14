@@ -157,7 +157,7 @@ internal static class CloudSyncDialog
             Action("Support tickets", async () =>
             {
                 await Refresh();
-                SupportTicketDialog.Show(d, http, Refresh, EnsureCurrent, cancellation.Token);
+                SupportTicketDialog.Show(d, http, Refresh, () => !closed && current() && vault.IsOpen, cancellation.Token);
             }, inBody: true);
             Action("Sync now", async () =>
             {
