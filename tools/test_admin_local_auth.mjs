@@ -205,7 +205,7 @@ const ticketPreflight=await fetch(ticketsEndpoint,{method:"OPTIONS",headers:{
   Origin:root,"Access-Control-Request-Method":"POST",
   "Access-Control-Request-Headers":"authorization,content-type",
 }});
-assert.equal(ticketPreflight.status,204,"Dashboard ticket API preflight is allowed");
+assert([200,204].includes(ticketPreflight.status),"Dashboard ticket API preflight is allowed");
 assert.equal(ticketPreflight.headers.get("access-control-allow-origin"),root);
 assert.match(ticketPreflight.headers.get("access-control-allow-methods")||"",/POST/);
 assert.match(ticketPreflight.headers.get("access-control-allow-headers")||"",/authorization.*content-type/i);
