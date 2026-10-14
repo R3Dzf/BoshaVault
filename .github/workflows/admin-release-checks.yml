@@ -20,6 +20,8 @@ jobs:
         run: python tools/test_admin_release.py
       - name: Check release minimum, rollout and rollback policies
         run: node tools/test_admin_release_manager.mjs
+      - name: Check announcement localization, targeting and content safety
+        run: node tools/test_announcements.mjs
       - name: Check verified admin AAL2 and allowlist decisions
         run: node tools/test-admin-access.cjs
       - name: Check privileged account support rules

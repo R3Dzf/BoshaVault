@@ -11,6 +11,7 @@ const vm = require("node:vm");
   const authFile = await import("../supabase/functions/lockvyn-admin/access.mjs");
   const supportPolicy=await import("../supabase/functions/lockvyn-admin/support.mjs");
   const releasePolicy=await import("../supabase/functions/lockvyn-admin/release.mjs");
+  const announcementPolicy=await import("../supabase/functions/lockvyn-admin/announcements.mjs");
   let source = readFileSync(file,"utf8");
   // The single TS-only type annotation does not affect runtime semantics.
   source = source.replace(/^import .*;\s*$/gm,"")
@@ -39,7 +40,8 @@ const vm = require("node:vm");
   const byToken = new Map();
   const caseId = "d0000000-0000-4000-8000-000000000004";
   let caseState="pending";
-  const calls = {list:0,adminLookup:0,mail:0,recoveryClaim:0,factors:0,updated:0,prepared:0,claimed:0,finished:0,sessionCheck:0,securitySignals:[],securityFeed:0,syncOverview:0,syncControl:0,policyReads:0,policySets:0};
+  const calls = {list:0,adminLookup:0,mail:0,recoveryClaim:0,factors:0,updated:0,prepared:0,claimed:0,finished:0,sessionCheck:0,securitySignals:[],securityFeed:0,syncOverview:0,syncControl:0,policyReads:0,policySets:0,announcementReads:0,announcementWrites:0,publicAnnouncementReads:0};
+  const syntheticAnnouncements=[];
   const syntheticPolicies={windows:{platform:"windows",candidateTag:null,minimumVersion:"0.0.0",rolloutPercent:100,updatedAt:"2026-01-01T00:00:00Z"},android:{platform:"android",candidateTag:null,minimumVersion:"0",rolloutPercent:100,updatedAt:"2026-01-01T00:00:00Z"}};
   const syntheticReleases=[
     {tag_name:"windows-v1.22.0",name:"Lockvyn Windows 1.22.0",draft:false,prerelease:false,published_at:"2026-10-01T00:00:00Z",body:"Windows notes <script>not executable</script>",assets:[{id:100,name:"Lockvyn-win-Setup.exe",size:1000,digest:"sha256:"+"a".repeat(64)},{id:101,name:"releases.win.json",size:100,digest:"sha256:"+"b".repeat(64)}]},
@@ -55,6 +57,7 @@ const vm = require("node:vm");
     const response=new Response(JSON.stringify(payload),{status:200,headers:{"Content-Type":"application/json"}});
     Object.defineProperty(response,"url",{value:parsed.href});return response;
   }
+  let announcementFeedUnavailable=false;
   const revokedSessionIds=new Set();
   let sessionLookupError=false;
   function token(user,aal="aal2",role="authenticated",sessionId=user.id) {
@@ -122,6 +125,30 @@ const vm = require("node:vm");
         assert.equal(args.p_user_id,args.p_session_id);
         if(sessionLookupError)return {data:null,error:{message:"synthetic lookup failure"}};
         return {data:!revokedSessionIds.has(args.p_session_id),error:null};
+      }
+      if(name==="lockvyn_announcements_feed"){
+        calls.publicAnnouncementReads++;
+        assert.equal(args.p_platform,"windows");assert.equal(args.p_version,"1.21.0");assert.equal(args.p_locale,"ar");
+        assert.equal(Object.keys(args).sort().join(","),"p_locale,p_platform,p_version","feed carries only platform, version and locale");
+        if(announcementFeedUnavailable)return {data:null,error:{message:"synthetic offline RPC"}};
+        return {data:[{id:"e1000000-0000-4000-8000-000000000001",title:"صيانة",body:"تنبيه صيانة",severity:"warning",notify:false,publishedAt:"2026-01-01T00:00:00Z",expiresAt:null}],error:null};
+      }
+      if(name==="lockvyn_admin_announcement_manage"){
+        assert.equal(args.p_actor,ownerId);assert.equal(args.p_actor_session,ownerId);
+        assert.equal(args.p_actor_aal,"aal2");
+        calls.announcementReads+=args.p_action==="list"?1:0;
+        if(args.p_action==="list")return {data:{announcements:syntheticAnnouncements},error:null};
+        assert.equal(args.p_fresh_totp,true);
+        calls.announcementWrites++;
+        let notice=syntheticAnnouncements.find(x=>x.id===args.p_announcement_id);
+        if(args.p_action==="create"){
+          notice={...args.p_payload,id:"e1000000-0000-4000-8000-000000000001",status:"draft"};
+          syntheticAnnouncements.push(notice);
+        }else if(!notice)return {data:null,error:{code:"P0002"}};
+        else if(args.p_action==="update")Object.assign(notice,args.p_payload);
+        else if(args.p_action==="publish")notice.status="published";
+        else if(args.p_action==="archive")notice.status="archived";
+        return {data:{announcement:notice},error:null};
       }
       if(name==="lockvyn_release_policy_public"){
         calls.policyReads++;
@@ -222,6 +249,8 @@ const vm = require("node:vm");
     validCandidateTag:releasePolicy.validCandidateTag,
     validateReleasePolicy:releasePolicy.validateReleasePolicy,
     compareReleaseVersions:releasePolicy.compareReleaseVersions,
+    announcementInputError:announcementPolicy.announcementInputError,
+    announcementQueryError:announcementPolicy.announcementQueryError,
     Deno:{
       env:{get:name=>({
         SUPABASE_URL:"https://example.supabase.co",
@@ -235,11 +264,11 @@ const vm = require("node:vm");
   };
   vm.runInNewContext(source,context,{filename:file,timeout:2000});
   assert.equal(typeof handler,"function");
-  async function call({jwt,action="list",id=targetId,page=1,search="",emailState="all",mfaState="all",limit=50,originHeader=origin,contentType="application/json",method="POST",kind,reason,caseId:requestCaseId,confirmEmail,platform,outcome,sinceDays,deviceQuery,suspend,reasonCode,candidateTag,minimumVersion,rolloutPercent,confirmTag}={}){
+  async function call({jwt,action="list",id=targetId,page=1,search="",emailState="all",mfaState="all",limit=50,originHeader=origin,contentType="application/json",method="POST",kind,reason,caseId:requestCaseId,confirmEmail,platform,outcome,sinceDays,deviceQuery,suspend,reasonCode,candidateTag,minimumVersion,rolloutPercent,confirmTag,announcement,announcementId,confirmId}={}){
     const headers={Origin:originHeader,"Content-Type":contentType};
     if(jwt)headers.Authorization="Bearer "+jwt;
     const request=new Request(endpoint,{method,headers,
-      body:method==="POST"?JSON.stringify({action,id,page,search,emailState,mfaState,limit,kind,reason,caseId:requestCaseId,confirmEmail,platform,outcome,sinceDays,deviceQuery,suspend,reasonCode,candidateTag,minimumVersion,rolloutPercent,confirmTag}):undefined});
+      body:method==="POST"?JSON.stringify({action,id,page,search,emailState,mfaState,limit,kind,reason,caseId:requestCaseId,confirmEmail,platform,outcome,sinceDays,deviceQuery,suspend,reasonCode,candidateTag,minimumVersion,rolloutPercent,confirmTag,announcement,announcementId,confirmId}):undefined});
     const res=await handler(request);
     return {status:res.status,data:await res.json()};
   }
@@ -403,6 +432,60 @@ const vm = require("node:vm");
   assert.equal(releaseRollback.data.policy.rolloutPercent,0);
   assert.equal(releaseRollback.data.rollbackSafe,true);
   assert.equal(calls.policySets,1);
+  const publicFeed=await handler(new Request(endpoint+"/announcements?platform=windows&version=1.21.0&locale=ar",{method:"GET"}));
+  const publicAnnouncements=await publicFeed.json();
+  assert.equal(publicFeed.status,200,"native clients can read the sanitized announcement feed");
+  assert.equal(publicFeed.headers.get("access-control-allow-origin"),"*");
+  assert.match(publicFeed.headers.get("cache-control"),/max-age=60/);
+  assert.equal(publicAnnouncements[0].title,"صيانة");
+  assert.equal(publicAnnouncements[0].actorId,undefined,"public feed contains no actor identity");
+  assert.equal(calls.publicAnnouncementReads,1);
+  const badAnnouncementFeed=await handler(new Request(endpoint+"/announcements?platform=windows&version=1.2&locale=en",{method:"GET"}));
+  assert.equal(badAnnouncementFeed.status,400,"public feed validates platform version bounds");
+  assert.equal(calls.publicAnnouncementReads,1,"invalid feed query never reaches the database");
+  announcementFeedUnavailable=true;
+  const unavailableFeed=await handler(new Request(endpoint+"/announcements?platform=windows&version=1.21.0&locale=ar",{method:"GET"}));
+  assert.equal(unavailableFeed.status,503,"offline feed failure returns a safe retry response");
+  assert.equal(unavailableFeed.headers.get("cache-control"),"no-store","failed feed is not cached");
+  announcementFeedUnavailable=false;
+  const reconnectedFeed=await handler(new Request(endpoint+"/announcements?platform=windows&version=1.21.0&locale=ar",{method:"GET"}));
+  const recoveredItems=await reconnectedFeed.json();
+  assert.equal(reconnectedFeed.status,200,"the same anonymous feed can be fetched after reconnect");
+  assert.equal(recoveredItems[0].id,publicAnnouncements[0].id,"retry returns the same item without server read receipts");
+  assert.equal(calls.publicAnnouncementReads,3,"offline retry carries no device or account state");
+
+
+  const notice={titleEn:"Maintenance",titleAr:"صيانة",bodyEn:"Sync pauses briefly.",
+    bodyAr:"سيتوقف التزامن لفترة قصيرة.",severity:"warning",targetPlatform:"windows",
+    minVersion:"1.20.0",maxVersion:"1.22.0",notify:true,expiresAt:null};
+  const readsBefore=calls.announcementReads;
+  const announcementList=await call({jwt:ownerAal2,action:"announcements"});
+  assert.equal(announcementList.status,200,"AAL2 admin can load announcement drafts");
+  assert.equal(Array.isArray(announcementList.data.announcements),true);
+  assert.equal(calls.announcementReads,readsBefore+1);
+  const deniedAnnouncement=await call({jwt:ownerAal1,action:"announcementSave",announcement:notice});
+  assert.equal(deniedAnnouncement.status,403,"AAL1 cannot save a notice");
+  assert.equal(calls.announcementWrites,0,"AAL1 cannot reach the announcement mutation RPC");
+  const invalidAnnouncement=await call({jwt:ownerAal2,action:"announcementSave",
+    announcement:{...notice,bodyEn:"private@example.invalid"}});
+  assert.equal(invalidAnnouncement.status,400,"sensitive content is rejected");
+  assert.equal(calls.announcementWrites,0,"invalid content never reaches the database");
+  const savedAnnouncement=await call({jwt:ownerAal2,action:"announcementSave",announcement:notice});
+  assert.equal(savedAnnouncement.status,200);
+  assert.equal(savedAnnouncement.data.announcement.status,"draft");
+  const noticeId=savedAnnouncement.data.announcement.id;
+  const badNoticeConfirm=await call({jwt:ownerAal2,action:"announcementPublish",id:noticeId,confirmId:"wrong"});
+  assert.equal(badNoticeConfirm.status,400,"publishing requires typed notice ID");
+  assert.equal(calls.announcementWrites,1,"bad confirmation did not mutate");
+  const publishedNotice=await call({jwt:ownerAal2,action:"announcementPublish",id:noticeId,confirmId:noticeId});
+  assert.equal(publishedNotice.status,200);
+  assert.equal(publishedNotice.data.announcement.status,"published");
+  const archivedNotice=await call({jwt:ownerAal2,action:"announcementArchive",id:noticeId,confirmId:noticeId});
+  assert.equal(archivedNotice.status,200);
+  assert.equal(archivedNotice.data.announcement.status,"archived");
+  assert.equal(calls.announcementWrites,3);
+  console.log("PASS Phase 07: synthetic bilingual notice feed, version filtering, AAL2 writes and typed publish/archive");
+
   console.log("PASS actual Edge Function AAL1/nonadmin denial, owner AAL2 list and synthetic recovery");
   console.log("PASS all checks are isolated in memory; zero network/database/email activity");
 })().catch(e=>{console.error(e);process.exitCode=1;});

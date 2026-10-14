@@ -40,5 +40,13 @@ The vault master passphrase is not the cloud account password. Admins cannot res
 - The feed requires the same confirmed-user, AAL2, live-session and allowlist checks as other admin routes. The private SQL table is not directly exposed to client roles.
 - No customer-wide MFA enforcement or Supabase Auth provider rate-limit setting is changed by this feature. See [Phase 04 security-center rollout notes](ADMIN-PHASE-04.md) for the retention and rollback boundary.
 
+## Release management
+Phase 06 adds a private audited rollout policy for Windows and Android. Native clients read only the sanitized platform policy and keep update eligibility local. The public release-policy route does not require an admin session; policy writes do.
+
+## Announcements and notices
+Phase 07 adds bilingual English/Arabic drafts, preview, publish/archive, platform/version targeting, expiry, and optional in-app alerts. Drafts and audit rows stay in the private schema. Admin writes require the verified AAL2 active administrator session and fresh TOTP. The public feed returns only current published notices that match the requested platform, version, and locale; clients send no account or device identifiers.
+
+Windows and Android store the alert preference locally, disabled by default. They fetch only when the user opens the notices view or opts into in-app alerts. Offline errors do not affect vault access or sync, and local notice IDs suppress repeat prompts without being uploaded. This feature uses no remote push provider or operating-system notification permission.
+
 ## Browser HTML hosting
 Supabase Edge Functions serve HTML as text on their default project domain. The login page is served through a dedicated Cloudflare Worker (`infra/cloudflare/lockvyn-admin-ui.js`) that renders HTML with a strict nonce-based CSP. The browser signs in directly with Supabase Auth and sends only authorized admin API requests to the Edge Function from the explicitly allowed Cloudflare origin. No administrative service-role secret is shipped to the Worker or browser.

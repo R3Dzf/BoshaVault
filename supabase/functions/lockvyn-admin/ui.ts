@@ -85,6 +85,19 @@ footer{font-size:12px;color:#787284;margin-top:20px}
 .release-table{min-width:850px}
 .release-policy-block{border-top:1px solid #efecf5;margin-top:18px;padding-top:18px}
 .release-notes{white-space:pre-wrap;max-width:340px}
+.announcement-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(290px,.85fr);gap:18px;margin-top:16px}
+.announcement-editor{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.announcement-editor label{min-width:0}.announcement-editor .wide{grid-column:1/-1}
+.announcement-editor textarea,.announcement-editor select{font:inherit;border:1px solid #d9d6e4;border-radius:10px;padding:10px 12px;background:white;color:#211b38;width:100%;min-height:44px}
+.announcement-editor textarea{resize:vertical;min-height:86px;line-height:1.5}
+.announcement-editor input[type=checkbox]{width:auto;min-height:0;padding:0}
+.announcement-list{list-style:none;padding:0;margin:12px 0;display:grid;gap:9px}
+.announcement-list li{border:1px solid #e8e4f1;border-radius:11px;padding:12px;display:grid;gap:6px}
+.announcement-list li button{text-align:left}
+.announcement-preview{white-space:pre-wrap;overflow-wrap:anywhere;border:1px solid #e8e4f1;background:#fbfaff;border-radius:10px;padding:14px;min-height:110px}
+.announcement-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin-top:12px}
+@media(max-width:760px){.announcement-grid{grid-template-columns:1fr}}
+@media(max-width:520px){.announcement-editor{grid-template-columns:1fr}.announcement-editor .wide{grid-column:auto}}
 </style>
 </head>
 <body>
@@ -106,6 +119,49 @@ footer{font-size:12px;color:#787284;margin-top:20px}
 <button class="primary" type="submit">Verify and open dashboard</button></form>
 </section>
 <div id="dashboard" hidden>
+<section aria-labelledby="announcement-heading">
+  <div class="toolbar">
+    <div><div class="eyebrow">Maintenance · security · updates</div>
+      <h2 id="announcement-heading">Announcements & notices</h2>
+      <p class="note">Write bilingual notices, preview plain text, target an app version and publish with fresh authenticator verification. Client alerts stay opt-in and local.</p></div>
+    <button id="refresh-announcements" type="button">Refresh notices</button>
+  </div>
+  <p id="announcement-state" role="status" aria-live="polite">Notices have not been loaded.</p>
+  <div class="announcement-grid">
+    <div>
+      <h3>Drafts and published notices</h3>
+      <ol id="announcement-list" class="announcement-list" aria-label="Announcement list"></ol>
+      <div class="announcement-actions">
+        <label>Type the selected notice ID to publish or archive
+          <input id="announcement-confirm-id" autocomplete="off" maxlength="36" aria-describedby="announcement-selected-id"></label>
+        <button id="announcement-publish" type="button" disabled>Publish selected draft</button>
+        <button id="announcement-archive" type="button" disabled>Archive selected notice</button>
+      </div>
+      <p id="announcement-selected-id" class="note">Select a notice to see its ID and actions.</p>
+    </div>
+    <div>
+      <form id="announcement-form" class="announcement-editor" style="max-width:none">
+        <label>English title<input id="announcement-title-en" maxlength="120" required></label>
+        <label>Arabic title<input id="announcement-title-ar" maxlength="120" required dir="auto"></label>
+        <label class="wide">English message<textarea id="announcement-body-en" maxlength="800" rows="4" required></textarea></label>
+        <label class="wide">Arabic message<textarea id="announcement-body-ar" maxlength="800" rows="4" required dir="auto"></textarea></label>
+        <label>Severity<select id="announcement-severity"><option value="info">Information</option><option value="warning">Warning</option><option value="critical">Critical</option></select></label>
+        <label>Platform<select id="announcement-platform"><option value="all">All platforms</option><option value="windows">Windows</option><option value="android">Android</option></select></label>
+        <label>Minimum version<input id="announcement-min" maxlength="16" placeholder="Optional · e.g. 1.21.0"></label>
+        <label>Maximum version<input id="announcement-max" maxlength="16" placeholder="Optional · Android uses version code"></label>
+        <label>Expires at<input id="announcement-expires" type="datetime-local"></label>
+        <label><span>Show an in-app alert when enabled locally</span><input id="announcement-notify" type="checkbox"></label>
+        <div class="wide announcement-actions">
+          <button class="primary" id="announcement-save" type="submit">Save as draft</button>
+          <button id="announcement-new" type="button">New draft</button>
+          <button id="announcement-preview-button" type="button">Preview English & Arabic</button>
+        </div>
+      </form>
+      <h3>Preview</h3>
+      <div id="announcement-preview" class="announcement-preview" role="status" aria-live="polite">The preview appears here as plain text.</div>
+    </div>
+  </div>
+</section>
 <section class="release-manager" aria-labelledby="release-manager-heading">
   <div class="toolbar">
     <div><div class="eyebrow">Official packages · Windows & Android</div>
@@ -344,7 +400,7 @@ async function api(action,params){
 function jwtAal(jwt){try{const bits=jwt.split(".")[1].replace(/-/g,"+").replace(/_/g,"/");return JSON.parse(atob(bits)).aal||"";}catch{return "";}}
 async function openDashboard(){
   visible("login",false);visible("mfa",false);visible("dashboard",true);visible("logout",true);
-  await loadPage(1);await loadHistory();await loadSecurityEvents();await loadReleaseManager();
+  await loadPage(1);await loadHistory();await loadSecurityEvents();await loadReleaseManager();await loadAnnouncementManager();
 }
 async function setupMfa(){
   const user=await authFetch("user",null,"GET",accessToken);
@@ -1043,6 +1099,131 @@ if(RECOVERY){
     });
   }
 }
+let announcementRows=[],selectedAnnouncement=null;
+function clearAnnouncementForm(){
+  selectedAnnouncement=null;
+  for(const id of ["announcement-title-en","announcement-title-ar","announcement-body-en","announcement-body-ar","announcement-min","announcement-max","announcement-expires"])
+    get(id).value="";
+  get("announcement-severity").value="info";
+  get("announcement-platform").value="all";
+  get("announcement-notify").checked=false;
+  get("announcement-confirm-id").value="";
+  get("announcement-selected-id").textContent="Select a notice to see its ID and actions.";
+  get("announcement-save").disabled=false;
+  get("announcement-save").textContent="Save as draft";
+  get("announcement-publish").disabled=true;
+  get("announcement-archive").disabled=true;
+}
+function announcementPayload(){
+  const expires=get("announcement-expires").value;
+  return {
+    titleEn:get("announcement-title-en").value.trim(),
+    titleAr:get("announcement-title-ar").value.trim(),
+    bodyEn:get("announcement-body-en").value.trim(),
+    bodyAr:get("announcement-body-ar").value.trim(),
+    severity:get("announcement-severity").value,
+    targetPlatform:get("announcement-platform").value,
+    minVersion:get("announcement-min").value.trim()||null,
+    maxVersion:get("announcement-max").value.trim()||null,
+    notify:get("announcement-notify").checked,
+    expiresAt:expires?new Date(expires).toISOString():null,
+  };
+}
+function updateAnnouncementConfirm(){
+  if(!selectedAnnouncement)return;
+  const matches=get("announcement-confirm-id").value.trim()===selectedAnnouncement.id;
+  get("announcement-publish").disabled=!matches||selectedAnnouncement.status!=="draft";
+  get("announcement-archive").disabled=!matches||selectedAnnouncement.status==="archived";
+}
+function selectAnnouncement(item){
+  selectedAnnouncement=item;
+  get("announcement-title-en").value=item.titleEn||"";
+  get("announcement-title-ar").value=item.titleAr||"";
+  get("announcement-body-en").value=item.bodyEn||"";
+  get("announcement-body-ar").value=item.bodyAr||"";
+  get("announcement-severity").value=item.severity||"info";
+  get("announcement-platform").value=item.targetPlatform||"all";
+  get("announcement-min").value=item.minVersion||"";
+  get("announcement-max").value=item.maxVersion||"";
+  get("announcement-notify").checked=Boolean(item.notify);
+  if(item.expiresAt){
+    const expiry=new Date(item.expiresAt);
+    get("announcement-expires").value=Number.isNaN(expiry.getTime())?"":new Date(expiry.getTime()-expiry.getTimezoneOffset()*60000).toISOString().slice(0,16);
+  }else get("announcement-expires").value="";
+  get("announcement-confirm-id").value="";
+  get("announcement-selected-id").textContent="Selected ID: "+item.id+" · "+item.status+" · Type this ID to enable publication or archive.";
+  get("announcement-save").disabled=item.status!=="draft";
+  get("announcement-save").textContent=item.status==="draft"?"Save draft changes":"Published notices are read-only";
+  updateAnnouncementConfirm();
+  previewAnnouncement();
+}
+function renderAnnouncements(items){
+  announcementRows=items;
+  const list=get("announcement-list");list.replaceChildren();
+  for(const item of items){
+    const row=document.createElement("li");
+    const button=document.createElement("button");button.type="button";
+    button.textContent=(item.titleEn||item.titleAr||"Untitled draft")+" · "+item.status;
+    button.setAttribute("aria-label","Select "+(item.titleEn||item.titleAr||"untitled notice")+" · "+item.status);
+    button.addEventListener("click",()=>selectAnnouncement(item));
+    const details=document.createElement("small");
+    details.textContent=(item.targetPlatform||"all")+" · "+(item.minVersion||"any version")+"–"+(item.maxVersion||"latest")+" · "+(item.severity||"info");
+    row.append(button,details);list.append(row);
+  }
+  if(!items.length){
+    const empty=document.createElement("li");empty.textContent="No notices yet. Create a draft on the right.";list.append(empty);
+  }
+}
+async function loadAnnouncementManager(){
+  if(!accessToken)return;
+  const state=get("announcement-state");state.textContent="Loading notices…";
+  try{
+    const data=await api("announcements",{});
+    if(!Array.isArray(data.announcements))throw Error("Invalid announcement response");
+    renderAnnouncements(data.announcements);
+    state.textContent="Loaded "+data.announcements.length+" notices. Drafts are private; published notices are delivered only to matching platform versions.";
+  }catch(error){
+    get("announcement-list").replaceChildren();
+    state.textContent="Could not load notices. Retry when connected.";
+    alertText(error.message,true);
+  }
+}
+function previewAnnouncement(){
+  const p=announcementPayload();
+  get("announcement-preview").textContent="English\n"+(p.titleEn||"Untitled")+"\n"+(p.bodyEn||"Message preview")+
+    "\n\nالعربية\n"+(p.titleAr||"بدون عنوان")+"\n"+(p.bodyAr||"معاينة الرسالة");
+}
+get("refresh-announcements").addEventListener("click",()=>{if(accessToken)loadAnnouncementManager()});
+get("announcement-new").addEventListener("click",clearAnnouncementForm);
+get("announcement-preview-button").addEventListener("click",previewAnnouncement);
+get("announcement-confirm-id").addEventListener("input",updateAnnouncementConfirm);
+get("announcement-form").addEventListener("submit",async e=>{
+  e.preventDefault();if(!accessToken)return;
+  try{
+    const saved=await api("announcementSave",{
+      announcementId:selectedAnnouncement?.id||null,announcement:announcementPayload(),
+    });
+    alertText(selectedAnnouncement?"Draft updated.":"Draft created.");
+    await loadAnnouncementManager();
+    const current=announcementRows.find(item=>item.id===saved.announcement.id);
+    if(current)selectAnnouncement(current);
+  }catch(error){alertText(error.message,true);}
+});
+async function changeAnnouncement(action){
+  if(!selectedAnnouncement)return;
+  const id=selectedAnnouncement.id;
+  if(get("announcement-confirm-id").value.trim()!==id){alertText("Type the selected notice ID to confirm.",true);return;}
+  try{
+    await api(action,{id,confirmId:id});
+    alertText(action==="announcementPublish"?"Notice published.":"Notice archived.");
+    await loadAnnouncementManager();
+    const current=announcementRows.find(item=>item.id===id);
+    if(current)selectAnnouncement(current);
+  }catch(error){alertText(error.message,true);}
+}
+get("announcement-publish").addEventListener("click",()=>changeAnnouncement("announcementPublish"));
+get("announcement-archive").addEventListener("click",()=>changeAnnouncement("announcementArchive"));
+
 </script>
 </body></html>`;
 }

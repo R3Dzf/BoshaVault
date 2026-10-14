@@ -69,6 +69,16 @@ public final class UiSmoke extends Instrumentation {
             Method blank=type.getDeclaredMethod("blank");blank.setAccessible(true);JSONArray entries=new JSONArray();String device=UUID.randomUUID().toString();
             for(int i=0;i<1000;i++){JSONObject e=(JSONObject)blank.invoke(null);e.put("title",String.format(Locale.ROOT,"Synthetic login %04d",i)).put("username","demo@example.invalid").put("password","Synthetic random secret 42!").put("clock",new JSONObject().put(device,1));entries.put(e);}data.put("entries",entries);Field body=type.getDeclaredField("data");body.setAccessible(true);body.set(engine,data);
             main(()->invoke("showVault"));waitForIdleSync();final Rect[] before={null};
+             main(()->{
+                 android.content.SharedPreferences noticePrefs=activity.getSharedPreferences("lockvyn-announcements",Context.MODE_PRIVATE);
+                 check(!noticePrefs.getBoolean("alerts_enabled",false),"announcement alerts are opt-in and default off");
+                 invoke("settings");AlertDialog settings=currentDialog();
+                 check(find(settings.getWindow().getDecorView(),Button.class,"Read announcements & notices")!=null,
+                       "manual announcements view is available in settings");
+                 check(find(settings.getWindow().getDecorView(),Button.class,"In-app notice alerts: Off")!=null,
+                       "local in-app alert preference is visible and off");
+                 settings.dismiss();
+             });
             main(()->{View screen=activity.findViewById(android.R.id.content);check(find(screen,TextView.class,"Vault")!=null&&find(screen,TextView.class,"Sync")!=null&&find(screen,TextView.class,"Backup")!=null&&find(screen,TextView.class,"Settings")!=null,"Calm Pro four-destination vector bottom navigation is visible");
                 Button addControl=find(screen,Button.class,"+ Add login");
                 check(addControl!=null&&addControl.getElevation()==0f&&addControl.getTranslationZ()==0f&&addControl.getStateListAnimator()==null,
@@ -138,7 +148,7 @@ public final class UiSmoke extends Instrumentation {
                 check(((android.view.ViewGroup)field("root")).getChildCount()==0,
                     "normal backgrounding still removes unlocked vault views");
             });
-            result.putString("stream","UI_SMOKE_PASS: "+passed+" native Android keyboard, email-code, MFA and 1000-row navigation checks passed. No email or cloud request was submitted.\n");resultCode=Activity.RESULT_OK;
+            result.putString("stream","UI_SMOKE_PASS: "+passed+" native Android keyboard, email-code, MFA, notice preference and 1000-row navigation checks passed. No email or cloud request was submitted.\n");resultCode=Activity.RESULT_OK;
         }catch(Throwable e){result.putString("stream","UI_SMOKE_FAIL: "+android.util.Log.getStackTraceString(e)+"\n");}
         finally{if(activity!=null)runOnMainSync(()->activity.finish());}
         finish(resultCode,result);

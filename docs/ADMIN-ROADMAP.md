@@ -21,8 +21,8 @@
 | 03 | Device inventory & access | [#21](https://github.com/R3Dzf/BoshaVault/issues/21) | Owner-waived; external gates deferred (not passed) |
 | 04 | Security Center | [#22](https://github.com/R3Dzf/BoshaVault/issues/22) | Owner-waived for sequencing; policy/review/hosted gates deferred |
 | 05 | Encrypted sync & quotas | [#23](https://github.com/R3Dzf/BoshaVault/issues/23) | Completed · [PR #50](https://github.com/R3Dzf/BoshaVault/pull/50) · `c1e763b` |
-| 06 | Release Manager | [#24](https://github.com/R3Dzf/BoshaVault/issues/24) | In progress by owner direction |
-| 07 | Announcements & notices | [#25](https://github.com/R3Dzf/BoshaVault/issues/25) | Queued |
+| 06 | Release Manager | [#24](https://github.com/R3Dzf/BoshaVault/issues/24) | Owner-directed sequencing waiver; public combined-release gate open |
+| 07 | Announcements & notices | [#25](https://github.com/R3Dzf/BoshaVault/issues/25) | In progress by owner direction |
 | 08 | Support tickets | [#26](https://github.com/R3Dzf/BoshaVault/issues/26) | Queued |
 | 09 | Privacy-conscious analytics | [#27](https://github.com/R3Dzf/BoshaVault/issues/27) | Queued |
 | 10 | Roles, operations & sign-off | [#28](https://github.com/R3Dzf/BoshaVault/issues/28) | Queued |

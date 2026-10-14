@@ -4,6 +4,10 @@ import android.app.*;
 import android.content.*;
 import android.content.ClipboardManager;
 import android.net.Uri;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
+import android.net.NetworkRequest;
 import android.os.*;
 import android.provider.Settings;
 import android.text.*;
@@ -25,6 +29,10 @@ public final class MainActivity extends Activity {
     private TextView vaultStats;
     private TextView autofillSettingsStatus;
     private Button autofillSettingsButton;
+    private ConnectivityManager announcementConnectivity;
+    private ConnectivityManager.NetworkCallback announcementNetworkCallback;
+    private final Object announcementLock=new Object();
+    private boolean announcementFetchBusy;
     private final List<JSONObject> displayedEntries=new ArrayList<>();
     private String folderFilter;
 
@@ -54,15 +62,15 @@ public final class MainActivity extends Activity {
         super.onStart();
         boolean resume=authGraceUntil>0&&SystemClock.elapsedRealtime()<authGraceUntil
             &&!screenLocked()&&engine!=null&&engine.isOpen()&&authenticatorDialogs>0;
-        active=true;authGraceUntil=0;
+        active=true;authGraceUntil=0;registerAnnouncementConnectivity();
         if(resume){lastTouch=SystemClock.elapsedRealtime();return;}
         for(AlertDialog dlg:new ArrayList<>(dialogs))dlg.dismiss();
         dialogs.clear();authenticatorDialogs=0;
         worker.execute(()->engine.close());showLock();
     }
-    @Override protected void onResume(){super.onResume();refreshAutofillSettingsState();if(scannedPairing!=null){String code=scannedPairing;scannedPairing=null;showPairing(Store.vault(this).exists(),code);}if(scannedCloud!=null){String code=scannedCloud;scannedCloud=null;joinCloud(code);}if(scannedSecure!=null&&(!Store.vault(this).exists()||engine.isOpen())){String code=scannedSecure;scannedSecure=null;connectToPc(code);}}
+    @Override protected void onResume(){super.onResume();refreshAutofillSettingsState();if(announcementAlertsEnabled())requestAnnouncements(false);if(scannedPairing!=null){String code=scannedPairing;scannedPairing=null;showPairing(Store.vault(this).exists(),code);}if(scannedCloud!=null){String code=scannedCloud;scannedCloud=null;joinCloud(code);}if(scannedSecure!=null&&(!Store.vault(this).exists()||engine.isOpen())){String code=scannedSecure;scannedSecure=null;connectToPc(code);}}
     @Override protected void onStop(){
-        super.onStop();active=false;
+        super.onStop();active=false;unregisterAnnouncementConnectivity();
         if(authenticatorDialogs>0&&engine!=null&&engine.isOpen()&&!screenLocked()&&!busy){
             authGraceUntil=SystemClock.elapsedRealtime()+AUTH_GRACE_MS;return;
         }
@@ -76,7 +84,7 @@ public final class MainActivity extends Activity {
         worker.execute(()->engine.close());
     }
     @Override protected void onDestroy(){
-        authGraceUntil=0;handler.removeCallbacks(tick);
+        authGraceUntil=0;unregisterAnnouncementConnectivity();handler.removeCallbacks(tick);
         for(AlertDialog dlg:new ArrayList<>(dialogs))dlg.dismiss();
         dialogs.clear();authenticatorDialogs=0;
         if(engine!=null)engine.close();
@@ -705,6 +713,88 @@ public final class MainActivity extends Activity {
         b.addView(Ui.button(this,"Unlock & complete transfer",true,()->{String p=master.getText().toString(),r=incoming==null?"":incoming.getText().toString();master.setText("");if(incoming!=null)incoming.setText("");int stamp=epoch;task(()->{if(!active||epoch!=stamp||pendingTransfer!=connection)throw new IOException("Transfer cancelled.");if(exists){if(!engine.isOpen())engine.open(p);if(engine.needsPassphrase(bytes)){engine.mergeUsingPassword(bytes,r.isEmpty()?p:r);Biometrics.disable(this);}else engine.merge(bytes);}else{VaultEngine.importNew(Store.vault(this),bytes,p,Store.device(this));engine.open(p);engine.revokeTrust();}connection.upload(engine.export());pendingTransfer=null;},()->{finished[0]=true;d.dismiss();toast("Transfer complete.");showVault();});}));
         b.addView(Ui.button(this,"Cancel transfer",false,d::dismiss));
     }
+    private android.content.SharedPreferences announcementPreferences(){
+        return getSharedPreferences("lockvyn-announcements",MODE_PRIVATE);
+    }
+    private boolean announcementAlertsEnabled(){
+        return announcementPreferences().getBoolean("alerts_enabled",false);
+    }
+    private void registerAnnouncementConnectivity(){
+        if(Build.VERSION.SDK_INT<21||announcementNetworkCallback!=null)return;
+        announcementConnectivity=(ConnectivityManager)getSystemService(CONNECTIVITY_SERVICE);
+        if(announcementConnectivity==null)return;
+        announcementNetworkCallback=new ConnectivityManager.NetworkCallback(){
+            @Override public void onAvailable(Network network){
+                if(announcementAlertsEnabled())requestAnnouncements(false);
+            }
+        };
+        try{
+            NetworkRequest request=new NetworkRequest.Builder()
+                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET).build();
+            announcementConnectivity.registerNetworkCallback(request,announcementNetworkCallback);
+        }catch(Exception e){announcementNetworkCallback=null;announcementConnectivity=null;}
+    }
+    private void unregisterAnnouncementConnectivity(){
+        if(announcementConnectivity!=null&&announcementNetworkCallback!=null){
+            try{announcementConnectivity.unregisterNetworkCallback(announcementNetworkCallback);}
+            catch(Exception ignored){}
+        }
+        announcementNetworkCallback=null;announcementConnectivity=null;
+    }
+    private int announcementVersionCode(){
+        try{
+            android.content.pm.PackageInfo info=getPackageManager().getPackageInfo(getPackageName(),0);
+            return Build.VERSION.SDK_INT>=28?(int)info.getLongVersionCode():info.versionCode;
+        }catch(Exception e){return 1;}
+    }
+    private void requestAnnouncements(boolean manual){
+        if(!manual&&!announcementAlertsEnabled())return;
+        synchronized(announcementLock){if(announcementFetchBusy)return;announcementFetchBusy=true;}
+        int version=announcementVersionCode();
+        String locale=Locale.getDefault().getLanguage().equalsIgnoreCase("ar")?"ar":"en";
+        cloudWorker.execute(()->{
+            List<AnnouncementClient.Notice> notices=null;Exception failure=null;
+            try{notices=AnnouncementClient.fetch(version,locale);}catch(Exception e){failure=e;}
+            List<AnnouncementClient.Notice> fetched=notices;Exception error=failure;
+            runOnUiThread(()->{
+                synchronized(announcementLock){announcementFetchBusy=false;}
+                if(!active||isFinishing())return;
+                if(error!=null){if(manual)toast("Could not load announcements. Connect to the internet and try again.");return;}
+                if(manual){showAnnouncementList(fetched);return;}
+                if(announcementAlertsEnabled())showAnnouncementAlerts(fetched);
+            });
+        });
+    }
+    private void showAnnouncementList(List<AnnouncementClient.Notice> notices){
+        StringBuilder text=new StringBuilder();
+        for(AnnouncementClient.Notice notice:notices){
+            if(text.length()>0)text.append("\n\n");
+            text.append(notice.title).append(" · ").append(notice.severity).append("\n").append(notice.body);
+        }
+        if(text.length()==0)text.append("There are no active notices for this platform version.");
+        AlertDialog d=new AlertDialog.Builder(this).setTitle("Announcements & notices")
+            .setMessage(text.toString()).setPositiveButton("Close",null).create();
+        dialogs.add(d);d.setOnDismissListener(x->dialogs.remove(d));d.show();
+    }
+    private void showAnnouncementAlerts(List<AnnouncementClient.Notice> notices){
+        android.content.SharedPreferences prefs=announcementPreferences();
+        Set<String> seen=new HashSet<>(prefs.getStringSet("seen_notice_ids",Collections.emptySet()));
+        List<AnnouncementClient.Notice> unseen=new ArrayList<>();
+        for(AnnouncementClient.Notice notice:notices)
+            if(notice.notify&&seen.add(notice.id))unseen.add(notice);
+        if(unseen.isEmpty())return;
+        while(seen.size()>200){Iterator<String> it=seen.iterator();if(it.hasNext()){it.next();it.remove();}else break;}
+        prefs.edit().putStringSet("seen_notice_ids",seen).apply();
+        StringBuilder text=new StringBuilder();
+        for(AnnouncementClient.Notice notice:unseen.subList(0,Math.min(3,unseen.size()))){
+            if(text.length()>0)text.append("\n\n");
+            text.append(notice.title).append(" · ").append(notice.severity).append("\n").append(notice.body);
+        }
+        AlertDialog d=new AlertDialog.Builder(this).setTitle("Lockvyn notice")
+            .setMessage(text.toString()).setPositiveButton("Read all notices",(dialog,which)->requestAnnouncements(true))
+            .setNegativeButton("Close",null).create();
+        dialogs.add(d);d.setOnDismissListener(x->dialogs.remove(d));d.show();
+    }
     private void refreshAutofillSettingsState(){
         if(autofillSettingsStatus!=null)
             autofillSettingsStatus.setText(AutofillStatus.summary(this));
@@ -759,6 +849,18 @@ public final class MainActivity extends Activity {
             }catch(Exception e){Ui.error(this,e);}
         }));
         b.addView(Ui.button(this,"Software updates",false,this::appUpdates));
+        b.addView(Ui.button(this,"Read announcements & notices",false,()->requestAnnouncements(true)));
+        final Button[] announcementToggle=new Button[1];
+        announcementToggle[0]=Ui.button(this,"",false,()->{
+            boolean enabled=!announcementAlertsEnabled();
+            announcementPreferences().edit().putBoolean("alerts_enabled",enabled).apply();
+            announcementToggle[0].setText("In-app notice alerts: "+(enabled?"On":"Off"));
+            toast(enabled?"In-app notice alerts enabled on this phone.":"In-app notice alerts disabled.");
+            if(enabled)requestAnnouncements(false);
+        });
+        announcementToggle[0].setText("In-app notice alerts: "+(announcementAlertsEnabled()?"On":"Off"));
+        b.addView(announcementToggle[0]);
+
         b.addView(Ui.button(this,"Cloud account security · 2FA",false,()->cloud()));
         LinearLayout advanced=Ui.column(this);advanced.setVisibility(View.GONE);
         advanced.addView(Ui.text(this,"Troubleshooting & security options",16,Ui.INK,true));
