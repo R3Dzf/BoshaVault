@@ -14,6 +14,7 @@ assert(anon && service && anon !== service, "Local test keys missing");
 const suite = randomUUID().slice(0, 8);
 const root = `https://lockvyn-admin-ui.r3dzf-studio.workers.dev`;
 const endpoint = base + "/functions/v1/lockvyn-admin";
+const ticketsEndpoint = endpoint + "/tickets";
 const password = "Synthetic-only-testing-"+randomUUID()+"aA1!";
 let accountWrites = 0, recoveryEmails = 0;
 
@@ -109,6 +110,14 @@ async function admin(token,body,origin=root) {
   try{data=await r.json()}catch{data={error:"No JSON"}}
   return {status:r.status,data};
 }
+async function ticketRequest(token,body,origin=root,method="POST") {
+  const response=await fetch(ticketsEndpoint,{
+    method,headers:{Origin:origin,"Content-Type":"application/json",Authorization:"Bearer "+token},
+    body:method==="POST"?JSON.stringify(body):undefined,redirect:"manual",
+  });
+  let data;try{data=await response.json()}catch{data={error:"No JSON"}}
+  return {status:response.status,data,headers:response.headers};
+}
 async function dataApi(path,method,token,body,apiKey=anon){
   const response=await fetch(base+"/rest/v1/"+path,{
     method,
@@ -190,6 +199,74 @@ const invalid=await admin(ownerAAL2.aal2,{
 assert.equal(invalid.status,400,"Reject unauthorized filter values");
 assert.equal(gotOwner.isSelf,true,"Admin owner shown as self");
 assert.equal(gotStranger.isSelf,false,"Nonadmin not labelled self");
+
+// Phase 08: real local GoTrue AAL1 owner flow and AAL2 agent workflow.
+const ticketPreflight=await fetch(ticketsEndpoint,{method:"OPTIONS",headers:{
+  Origin:root,"Access-Control-Request-Method":"POST",
+  "Access-Control-Request-Headers":"authorization,content-type",
+}});
+assert.equal(ticketPreflight.status,204,"Dashboard ticket API preflight is allowed");
+assert.equal(ticketPreflight.headers.get("access-control-allow-origin"),root);
+assert.match(ticketPreflight.headers.get("access-control-allow-methods")||"",/POST/);
+assert.match(ticketPreflight.headers.get("access-control-allow-headers")||"",/authorization.*content-type/i);
+const createdSupportTicket=await ticketRequest(stranger.aal1,{action:"ticketCreate",ticket:{
+  subject:"Synthetic local sync issue",body:"Local test report with no account or vault data.",
+  diagnosticConsent:true,diagnostics:{platform:"windows",appVersion:"3.1.0",osVersion:"Windows 11",errorCode:"SYNTHETIC_503"},
+}});
+assert.equal(createdSupportTicket.status,200,"Confirmed AAL1 user can create a ticket: "+JSON.stringify(createdSupportTicket.data));
+const localTicketId=createdSupportTicket.data.ticket.id;
+assert.match(localTicketId,/^[a-f0-9-]{36}$/i);
+const otherOwnerRead=await ticketRequest(owner.aal1,{action:"ticketGet",ticketId:localTicketId});
+assert.equal(otherOwnerRead.status,404,"Ticket content is private to its requester");
+const ownSupportTicket=await ticketRequest(stranger.aal1,{action:"ticketGet",ticketId:localTicketId});
+assert.equal(ownSupportTicket.status,200,"Requester can read own ticket at AAL1");
+assert.equal(ownSupportTicket.data.diagnostics.payload.errorCode,"SYNTHETIC_503");
+assert.equal(ownSupportTicket.data.ticket.requester_id,undefined,"Ticket response omits requester identifiers");
+const unsupportedFile=await ticketRequest(stranger.aal1,{action:"ticketCreate",ticket:{
+  subject:"Synthetic file attempt",body:"This fixture must not store arbitrary files.",
+  diagnosticConsent:false,diagnostics:null,attachments:[{filename:"vault.json",content:"synthetic"}],
+}});
+assert.equal(unsupportedFile.status,400,"Arbitrary file attachments are explicitly rejected");
+const noConsent=await ticketRequest(stranger.aal1,{action:"ticketCreate",ticket:{
+  subject:"Synthetic consent check",body:"No diagnostics should be accepted without consent.",
+  diagnosticConsent:false,diagnostics:{platform:"windows"},
+}});
+assert.equal(noConsent.status,400,"Diagnostics require explicit consent");
+const deniedAal1Agent=await ticketRequest(owner.aal1,{action:"ticketAdminList"});
+assert.equal(deniedAal1Agent.status,403,"AAL1 administrator cannot read the agent queue");
+const deniedNonadminAgent=await ticketRequest(strangerAAL2.aal2,{action:"ticketAdminList"});
+assert.equal(deniedNonadminAgent.status,403,"AAL2 nonadministrator cannot read the agent queue");
+const localAgentQueue=await ticketRequest(ownerAAL2.aal2,{action:"ticketAdminList"});
+assert.equal(localAgentQueue.status,200,"Allowlisted AAL2 administrator can read the queue");
+assert(localAgentQueue.data.tickets.some(item=>item.id===localTicketId));
+const localAgentTicket=await ticketRequest(ownerAAL2.aal2,{action:"ticketAdminGet",ticketId:localTicketId});
+assert.equal(localAgentTicket.status,200);
+assert.equal(localAgentTicket.data.diagnostics.payload.platform,"windows");
+const badAgentConfirm=await ticketRequest(await verifyExistingTotp(ownerAAL2,owner.aal1),{
+  action:"ticketAdminAssign",ticketId:localTicketId,assigneeId:owner.id,confirmId:"wrong",
+});
+assert.equal(badAgentConfirm.status,409,"Agent writes require typed ticket ID");
+const assignedLocalTicket=await ticketRequest(await verifyExistingTotp(ownerAAL2,owner.aal1),{
+  action:"ticketAdminAssign",ticketId:localTicketId,assigneeId:owner.id,confirmId:localTicketId,
+});
+assert.equal(assignedLocalTicket.status,200,"Agent assignment succeeds after fresh TOTP");
+const escalatedLocalTicket=await ticketRequest(await verifyExistingTotp(ownerAAL2,owner.aal1),{
+  action:"ticketAdminEscalate",ticketId:localTicketId,confirmId:localTicketId,
+});
+assert.equal(escalatedLocalTicket.status,200,"Agent can escalate the request");
+assert.equal(escalatedLocalTicket.data.ticket.status,"escalated");
+const statusLocalTicket=await ticketRequest(await verifyExistingTotp(ownerAAL2,owner.aal1),{
+  action:"ticketAdminStatus",ticketId:localTicketId,status:"in_progress",priority:"high",confirmId:localTicketId,
+});
+assert.equal(statusLocalTicket.status,200,"Agent can update status and priority");
+const agentReply=await ticketRequest(await verifyExistingTotp(ownerAAL2,owner.aal1),{
+  action:"ticketAdminReply",ticketId:localTicketId,body:"Synthetic local agent response.",confirmId:localTicketId,
+});
+assert.equal(agentReply.status,200,"Agent can reply after fresh TOTP");
+const visibleReply=await ticketRequest(stranger.aal1,{action:"ticketGet",ticketId:localTicketId});
+assert.equal(visibleReply.status,200);
+assert(visibleReply.data.messages.some(message=>message.senderRole==="agent"&&message.body==="Synthetic local agent response."));
+console.log("PASS real local Phase 08: AAL1 ownership, consented diagnostics, file rejection, allowlisted AAL2 assignment/escalation/status/reply and typed ID");
 
 // Phase 03: opted-in device metadata and per-Auth-session cloud revocation.
 // Two separate local GoTrue sessions prove that revoking one does not block the other.
@@ -414,6 +491,10 @@ assert.equal(dashboardPage.status,200,"Local admin dashboard HTML is served");
 assert.match(dashboardPage.headers.get("content-security-policy")||"",/script-src 'nonce-/);
 const dashboardHtml=await dashboardPage.text();
 for(const required of [
+  "Support tickets",
+  "id=\"ticket-confirm-id\" autocomplete=\"off\" maxlength=\"36\"",
+  "ticketAdminAssign",
+  "Consented diagnostics",
   "Registered cloud sessions",
   "Encrypted cloud sync",
   "Cloud sync activity filters",

@@ -521,6 +521,7 @@ public final class MainActivity extends Activity {
                 ?(profile.optString("deviceInventoryState").equals("visible")?" The app session is visible in your account list.":" Session listing will retry on the next successful sync.")
                 :"";
                 status.setText("Synced successfully. "+conflicts[0]+" conflict copies kept."+listing);renderList();});})));
+            b.addView(Ui.button(this,"Support tickets",false,()->supportTickets(client,profile,store,status)));
             b.addView(Ui.button(this,"Connect to my PC · secure QR",false,()->{d.dismiss();connectToPc("");}));
             LinearLayout advancedCloud=Ui.column(this);advancedCloud.setVisibility(View.GONE);
             b.addView(Ui.button(this,"Security & advanced cloud options ▾",false,()->advancedCloud.setVisibility(
@@ -794,6 +795,122 @@ public final class MainActivity extends Activity {
             .setMessage(text.toString()).setPositiveButton("Read all notices",(dialog,which)->requestAnnouncements(true))
             .setNegativeButton("Close",null).create();
         dialogs.add(d);d.setOnDismissListener(x->dialogs.remove(d));d.show();
+    }
+    private interface SupportTicketReady {void accept(JSONObject response);}
+    private void supportTicketRequest(CloudClient client,JSONObject profile,CloudSettingsStore store,
+            TextView status,JSONObject payload,SupportTicketReady ready){
+        cloudRefresh(client,profile,store,status,signed->{
+            byte[][] bytes={null};
+            cloudTask(status,()->bytes[0]=client.supportTickets(payload,signed.access),()->{
+                try{ready.accept(StrictJson.object(new String(bytes[0],StandardCharsets.UTF_8)));}
+                catch(Exception error){status.setText("Support response was invalid. Your offline vault remains available.");}
+                finally{if(bytes[0]!=null)Arrays.fill(bytes[0],(byte)0);}
+            });
+        });
+    }
+    private void supportTicketThread(CloudClient client,JSONObject profile,CloudSettingsStore store,
+            String ticketId,TextView thread,TextView status){
+        try{
+            supportTicketRequest(client,profile,store,status,new JSONObject().put("action","ticketGet").put("ticketId",ticketId),response->{
+                JSONArray messages=response.optJSONArray("messages");StringBuilder text=new StringBuilder();
+                if(messages!=null)for(int i=0;i<messages.length();i++){
+                    JSONObject item=messages.optJSONObject(i);if(item==null)continue;
+                    text.append(item.optString("senderRole","user").equals("agent")?"Support: ":"You: ")
+                        .append(item.optString("body","")).append("\n\n");
+                }
+                thread.setText(text.length()==0?"No messages yet.":text.toString());
+                JSONObject ticket=response.optJSONObject("ticket");
+                status.setText(ticket==null?"Loaded ticket.":"Ticket "+ticketId+" · "+ticket.optString("status","open"));
+            });
+        }catch(Exception error){status.setText("Could not load this support request.");}
+    }
+    private void supportTicketList(CloudClient client,JSONObject profile,CloudSettingsStore store,
+            LinearLayout list,TextView thread,TextView status,String[] selectedId,String preferredId){
+        try{
+            supportTicketRequest(client,profile,store,status,new JSONObject().put("action","ticketList"),response->{
+                list.removeAllViews();JSONArray tickets=response.optJSONArray("tickets");
+                String selected=null;
+                if(tickets!=null)for(int i=0;i<tickets.length();i++){
+                    JSONObject item=tickets.optJSONObject(i);if(item==null)continue;
+                    String id=item.optString("id","");if(!VaultEngine.id(id))continue;
+                    String label=item.optString("subject","Support request")+" · "+item.optString("status","open");
+                    if(item.optString("priority","normal").equals("high"))label+=" · high";
+                    final String ticketId=id;
+                    list.addView(Ui.button(this,label,false,()->{
+                        selectedId[0]=ticketId;
+                        supportTicketThread(client,profile,store,ticketId,thread,status);
+                    }));
+                    if(selected==null)selected=id;
+                    if(id.equals(preferredId))selected=id;
+                }
+                selectedId[0]=selected;
+                if(selected==null){
+                    thread.setText("No requests yet. Create a support request above.");
+                    status.setText("No support requests yet.");
+                }else supportTicketThread(client,profile,store,selected,thread,status);
+            });
+        }catch(Exception error){status.setText("Could not load support requests.");}
+    }
+    private void supportTickets(CloudClient client,JSONObject profile,CloudSettingsStore store,TextView cloudStatus){
+        LinearLayout b=Ui.column(this);
+        b.addView(Ui.text(this,"Create a private in-app request and track replies here. Cloud sign-in is required; the vault remains available offline.",13,Ui.MUTED,false));
+        EditText subject=Ui.field(b,"Short title","",false,120);
+        EditText description=Ui.field(b,"Describe what you need help with","",false,4000);
+        description.setMinLines(4);description.setGravity(Gravity.TOP|Gravity.START);
+        CheckBox consent=check(b,"Include optional sanitized diagnostics (platform, app version, Android version and error code). No vault data, email, device ID, credentials or raw logs.",false);
+        TextView preview=Ui.text(this,"Diagnostics are off until enabled.",12,Ui.MUTED,false);b.addView(preview);
+        consent.setOnCheckedChangeListener((button,enabled)->preview.setText(enabled
+            ?"Preview: Android · app "+getPackageVersion()+" · OS "+(Build.VERSION.RELEASE==null?"unknown":Build.VERSION.RELEASE)+" · error code MANUAL"
+            :"Diagnostics are off until enabled."));
+        b.addView(Ui.text(this,"Your support requests",14,Ui.INK,true));
+        LinearLayout list=Ui.column(this);b.addView(list);
+        TextView thread=Ui.text(this,"Choose a request to read its replies.",13,Ui.INK,false);b.addView(thread);
+        EditText reply=Ui.field(b,"Reply to selected request","",false,4000);reply.setMinLines(3);reply.setGravity(Gravity.TOP|Gravity.START);
+        TextView status=Ui.text(this,"Ready.",12,Ui.MUTED,false);b.addView(status);
+        final String[] selectedId={null};
+        b.addView(Ui.button(this,"Refresh requests",false,()->supportTicketList(client,profile,store,list,thread,status,selectedId,selectedId[0])));
+        b.addView(Ui.button(this,"Create request",true,()->{
+            String title=subject.getText().toString().trim(),body=description.getText().toString().trim();
+            if(title.length()<3||body.isEmpty()){status.setText("Enter a title and describe the issue.");return;}
+            try{
+                JSONObject ticket=new JSONObject().put("subject",title).put("body",body).put("diagnosticConsent",consent.isChecked());
+                if(consent.isChecked()){
+                    String version=getPackageVersion();
+                    ticket.put("diagnostics",new JSONObject().put("platform","android").put("appVersion",version)
+                        .put("osVersion",Build.VERSION.RELEASE==null?"unknown":Build.VERSION.RELEASE).put("errorCode","MANUAL"));
+                }else ticket.put("diagnostics",JSONObject.NULL);
+                supportTicketRequest(client,profile,store,status,new JSONObject().put("action","ticketCreate").put("ticket",ticket),response->{
+                    JSONObject created=response.optJSONObject("ticket");String id=created==null?"":created.optString("id","");
+                    subject.setText("");description.setText("");consent.setChecked(false);
+                    supportTicketList(client,profile,store,list,thread,status,selectedId,id);
+                });
+            }catch(Exception error){status.setText("Could not prepare the support request.");}
+        }));
+        b.addView(Ui.button(this,"Send reply",false,()->{
+            String id=selectedId[0],body=reply.getText().toString().trim();
+            if(id==null||body.isEmpty()){status.setText("Choose a request and enter a reply.");return;}
+            try{supportTicketRequest(client,profile,store,status,new JSONObject().put("action","ticketReply").put("ticketId",id).put("body",body),response->{
+                reply.setText("");supportTicketList(client,profile,store,list,thread,status,selectedId,id);
+            });}
+            catch(Exception error){status.setText("Could not prepare the reply.");}
+        }));
+        b.addView(Ui.button(this,"Close selected request",false,()->{
+            String id=selectedId[0];if(id==null){status.setText("Choose a request first.");return;}
+            try{supportTicketRequest(client,profile,store,status,new JSONObject().put("action","ticketClose").put("ticketId",id),response->supportTicketList(client,profile,store,list,thread,status,selectedId,id));}
+            catch(Exception error){status.setText("Could not close the request.");}
+        }));
+        b.addView(Ui.button(this,"Reopen selected request",false,()->{
+            String id=selectedId[0];if(id==null){status.setText("Choose a request first.");return;}
+            try{supportTicketRequest(client,profile,store,status,new JSONObject().put("action","ticketReopen").put("ticketId",id),response->supportTicketList(client,profile,store,list,thread,status,selectedId,id));}
+            catch(Exception error){status.setText("Could not reopen the request.");}
+        }));
+        AlertDialog ticketDialog=dialog("Support tickets",b);
+        ticketDialog.setOnDismissListener(x->{dialogs.remove(ticketDialog);clearCloudFields(b);});
+        supportTicketList(client,profile,store,list,thread,status,selectedId,null);
+    }
+    private String getPackageVersion(){
+        try{return getPackageManager().getPackageInfo(getPackageName(),0).versionName;}
+        catch(Exception ignored){return "unknown";}
     }
     private void refreshAutofillSettingsState(){
         if(autofillSettingsStatus!=null)

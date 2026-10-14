@@ -1,6 +1,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2.58.0";
 import { html } from "./ui.ts";
 import { announcementInputError, announcementQueryError } from "./announcements.mjs";
+import { parseUserTicketRequest, parseAdminTicketRequest, isAdminTicketAction } from "./tickets.mjs";
 import { validCandidateTag, validateReleasePolicy, compareReleaseVersions } from "./release.mjs";
 import { securityHtml } from "./security.ts";
 import { verifiedUserGate, adminMembershipGate } from "./access.mjs";
@@ -169,6 +170,17 @@ async function currentReleasePolicies(){
 
 Deno.serve(async (request) => {
   const url = new URL(request.url);
+  const ticketsRoute = url.pathname.endsWith("/lockvyn-admin/tickets");
+  if(ticketsRoute&&request.method==="OPTIONS"&&request.headers.get("origin")===dashboardOrigin){
+    return new Response(null,{status:204,headers:{
+      "Access-Control-Allow-Origin":dashboardOrigin,
+      "Access-Control-Allow-Methods":"POST, OPTIONS",
+      "Access-Control-Allow-Headers":"authorization, content-type",
+      "Access-Control-Max-Age":"600",
+      "Cache-Control":"no-store",
+      "Vary":"Origin",
+    }});
+  }
   if(request.method==="OPTIONS"&&url.pathname.endsWith("/lockvyn-admin/announcements")){
     return new Response(null,{status:204,headers:{
       "Access-Control-Allow-Origin":"*",
@@ -262,12 +274,18 @@ Deno.serve(async (request) => {
     });
     return response;
   }
-  if (!url.pathname.endsWith("/lockvyn-admin") || request.method !== "POST") {
+  if ((!url.pathname.endsWith("/lockvyn-admin") && !ticketsRoute) || request.method !== "POST") {
     return result({ error: "Not found" }, 404);
   }
 
   // Reject browser cross-origin requests before evaluating any user credentials.
-  if (![url.origin, dashboardOrigin].includes(request.headers.get("origin") ?? "")) return result({ error: "Forbidden" }, 403);
+  const requestOrigin=request.headers.get("origin");
+  if(ticketsRoute){
+    if(requestOrigin!==null&&![url.origin,dashboardOrigin].includes(requestOrigin))
+      return result({error:"Forbidden"},403);
+  }else if(![url.origin,dashboardOrigin].includes(requestOrigin??"")){
+    return result({error:"Forbidden"},403);
+  }
   if (!request.headers.get("content-type")?.startsWith("application/json")) {
     return result({ error: "Invalid content type" }, 415);
   }
@@ -288,15 +306,17 @@ Deno.serve(async (request) => {
     claims = JSON.parse(atob(encoded));
   } catch { return result({ error: "Unauthorized" }, 401); }
   const denied = verifiedUserGate(verified.user, claims);
-  if (denied) {
+  if (denied && !ticketsRoute) {
     if (denied.status === 403 && claims.sub === verified.user.id &&
         claims.role === "authenticated") {
       await recordSecuritySignal(verified.user.id, "admin_step_up_denied");
     }
     return result(denied.body, denied.status);
   }
-  // Supabase refresh-token revocation does not invalidate an already-issued
-  // JWT by itself. Check the Auth session row before any privileged action.
+  // Support requests are available to verified signed-in users at AAL1. Agent
+  // actions below still require the existing AAL2, allowlist and fresh-TOTP gate.
+  if(ticketsRoute && (claims.sub!==verified.user.id||claims.role!=="authenticated"))
+    return result({error:"Unauthorized"},401);
   const sessionId = claims.session_id;
   if (typeof sessionId !== "string" ||
       !/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(sessionId)) {
@@ -310,9 +330,69 @@ Deno.serve(async (request) => {
     return result({ error: "Unable to validate active session" }, 503);
   }
   if (!sessionActive) {
-    await recordSecuritySignal(verified.user.id, "admin_inactive_session");
+    if(!ticketsRoute)await recordSecuritySignal(verified.user.id, "admin_inactive_session");
     return result({ error: "Session is no longer active" }, 401);
   }
+
+  let body: Record<string, unknown>;
+  try {
+    const text = await request.text();
+    if (text.length > (ticketsRoute?24576:8192)) return result({ error: "Request too large" }, 413);
+    const parsed = JSON.parse(text);
+    if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") throw new Error();
+    body = parsed;
+  } catch { return result({ error: "Invalid request" }, 400); }
+
+  if(ticketsRoute){
+    let rpcName, parsedTicket;
+    if(isAdminTicketAction(body.action)){
+      if(denied)return result(denied.body,denied.status);
+      const {data:ticketAdmin,error:ticketAdminError}=await service
+        .from("lockvyn_admins").select("user_id").eq("user_id",verified.user.id).maybeSingle();
+      if(ticketAdminError)return result({error:"Administration is not configured"},503);
+      if(!adminMembershipGate(ticketAdmin,verified.user.id)){
+        await recordSecuritySignal(verified.user.id,"admin_allowlist_denied");
+        return result({error:"Not an authorized Lockvyn administrator"},403);
+      }
+      parsedTicket=parseAdminTicketRequest(body);
+      if(!parsedTicket.ok)return result({error:parsedTicket.error},400);
+      if(parsedTicket.write&&body.confirmId!==parsedTicket.ticketId)
+        return result({error:"Type the ticket ID to confirm this change"},409);
+      if(parsedTicket.write&&!freshVerifiedTotp(claims,Math.floor(Date.now()/1000)))
+        return result({error:"Verify a fresh authenticator code before changing a ticket"},403);
+      rpcName="lockvyn_support_ticket_admin_manage";
+      const {data,error}=await service.rpc(rpcName,{
+        p_action:parsedTicket.action,p_actor:verified.user.id,p_actor_session:sessionId,
+        p_actor_aal:claims.aal,p_fresh_totp:parsedTicket.write,
+        p_ticket_id:parsedTicket.ticketId,p_payload:parsedTicket.payload,
+      });
+      if(error){
+        if(error.code==="54000")return result({error:"Support ticket rate limit reached. Wait before trying again."},429);
+        if(error.code==="42501")return result({error:"A fresh active administrator session is required"},403);
+        if(error.code==="P0002")return result({error:"Ticket not found"},404);
+        if(error.code==="55000")return result({error:"This ticket cannot be changed in its current state"},409);
+        if(error.code==="22023"||error.code==="22P02")return result({error:"Ticket details are invalid or contain an unredacted credential"},400);
+        return result({error:"Unable to update support ticket"},502);
+      }
+      return result(data);
+    }
+    parsedTicket=parseUserTicketRequest(body);
+    if(!parsedTicket.ok)return result({error:parsedTicket.error},400);
+    const {data,error}=await service.rpc("lockvyn_support_ticket_user_manage",{
+      p_action:parsedTicket.action,p_actor:verified.user.id,p_actor_session:sessionId,
+      p_ticket_id:parsedTicket.ticketId,p_payload:parsedTicket.payload,
+    });
+    if(error){
+      if(error.code==="54000")return result({error:"Support ticket rate limit reached. Wait before trying again."},429);
+      if(error.code==="42501")return result({error:"A verified active session is required"},403);
+      if(error.code==="P0002")return result({error:"Ticket not found"},404);
+      if(error.code==="55000")return result({error:"This ticket cannot be changed in its current state"},409);
+      if(error.code==="22023"||error.code==="22P02")return result({error:"Ticket details are invalid or contain an unredacted credential"},400);
+      return result({error:"Unable to update support ticket"},502);
+    }
+    return result(data);
+  }
+
   const { data: admin, error: permissionError } = await service
     .from("lockvyn_admins").select("user_id").eq("user_id", verified.user.id).maybeSingle();
   if (permissionError) return result({ error: "Administration is not configured" }, 503);
@@ -320,16 +400,6 @@ Deno.serve(async (request) => {
     await recordSecuritySignal(verified.user.id, "admin_allowlist_denied");
     return result({ error: "Not an authorized Lockvyn administrator" }, 403);
   }
-
-  let body: Record<string, unknown>;
-  try {
-    const text = await request.text();
-    if (text.length > 8192) return result({ error: "Request too large" }, 413);
-    const parsed = JSON.parse(text);
-    if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") throw new Error();
-    body = parsed;
-  } catch { return result({ error: "Invalid request" }, 400); }
-
 
   if(body.action==="announcements"){
     const {data,error}=await service.rpc("lockvyn_admin_announcement_manage",{

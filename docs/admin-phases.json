@@ -59,13 +59,13 @@
       "number": "07",
       "issue": 25,
       "name": "Announcements & notices",
-      "status": "in_progress"
+      "status": "waived"
     },
     {
       "number": "08",
       "issue": 26,
       "name": "Support tickets",
-      "status": "queued"
+      "status": "in_progress"
     },
     {
       "number": "09",
